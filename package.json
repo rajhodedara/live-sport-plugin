@@ -28,7 +28,8 @@
     "node-fetch": "^2.7.0",
     "opossum": "^10.0.0",
     "playwright": "^1.62.1",
-    "stremio-addon-sdk": "^1.6.10"
+    "stremio-addon-sdk": "^1.6.10",
+    "tmp": "0.2.7"
   },
   "engines": {
     "node": ">=22.0.0"
