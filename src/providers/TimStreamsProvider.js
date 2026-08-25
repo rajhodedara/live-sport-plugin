@@ -188,29 +188,21 @@ class TimStreamsProvider extends BaseProvider {
         // 1. Try native decryption
         const nativeResult = await this.extractM3u8(embed.url);
         if (nativeResult) {
-            m3u8 = nativeResult.m3u8;
+            m3u8Url = nativeResult.m3u8;
             referer = nativeResult.referer;
         }
-        if (m3u8) {
-          // Direct Stream (Native player header fallback)
+
+        if (m3u8Url) {
+          console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${m3u8Url}`);
+          const { BASE_URL } = require('../config');
+          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
+            
           streams.push(new StreamEntity({
-            name: `TimStreams`,
-            title: `[Direct] ${embed.name || 'Stream'}`,
-            url: m3u8,
-            behaviorHints: {
-              notWebReady: false,
-              headers: {
-                "Referer": `${referer}/`,
-                "Origin": referer,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-              },
-              proxyHeaders: {
-                request: {
-                  "Referer": `${referer}/`,
-                  "Origin": referer,
-                  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-                }
-              }
+            name: 'TimStreams',
+            title: `TimStreams ${matchTitle}`,
+            url: proxyUrl,
+            behaviorHints: { 
+              notWebReady: true
             },
             resolution: 'HD'
           }));

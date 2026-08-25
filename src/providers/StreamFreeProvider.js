@@ -140,23 +140,19 @@ class StreamFreeProvider extends BaseProvider {
       
       const targetUrl = `${baseUrl}?_t=${t._t}&_e=${t._e}&_n=${t._n}`;
 
-        console.log(`[Proxy] Using internal fallback for StreamFree match: ${sourceId}`);
-        return [new StreamEntity({
-          name: 'StreamFree',
-          title: `StreamFree (${bestQuality})`,
-          url: targetUrl,
-          behaviorHints: {
-            notWebReady: true,
-            proxyHeaders: {
-              request: {
-                "Origin": "https://streamfree.top",
-                "Referer": "https://streamfree.top/",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-              }
-            }
-          },
-          resolution: bestQuality
-        })];
+      const referer = 'https://streamfree.top/';
+      const { BASE_URL } = require('../config');
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(targetUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
+
+      return [new StreamEntity({
+        name: 'StreamFree',
+        title: `StreamFree (${bestQuality})`,
+        url: proxyUrl,
+        behaviorHints: {
+          notWebReady: true
+        },
+        resolution: bestQuality
+      })];
     } catch (error) {
       console.error(`[${this.name}] resolveStream failed for ${sourceId}:`, error.message);
       return [];

@@ -60,19 +60,14 @@ class EmbedStProvider extends BaseProvider {
 
           if (m3u8Url) {
             console.log(`[${this.name}] Natively decrypted M3U8 for ${matchTitle}: ${m3u8Url}`);
+            const { BASE_URL } = require('../config');
+            const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
             streams.push(new StreamEntity({
               name: 'EmbedSt',
               title: `[Direct] ${matchTitle}`,
-              url: m3u8Url,
+              url: proxyUrl,
               behaviorHints: { 
-                notWebReady: true,
-                proxyHeaders: {
-                  request: {
-                    "Origin": new URL(referer).origin,
-                    "Referer": referer,
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-                  }
-                }
+                notWebReady: true
               },
               resolution: 'HD'
             }));

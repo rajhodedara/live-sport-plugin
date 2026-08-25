@@ -140,22 +140,17 @@ class EmbedIndiaProvider extends BaseProvider {
       const html = await this._fetchEmbed.fire(embedUrl, referer);
       const result = extract(html);
       if (result) {
-        console.log(`[${this.name}] Server-side extraction succeeded via ${result.pattern} for: ${matchTitle}`);
-          
-        const originUrl = referer ? new URL(referer).origin : new URL(embedUrl).origin;
+        console.log(`[EmbedIndia] Extracted M3U8: ${result.m3u8}`);
+        const { BASE_URL } = require('../config');
+        
+        const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(result.m3u8)}&referer=${encodeURIComponent(result.referer)}&origin=${encodeURIComponent(new URL(result.referer).origin)}`;
+
         return new StreamEntity({
           name: 'EmbedIndia',
-          title: `[Direct] ${matchTitle}`,
-          url: result.url,
-          behaviorHints: {
-            notWebReady: true,
-            proxyHeaders: {
-              request: {
-                "Origin": originUrl,
-                "Referer": referer || embedUrl,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
-              }
-            }
+          title: `EmbedIndia (${matchTitle})`,
+          url: proxyUrl,
+          behaviorHints: { 
+            notWebReady: true
           },
           resolution: 'HD'
         });
