@@ -137,8 +137,11 @@ app.get('/api/manifest', (req, res) => {
       // It's a URL
       let absoluteUrl = l;
       if (!l.startsWith('http')) {
-        const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
-        absoluteUrl = baseUrl + l;
+        const urlObj = new URL(targetUrl);
+        const basePath = urlObj.pathname.substring(0, urlObj.pathname.lastIndexOf('/') + 1);
+        const baseUrl = urlObj.origin + basePath;
+        // IMPORTANT: Append the query string (urlObj.search) so tokens are passed to chunks
+        absoluteUrl = baseUrl + l + urlObj.search;
       }
       
       // If it's a sub-playlist, route it back through our proxy!
