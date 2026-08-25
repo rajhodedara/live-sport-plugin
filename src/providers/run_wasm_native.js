@@ -161,7 +161,8 @@ global.fetch = async (url, opts) => {
 
 (async () => {
   try {
-    const lock = await import('file:///C:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/lock.js');
+    const lockPath = require('url').pathToFileURL(require('path').join(process.cwd(), 'lock.js')).href;
+    const lock = await import(lockPath);
     await lock.default();
     try {
       await lock.set_stream(process.argv[2], process.argv[3], process.argv[4]);
