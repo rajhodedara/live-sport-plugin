@@ -100,7 +100,8 @@ global.fetch = async (url, opts) => {
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
   
   if (urlStr.includes('lock.wasm')) {
-    const wasmBuffer = fs.readFileSync('C:/Users/odeda/Desktop/Projects/Nuvio Live Sports Plugin/lock.wasm');
+    const wasmPath = path.join(process.cwd(), 'lock.wasm');
+    const wasmBuffer = fs.readFileSync(wasmPath);
     return new Response(wasmBuffer, { status: 200, headers: { 'Content-Type': 'application/wasm' } });
   }
   
