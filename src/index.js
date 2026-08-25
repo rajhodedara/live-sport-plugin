@@ -107,6 +107,58 @@ app.get('/api/matches', (req, res) => {
   res.json(matches);
 });
 
+app.get('/api/manifest', (req, res) => {
+  const targetUrl = req.query.url;
+  const referer = req.query.referer || 'https://embed.st/';
+  const origin = req.query.origin || 'https://embed.st';
+  
+  if (!targetUrl) return res.status(400).send('Missing url');
+
+  try {
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'fetch_m3u8.py');
+    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const cmd = `${pythonCmd} "${scriptPath}" "${targetUrl}" "${referer}" "${origin}"`;
+    
+    const out = child_process.execSync(cmd, { encoding: 'utf8', timeout: 15000 });
+    
+    if (out.startsWith('MISSING_CURL_CFFI')) {
+       return res.status(500).send('curl_cffi not installed on server');
+    }
+    if (out.startsWith('ERROR_')) {
+       return res.status(502).send('Upstream error: ' + out);
+    }
+    
+    // Rewrite the manifest
+    const lines = out.split('\n');
+    const rewritten = lines.map(line => {
+      const l = line.trim();
+      if (!l || l.startsWith('#')) return line;
+      
+      // It's a URL
+      let absoluteUrl = l;
+      if (!l.startsWith('http')) {
+        const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+        absoluteUrl = baseUrl + l;
+      }
+      
+      // If it's a sub-playlist, route it back through our proxy!
+      if (absoluteUrl.includes('.m3u8')) {
+         return `/api/manifest?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+      }
+      
+      // If it's a .ts chunk, return the absolute URL directly (bypassing Nuvio for video data!)
+      return absoluteUrl;
+    });
+
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.send(rewritten.join('\n'));
+  } catch (err) {
+    console.error('[ManifestProxy] Error:', err.message);
+    res.status(500).send('Manifest proxy error');
+  }
+});
+
 
 // ─── /api/proxy-embed — CORS-safe embed HTML fetcher (SSRF-protected) ────────
 // Fetches the HTML of a sports embed page on behalf of the client browser.

@@ -5,7 +5,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     xvfb \
     xauth \
+    python3 \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install curl_cffi for Cloudflare TLS bypass (using --break-system-packages for Debian Bookworm)
+RUN pip3 install curl_cffi --break-system-packages
 
 WORKDIR /app
 
