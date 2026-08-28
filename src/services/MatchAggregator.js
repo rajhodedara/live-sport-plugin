@@ -100,15 +100,17 @@ class MatchAggregator {
       // Live badge should only appear from 10 minutes before kickoff through 3 hours after kickoff.
       const isLiveDisplayWindow = kickoff === 0 || (now >= kickoff - (10 * 60 * 1000) && now <= kickoff + (3 * 60 * 60 * 1000));
       
-      if (TRENDING_KEYWORDS.some(kw => titleLower.includes(kw))) {
-        if (isLiveDisplayWindow) {
-          match.popular = '1';
-        }
+      // For any scheduled match currently within the live display window, boost the popularity flag.
+      // This keeps live MLB/NBA/NFL/etc. games visible even when they do not match a trending keyword.
+      if (kickoff > 0 && isLiveDisplayWindow) {
+        match.popular = '1';
+      } else if (kickoff > 0 && !isLiveDisplayWindow) {
+        match.popular = '0';
       }
       
-      // Strip the popular flag if the event is outside the live display window.
-      if (match.popular === '1' && kickoff > 0 && !isLiveDisplayWindow) {
-        match.popular = '0';
+      // Keep the historical keyword boost for known high-interest matches when they are in range.
+      if (kickoff === 0 && TRENDING_KEYWORDS.some(kw => titleLower.includes(kw))) {
+        match.popular = '1';
       }
     });
 

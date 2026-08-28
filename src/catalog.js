@@ -201,7 +201,7 @@ async function handleCatalog(type, id, extra, config) {
   };
 
   if (categoryMatch === 'live') {
-    filteredMatches = matches.filter(isLiveDisplayWindow);
+    filteredMatches = matches.filter(m => m.popular === '1' || isLiveDisplayWindow(m));
   } else if (categoryMatch === 'upcoming') {
     const now = Date.now();
     filteredMatches = matches.filter(m => {
