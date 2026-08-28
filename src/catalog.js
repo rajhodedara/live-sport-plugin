@@ -4,8 +4,12 @@ const { normalizeTimeZone } = require('./timezone');
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function mapMatchToMetaPreview(match, config = {}) {
-  const titleStr = match.title || 'Live Match';
-  const safeTitle = encodeURIComponent(Array.from(titleStr).slice(0, 30).join(''));
+  const displayTitle = (() => {
+    if (match.team1 && match.team1.name && match.team2 && match.team2.name) {
+      return `${match.team1.name} vs ${match.team2.name}`;
+    }
+    return match.title || 'Live Match';
+  })();
   
   // Dynamic Sport-Specific Posters
   const categoryColors = {
@@ -64,16 +68,12 @@ function mapMatchToMetaPreview(match, config = {}) {
     return null;
   }
 
-  // Generate a clean, readable fallback poster using the match title
-  let posterText = match.title;
+  // Generate a clean, readable fallback poster using the team names when available.
+  let posterText = displayTitle;
   if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
       posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
   } else {
       posterText = posterText.replace(/ vs /i, '\nvs\n').replace(/ - /i, '\n-\n');
-  }
-  
-  if (posterText.length > 50) {
-      posterText = match.category.toUpperCase();
   }
   
   const fallbackPoster = `https://placehold.co/800x450/111111/${color}.png?text=${encodeURIComponent(posterText)}&font=Montserrat`;
@@ -122,7 +122,7 @@ function mapMatchToMetaPreview(match, config = {}) {
      const timezone = normalizeTimeZone(config && config.timezone ? config.timezone : 'America/New_York');
      const options = { hour: '2-digit', minute: '2-digit', timeZone: timezone };
 
-     timeString = dateObj.toLocaleTimeString('en-US', options) + ` (${timezone})`;
+     timeString = dateObj.toLocaleTimeString('en-US', options);
 
      const now = Date.now();
      const diff = dateObj.getTime() - now;
@@ -144,13 +144,12 @@ function mapMatchToMetaPreview(match, config = {}) {
   if (match.team1 && match.team1.name) cast.push(match.team1.name);
   if (match.team2 && match.team2.name) cast.push(match.team2.name);
 
-  const leagueStr = match.league ? `🏆 League: ${match.league}\n` : '';
-  const desc = `${leagueStr}📅 Category: ${match.category.toUpperCase()}\n⏰ Status: ${timeString === '24/7 Stream' ? '24/7 Live Network' : 'Kickoff at ' + timeString + relativeTimeStr}`;
+  const desc = '';
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
     type: 'tv',
-    name: `${prefix}${match.title}`,
+    name: `${prefix}${displayTitle}`,
     genres: [match.category.toUpperCase()],
     poster: poster,
     posterShape: 'landscape',
