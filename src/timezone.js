@@ -2,10 +2,10 @@
  * Parses a date string and a timezone into a stable UTC UNIX timestamp (milliseconds).
  * 
  * @param {string|number} dateValue - The date string or UNIX timestamp.
- * @param {string} [timeZone='UTC'] - IANA Timezone string (e.g., 'America/New_York', 'UTC').
+ * @param {string} [timeZone='America/New_York'] - IANA Timezone string (e.g., 'America/New_York', 'UTC').
  * @returns {number|null} - UTC UNIX timestamp in milliseconds, or null if invalid.
  */
-function parseTimezone(dateValue, timeZone = 'UTC') {
+function parseTimezone(dateValue, timeZone = 'America/New_York') {
   if (dateValue === null || dateValue === undefined) return null;
 
   // If it's already a valid number (UNIX timestamp), return it (assuming milliseconds if > 1e11)

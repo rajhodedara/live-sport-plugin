@@ -43,7 +43,7 @@ class WatchFootyProvider extends BaseProvider {
             status = 'finished'; // Or upcoming, but we ignore finished usually
           }
 
-          const matchTime = item.timestamp ? parseTimezone(item.timestamp, 'UTC') : Date.now();
+          const matchTime = item.timestamp ? parseTimezone(item.timestamp, 'America/New_York') : Date.now();
           
           // Map dynamic sports directly from the API
           const category = item.sport ? item.sport.toLowerCase() : 'football';

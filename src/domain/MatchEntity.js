@@ -5,7 +5,7 @@ const { parseTimezone } = require('../timezone');
  * Uses the robust timezone parser.
  */
 function toMillis(value) {
-  const parsed = parseTimezone(value, 'UTC'); // fallback if providers didn't already parse it
+  const parsed = parseTimezone(value, 'America/New_York'); // fallback if providers didn't already parse it
   return parsed ? parsed.toString() : '';
 }
 

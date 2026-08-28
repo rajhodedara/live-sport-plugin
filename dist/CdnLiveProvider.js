@@ -34,7 +34,7 @@ class CdnLiveProvider extends BaseProvider {
           let status = 'upcoming';
           if (item.status === 'live' || item.status === 'in') status = 'live';
 
-          const matchTime = item.start ? parseTimezone(item.start, 'UTC') : Date.now();
+          const matchTime = item.start ? parseTimezone(item.start, 'America/New_York') : Date.now();
 
           matches.push(new MatchEntity({
             id: `cdn_${matchId}`,
