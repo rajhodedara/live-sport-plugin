@@ -97,18 +97,17 @@ class MatchAggregator {
         kickoff = isNaN(parsed) ? new Date(match.date).getTime() : parsed;
         if (isNaN(kickoff)) kickoff = 0;
       }
-      // Allow matches to be flagged as 'Live' from 3 hours before kickoff up to 14 hours after kickoff
-      const isWithinTimeWindow = kickoff === 0 || (now >= kickoff - (3 * 3600 * 1000) && now <= kickoff + (14 * 3600 * 1000));
+      // Live badge should only appear from 10 minutes before kickoff through 3 hours after kickoff.
+      const isLiveDisplayWindow = kickoff === 0 || (now >= kickoff - (10 * 60 * 1000) && now <= kickoff + (3 * 60 * 60 * 1000));
       
       if (TRENDING_KEYWORDS.some(kw => titleLower.includes(kw))) {
-        if (isWithinTimeWindow) {
+        if (isLiveDisplayWindow) {
           match.popular = '1';
         }
       }
       
-      // GLOBAL FIX: Some providers (like Streamed.pk) flag future events as popular/live early.
-      // We must override and strip the popular flag if the event is too far in the future.
-      if (match.popular === '1' && kickoff > 0 && !isWithinTimeWindow) {
+      // Strip the popular flag if the event is outside the live display window.
+      if (match.popular === '1' && kickoff > 0 && !isLiveDisplayWindow) {
         match.popular = '0';
       }
     });

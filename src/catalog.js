@@ -6,7 +6,7 @@ const { normalizeTimeZone } = require('./timezone');
 function mapMatchToMetaPreview(match, config = {}) {
   const displayTitle = (() => {
     if (match.team1 && match.team1.name && match.team2 && match.team2.name) {
-      return `${match.team1.name} vs ${match.team2.name}`;
+      return `${match.team1.name}\n${match.team2.name}`;
     }
     return match.title || 'Live Match';
   })();
@@ -71,9 +71,9 @@ function mapMatchToMetaPreview(match, config = {}) {
   // Generate a clean, readable fallback poster using the team names when available.
   let posterText = displayTitle;
   if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
-      posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
+      posterText = `${match.team1.name}\n${match.team2.name}`;
   } else {
-      posterText = posterText.replace(/ vs /i, '\nvs\n').replace(/ - /i, '\n-\n');
+      posterText = posterText.replace(/ vs /i, '\n').replace(/ - /i, '\n').replace(/\s*\n\s*/g, '\n');
   }
   
   const fallbackPoster = `https://placehold.co/800x450/111111/${color}.png?text=${encodeURIComponent(posterText)}&font=Montserrat`;
@@ -139,7 +139,14 @@ function mapMatchToMetaPreview(match, config = {}) {
      }
   }
 
-  const prefix = match.popular === '1' ? '🔴 LIVE: ' : '⏱️ ';
+  const getLiveDisplayWindow = (event, now = Date.now()) => {
+    const timeMs = event && event.date ? Number(event.date) : 0;
+    if (!timeMs || Number.isNaN(timeMs)) return event && event.popular === '1';
+    return now >= timeMs - (10 * 60 * 1000) && now <= timeMs + (3 * 60 * 60 * 1000);
+  };
+
+  const isLiveDisplay = match.popular === '1' && getLiveDisplayWindow(match);
+  const prefix = '';
   const cast = [];
   if (match.team1 && match.team1.name) cast.push(match.team1.name);
   if (match.team2 && match.team2.name) cast.push(match.team2.name);
@@ -154,7 +161,6 @@ function mapMatchToMetaPreview(match, config = {}) {
     poster: poster,
     posterShape: 'landscape',
     background: background,
-    logo: logo,
     releaseInfo: timeString,
     description: desc,
     cast: cast,
@@ -187,8 +193,15 @@ async function handleCatalog(type, id, extra, config) {
   
   let filteredMatches = matches;
 
+  const isLiveDisplayWindow = (event) => {
+    const timeMs = event && event.date ? Number(event.date) : 0;
+    if (!timeMs || Number.isNaN(timeMs)) return event && event.popular === '1';
+    const now = Date.now();
+    return now >= timeMs - (10 * 60 * 1000) && now <= timeMs + (3 * 60 * 60 * 1000);
+  };
+
   if (categoryMatch === 'live') {
-    filteredMatches = matches.filter(m => m.popular === '1');
+    filteredMatches = matches.filter(isLiveDisplayWindow);
   } else if (categoryMatch === 'upcoming') {
     const now = Date.now();
     filteredMatches = matches.filter(m => {
