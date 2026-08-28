@@ -50,7 +50,7 @@ const manifest = {
       default: 'America/New_York',
       options: [
         'UTC',
-        'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+        'America/Eastern', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
         'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
         'Asia/Dubai', 'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Tokyo',
         'Australia/Sydney', 'Pacific/Auckland'

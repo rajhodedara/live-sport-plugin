@@ -5,7 +5,29 @@
  * @param {string} [timeZone='America/New_York'] - IANA Timezone string (e.g., 'America/New_York', 'UTC').
  * @returns {number|null} - UTC UNIX timestamp in milliseconds, or null if invalid.
  */
-function parseTimezone(dateValue, timeZone = 'America/New_York') {
+const DEFAULT_TIMEZONE = 'America/New_York';
+
+function normalizeTimeZone(timeZone) {
+  const candidate = (typeof timeZone === 'string' ? timeZone.trim() : '') || DEFAULT_TIMEZONE;
+  const aliases = {
+    'America/Eastern': DEFAULT_TIMEZONE,
+    'US/Eastern': DEFAULT_TIMEZONE,
+    'EST': DEFAULT_TIMEZONE,
+    'ET': DEFAULT_TIMEZONE,
+    'America/ET': DEFAULT_TIMEZONE
+  };
+
+  const normalized = aliases[candidate] || candidate;
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: normalized }).format(new Date(0));
+    return normalized;
+  } catch (error) {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
+function parseTimezone(dateValue, timeZone = DEFAULT_TIMEZONE) {
   if (dateValue === null || dateValue === undefined) return null;
 
   // If it's already a valid number (UNIX timestamp), return it (assuming milliseconds if > 1e11)
@@ -16,6 +38,8 @@ function parseTimezone(dateValue, timeZone = 'America/New_York') {
 
   const str = String(dateValue).trim();
   if (!str || str === '0') return null;
+
+  const timezone = normalizeTimeZone(timeZone);
 
   // If it's a numeric string representing a timestamp
   const numeric = Number(str);
@@ -42,7 +66,7 @@ function parseTimezone(dateValue, timeZone = 'America/New_York') {
 
   // Format this time in the target timezone to determine the offset.
   const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
+    timeZone: timezone,
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
     hour12: false
@@ -68,4 +92,4 @@ function parseTimezone(dateValue, timeZone = 'America/New_York') {
   return trueUtcTime > 0 ? trueUtcTime : null;
 }
 
-module.exports = { parseTimezone };
+module.exports = { parseTimezone, normalizeTimeZone, DEFAULT_TIMEZONE };

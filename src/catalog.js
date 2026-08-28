@@ -1,4 +1,5 @@
 const container = require('./container');
+const { normalizeTimeZone } = require('./timezone');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -118,14 +119,11 @@ function mapMatchToMetaPreview(match, config = {}) {
   if (match.date && !isNaN(parseInt(match.date)) && parseInt(match.date) > 0) {
      const dateObj = new Date(parseInt(match.date));
      releasedIso = dateObj.toISOString();
-     const options = { hour: '2-digit', minute: '2-digit' };
-     
-     if (config && config.timezone) {
-       options.timeZone = config.timezone;
-     }
-     
-     timeString = dateObj.toLocaleTimeString('en-US', options) + (options.timeZone ? ` (${options.timeZone})` : '');
-     
+     const timezone = normalizeTimeZone(config && config.timezone ? config.timezone : 'America/New_York');
+     const options = { hour: '2-digit', minute: '2-digit', timeZone: timezone };
+
+     timeString = dateObj.toLocaleTimeString('en-US', options) + ` (${timezone})`;
+
      const now = Date.now();
      const diff = dateObj.getTime() - now;
      if (diff > 0 && match.popular === '0') {
