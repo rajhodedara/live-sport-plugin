@@ -146,19 +146,23 @@ function mapMatchToMetaPreview(match, config = {}) {
 
   let poster = fallbackPoster;
   let logo = match.logo || (match.team1 && match.team1.logo ? match.team1.logo : null);
+  let posterIsGenerated = true;
 
   const channelLogo = getChannelLogo(match.title);
   if (match.poster) {
     poster = getProxyUrl(match.poster, false);
+    posterIsGenerated = false;
   } else if (channelLogo) {
     poster = getProxyUrl(channelLogo, true);
     logo = channelLogo;
+    posterIsGenerated = false;
   } else if (match.thumbnail_url) {
     const tUrl = match.thumbnail_url.startsWith('http') ? match.thumbnail_url : `https://streamfree.top${match.thumbnail_url}`;
     const isLogo = match.category === 'networks' || tUrl.toLowerCase().includes('logo') || tUrl.toLowerCase().includes('icon');
-    
+
     poster = getProxyUrl(tUrl, isLogo);
-    
+    posterIsGenerated = false;
+
     if (isLogo) {
       logo = tUrl;
     }
@@ -167,8 +171,15 @@ function mapMatchToMetaPreview(match, config = {}) {
   if (logo && !logo.includes('wsrv.nl')) {
     logo = getProxyUrl(logo, true);
   }
-  
+
   let background = match.background ? getProxyUrl(match.background, false) : poster;
+
+  // Some scrapers (StreamSports99, Strims24) capture real per-team crest
+  // URLs. Forward both - not just team1's, folded into the single legacy
+  // `logo` field above - so the client can render an actual "club badge
+  // vs club badge" cover instead of a generic poster when both exist.
+  const team1Badge = match.team1 && match.team1.logo ? getProxyUrl(match.team1.logo, true) : null;
+  const team2Badge = match.team2 && match.team2.logo ? getProxyUrl(match.team2.logo, true) : null;
 
   let timeString = match.category === 'networks' ? '24/7 Stream' : 'Live Now';
   let relativeTimeStr = '';
@@ -224,6 +235,9 @@ function mapMatchToMetaPreview(match, config = {}) {
     releaseInfo: isLive ? (is247 ? '24/7' : 'LIVE') : timeString,
     description: desc,
     cast: cast,
+    posterIsGenerated,
+    team1: match.team1 && match.team1.name ? { name: match.team1.name, logo: team1Badge } : null,
+    team2: match.team2 && match.team2.name ? { name: match.team2.name, logo: team2Badge } : null,
     behaviorHints: {
       defaultVideoId: `nuvio_sport_${match.id}`
     }

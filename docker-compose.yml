@@ -6,8 +6,8 @@ services:
     container_name: nuvio-live-sports
     ports:
       - "7000:7000"
+    env_file:
+      - .env
     environment:
       - PORT=7000
-      # If you are hosting this on a public VPS, uncomment the line below and set your domain or IP
-      # - ADDON_URL=http://your-server-ip:7000
     restart: unless-stopped

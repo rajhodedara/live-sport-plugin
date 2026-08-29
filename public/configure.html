@@ -1,479 +1,290 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nuvio Live Sports | Premium Setup</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@700;900&display=swap"
-    rel="stylesheet">
+  <title>Nuvio Live Sports | Configure</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Cg style='mix-blend-mode:screen'%3E%3Crect x='2' y='8' width='24' height='24' rx='6' fill='%23FF4FA3'/%3E%3Crect x='14' y='8' width='24' height='24' rx='6' fill='%235B86FF'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/sleeve.css">
   <style>
-    :root {
-      --bg: #09090b;
-      --card-bg: rgba(28, 28, 30, 0.4);
-      --card-border: rgba(255, 255, 255, 0.05);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #ef4444;
-      --accent-glow: rgba(239, 68, 68, 0.3);
-      --glass: rgba(255, 255, 255, 0.02);
-    }
-
-    body {
-      margin: 0;
-      padding: 20px;
-      font-family: 'Inter', sans-serif;
-      background-color: var(--bg);
-      color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
+    body{
       background-image:
-        radial-gradient(circle at 15% 50%, rgba(239, 68, 68, 0.08), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.05), transparent 25%);
+        radial-gradient(circle at 15% 0%, rgba(255,79,163,.08), transparent 30%),
+        radial-gradient(circle at 85% 20%, rgba(91,134,255,.08), transparent 30%);
     }
-
-    .container {
-      background: var(--card-bg);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      padding: 40px;
-      border-radius: 24px;
-      border: 1px solid var(--card-border);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      width: 100%;
-      max-width: 500px;
-      position: relative;
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 30px;
-    }
-
-    h1 {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 900;
-      margin: 0 0 10px 0;
-      font-size: 32px;
-      background: linear-gradient(135deg, #fff 0%, #aaa 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-    }
-
-    .dot {
-      width: 12px;
-      height: 12px;
-      background: var(--accent);
-      border-radius: 50%;
-      display: inline-block;
-      box-shadow: 0 0 10px var(--accent-glow);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      50% {
-        opacity: 0.5;
-        transform: scale(1.3);
-      }
-    }
-
-    p.subtitle {
-      color: var(--text-muted);
-      font-size: 15px;
-      margin: 0;
-    }
-
-    .section {
-      background: var(--glass);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 24px;
-      margin-bottom: 24px;
-    }
-
-    h3 {
-      margin: 0 0 16px 0;
-      font-size: 16px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      text-transform: uppercase;
-      color: #fff;
-    }
-
-    .sports-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
-    }
-
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      cursor: pointer;
-      font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid transparent;
-      transition: all 0.2s;
-    }
-
-    .checkbox-label:hover {
-      background: rgba(255, 255, 255, 0.06);
-    }
-
-    .checkbox-label.active {
-      border-color: rgba(239, 68, 68, 0.3);
-      background: rgba(239, 68, 68, 0.1);
-    }
-
-    input[type="checkbox"] {
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      border: 2px solid #555;
-      border-radius: 4px;
-      outline: none;
-      cursor: pointer;
-      position: relative;
-      transition: all 0.2s;
-    }
-
-    input[type="checkbox"]:checked {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-
-    input[type="checkbox"]:checked::after {
-      content: '✓';
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: white;
-      font-size: 12px;
-      font-weight: bold;
-    }
-
-    .input-group {
-      margin-top: 16px;
-    }
-
-    .input-group label {
-      display: block;
-      font-size: 13px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
-    }
-
-    input[type="text"] {
-      width: 100%;
-      padding: 14px 16px;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      color: #fff;
-      font-size: 15px;
-      box-sizing: border-box;
-      font-family: 'Inter', sans-serif;
-      transition: all 0.2s;
-    }
-
-    input[type="text"]:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
-    }
-
-    .btn {
-      display: block;
-      width: 100%;
-      padding: 16px;
-      background: var(--accent);
-      color: #fff;
-      text-align: center;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 800;
-      cursor: pointer;
-      text-decoration: none;
-      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
-      transition: all 0.3s;
-      font-family: 'Outfit', sans-serif;
-      letter-spacing: 1px;
-    }
-
-    .btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
-    }
-
-    .btn:active {
-      transform: translateY(1px);
-    }
+    main{max-width:620px;margin:0 auto;padding:var(--sp-6) var(--sp-4) var(--sp-8)}
+    .header{text-align:center;margin-bottom:var(--sp-6)}
+    .header h1{font-size:var(--size-3xl);margin:var(--sp-3) 0 var(--sp-2);display:flex;
+      align-items:center;justify-content:center;gap:var(--sp-2)}
+    .dot{width:11px;height:11px;background:var(--ink-pink);border-radius:50%;box-shadow:0 0 10px rgba(255,79,163,.5);
+      animation:pulseBadge 2s infinite}
+    .section{padding:var(--sp-5);margin-bottom:var(--sp-4)}
+    .section-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:var(--sp-4)}
+    .checks-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-2)}
+    @media (max-width:480px){.checks-grid{grid-template-columns:1fr}}
+    .check span.label-text{font-size:var(--size-sm)}
+    .backlink{display:inline-flex;align-items:center;gap:var(--sp-1);color:var(--text-secondary);
+      text-decoration:none;font-size:var(--size-sm);margin-bottom:var(--sp-5)}
+    .backlink:hover{color:var(--text-primary)}
   </style>
 </head>
-
 <body>
-  <div class="container">
-    <div class="header">
-      <h1><span class="dot"></span> Nuvio Sports</h1>
-      <p class="subtitle">Customize your ultimate live sports dashboard.</p>
-    </div>
 
-    <div class="section">
-      <h3>Select Sports</h3>
-      <div class="sports-grid" id="sportsGrid">
-        <label class="checkbox-label active"><input type="checkbox" value="football" checked> ⚽ Football</label>
-        <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> 🏀 Basketball</label>
-        <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> 🏏 Cricket</label>
-        <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> 🏈 NFL</label>
-        <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> 🏎️ Racing</label>
-        <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> 🏒 Hockey</label>
-        <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> ⚾ Baseball</label>
-        <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> 🏉 Rugby</label>
-        <label class="checkbox-label active"><input type="checkbox" value="college" checked> 🎓 College</label>
-        <label class="checkbox-label active"><input type="checkbox" value="mma" checked> 🥊 MMA</label>
-        <label class="checkbox-label active"><input type="checkbox" value="golf" checked> ⛳ Golf</label>
-        <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> 🎾 Tennis</label>
-        <label class="checkbox-label active"><input type="checkbox" value="darts" checked> 🎯 Darts</label>
-        <label class="checkbox-label active"><input type="checkbox" value="other" checked> 📡 Other Sports</label>
-      </div>
-    </div>
+<svg style="display:none" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></symbol>
+</svg>
 
-    <div class="section">
-      <h3>Localization</h3>
-      <div class="input-group">
-        <label>Select your local timezone (Match times will be displayed in this timezone)</label>
-        <select id="timezone" style="width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--card-border); border-radius: 12px; color: #fff; font-size: 15px; box-sizing: border-box; font-family: 'Inter', sans-serif; transition: all 0.2s; outline: none; cursor: pointer;">
-        </select>
-      </div>
-    </div>
+<main>
+  <a href="/" class="backlink"><svg width="16" height="16" style="transform:rotate(180deg)"><use href="#i-chevron"/></svg> Back to matches</a>
 
-    <div class="section">
-      <h3>Priority Tracking</h3>
-      <div class="input-group">
-        <label>Favorite Teams (Comma Separated)</label>
-        <input type="text" id="teams" placeholder="e.g. Arsenal, Lakers, Ferrari">
-      </div>
-    </div>
-
-    <div class="section">
-      <h3>Streaming Sources</h3>
-      <div class="sports-grid" id="sourcesGrid">
-        <label class="checkbox-label active"><input type="checkbox" value="streamfree" checked> 🌐 StreamFree (Recommended) (Web Browser Source)</label>
-        <label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams (Recommended)</label>
-        <label class="checkbox-label active"><input type="checkbox" value="bintv" checked> 📺 BinTV (Recommended)</label>
-        <label class="checkbox-label active"><input type="checkbox" value="ntv" checked> 📺 NTV</label>
-        <label class="checkbox-label active"><input type="checkbox" value="iptv-org" checked> 📡 IPTV Org (Direct IPTV)</label>
-        <label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamsports" checked> 📺 StreamSports</label>
-        <label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label>
-        <label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label>
-        <label class="checkbox-label active"><input type="checkbox" value="ppvdomains" checked> 🌐 PPV Domains (Web Browser Source)</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic (Web Browser Source)</label>
-      </div>
-    </div>
-
-    <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
-    <button id="copyBtn" class="btn" style="background: #333; margin-top: 12px; font-size: 14px;">COPY LINK (FOR NUVIO APP)</button>
+  <div class="header">
+    <h1 class="t-display"><span class="dot"></span> Nuvio Sports</h1>
+    <p class="t-secondary">Customize your ultimate live sports dashboard.</p>
   </div>
 
-  <script>
-    const btn = document.getElementById('installBtn');
-    const copyBtn = document.getElementById('copyBtn');
-    const input = document.getElementById('teams');
-    const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
-    const sourceCheckboxes = document.querySelectorAll('#sourcesGrid input[type="checkbox"]');
-    const timezoneSelect = document.getElementById('timezone');
+  <div class="card section">
+    <div class="section-head">
+      <h3 class="t-meta" style="margin:0;font-size:var(--size-sm)">Select sports</h3>
+      <div style="display:flex;gap:var(--sp-2)">
+        <button class="btn btn--ghost btn--sm" id="sportsAll">All</button>
+        <button class="btn btn--ghost btn--sm" id="sportsNone">None</button>
+      </div>
+    </div>
+    <div class="checks-grid" id="sportsGrid"></div>
+  </div>
 
-    // Attempt to load existing config from URL
-    let existingConfig = {};
-    try {
-      const pathParts = window.location.pathname.split('/');
-      if (pathParts.length >= 3 && pathParts[pathParts.length - 1] === 'configure') {
-        const encoded = pathParts[pathParts.length - 2];
-        let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
-        while (base64.length % 4) base64 += '=';
-        existingConfig = JSON.parse(decodeURIComponent(escape(atob(base64))));
-      }
-    } catch (e) {
-      console.warn("Could not parse existing config from URL", e);
+  <div class="card section">
+    <h3 class="t-meta" style="margin:0 0 var(--sp-4)">Localization</h3>
+    <div class="field">
+      <label class="label" for="timezone">Match times shown in</label>
+      <select id="timezone" class="select"></select>
+    </div>
+  </div>
+
+  <div class="card section">
+    <h3 class="t-meta" style="margin:0 0 var(--sp-4)">Priority tracking</h3>
+    <div class="field">
+      <label class="label" for="teams">Favorite teams (comma separated)</label>
+      <input type="text" id="teams" class="input" placeholder="e.g. Arsenal, Lakers, Ferrari">
+      <span class="hint">These populate a dedicated "Your Teams" catalog at the top of the app.</span>
+    </div>
+  </div>
+
+  <div class="card section">
+    <div class="section-head">
+      <h3 class="t-meta" style="margin:0;font-size:var(--size-sm)">Streaming sources</h3>
+      <div style="display:flex;gap:var(--sp-2)">
+        <button class="btn btn--ghost btn--sm" id="sourcesAll">All</button>
+        <button class="btn btn--ghost btn--sm" id="sourcesNone">None</button>
+      </div>
+    </div>
+    <div class="checks-grid" id="sourcesGrid"></div>
+  </div>
+
+  <a href="#" id="installBtn" class="btn btn--curate btn--block btn--lg">Install addon</a>
+  <button id="copyBtn" class="btn btn--secondary btn--block" style="margin-top:var(--sp-3)">Copy link (for Nuvio app)</button>
+</main>
+
+<div id="toastHost" aria-live="polite"></div>
+
+<script>
+  const SPORTS = [
+    ['football', '⚽ Football'], ['basketball', '🏀 Basketball'], ['cricket', '🏏 Cricket'],
+    ['american_football', '🏈 NFL'], ['motorsport', '🏎️ Racing'], ['hockey', '🏒 Hockey'],
+    ['baseball', '⚾ Baseball'], ['rugby', '🏉 Rugby'], ['college', '🎓 College'],
+    ['mma', '🥊 MMA'], ['golf', '⛳ Golf'], ['tennis', '🎾 Tennis'],
+    ['darts', '🎯 Darts'], ['other', '📡 Other Sports']
+  ];
+  const SOURCES = [
+    ['streamfree', '🌐 StreamFree (Recommended)'], ['timstreams', '📺 TimStreams (Recommended)'],
+    ['bintv', '📺 BinTV (Recommended)'], ['ntv', '📺 NTV'], ['iptv-org', '📡 IPTV Org (Direct IPTV)'],
+    ['sportyhunter', '📺 SportyHunter'], ['streamsports', '📺 StreamSports'], ['watchfooty', '📺 WatchFooty'],
+    ['cdnlive', '📺 CDNLiveTV'], ['streamsports99', '📺 StreamSports99'],
+    ['ppvdomains', '🌐 PPV Domains'], ['streamic', '🌐 Streamic']
+  ];
+
+  function buildChecks(container, items, idPrefix) {
+    container.innerHTML = items.map(([value, label], i) => `
+      <label class="check active" data-value="${value}">
+        <input type="checkbox" id="${idPrefix}${i}" value="${value}" checked>
+        <span class="box"><svg width="13" height="13"><use href="#i-check"/></svg></span>
+        <span class="label-text">${label}</span>
+      </label>`).join('');
+  }
+
+  const sportsGrid = document.getElementById('sportsGrid');
+  const sourcesGrid = document.getElementById('sourcesGrid');
+  buildChecks(sportsGrid, SPORTS, 'sport-');
+  buildChecks(sourcesGrid, SOURCES, 'source-');
+
+  const btn = document.getElementById('installBtn');
+  const copyBtn = document.getElementById('copyBtn');
+  const input = document.getElementById('teams');
+  const timezoneSelect = document.getElementById('timezone');
+
+  function checkboxes() { return sportsGrid.querySelectorAll('input[type="checkbox"]'); }
+  function sourceCheckboxes() { return sourcesGrid.querySelectorAll('input[type="checkbox"]'); }
+
+  function toast(message) {
+    const host = document.getElementById('toastHost');
+    const el = document.createElement('div');
+    el.className = 'toast toast--pink';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `<svg width="18" height="18" style="color:var(--ink-pink)"><use href="#i-check"/></svg><span>${message}</span>`;
+    host.appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 200ms'; setTimeout(() => el.remove(), 220); }, 2200);
+  }
+
+  // Attempt to load existing config from URL
+  let existingConfig = {};
+  try {
+    const pathParts = window.location.pathname.split('/');
+    if (pathParts.length >= 3 && pathParts[pathParts.length - 1] === 'configure') {
+      const encoded = pathParts[pathParts.length - 2];
+      let base64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) base64 += '=';
+      existingConfig = JSON.parse(decodeURIComponent(escape(atob(base64))));
     }
+  } catch (e) {
+    console.warn("Could not parse existing config from URL", e);
+  }
 
-    // Populate timezones
-    try {
-      const popularTimezones = [
-        { value: 'Pacific/Midway', label: 'Midway Island (GMT-11:00)' },
-        { value: 'Pacific/Honolulu', label: 'Hawaii (GMT-10:00)' },
-        { value: 'America/Anchorage', label: 'Alaska (GMT-09:00)' },
-        { value: 'America/Los_Angeles', label: 'Pacific Time (GMT-08:00)' },
-        { value: 'America/Denver', label: 'Mountain Time (GMT-07:00)' },
-        { value: 'America/Chicago', label: 'Central Time (GMT-06:00)' },
-        { value: 'America/New_York', label: 'Eastern Time (GMT-05:00)' },
-        { value: 'America/Halifax', label: 'Atlantic Time (GMT-04:00)' },
-        { value: 'America/Sao_Paulo', label: 'Brazil (GMT-03:00)' },
-        { value: 'Atlantic/South_Georgia', label: 'Mid-Atlantic (GMT-02:00)' },
-        { value: 'Atlantic/Azores', label: 'Azores (GMT-01:00)' },
-        { value: 'Europe/London', label: 'UK & Ireland (GMT+00:00)' },
-        { value: 'Europe/Paris', label: 'Western Europe (GMT+01:00)' },
-        { value: 'Europe/Athens', label: 'Eastern Europe (GMT+02:00)' },
-        { value: 'Europe/Moscow', label: 'Russia - Moscow (GMT+03:00)' },
-        { value: 'Asia/Dubai', label: 'UAE (GMT+04:00)' },
-        { value: 'Asia/Karachi', label: 'Pakistan (GMT+05:00)' },
-        { value: 'Asia/Kolkata', label: 'India (GMT+05:30)' },
-        { value: 'Asia/Dhaka', label: 'Bangladesh (GMT+06:00)' },
-        { value: 'Asia/Bangkok', label: 'Thailand & Vietnam (GMT+07:00)' },
-        { value: 'Asia/Singapore', label: 'Singapore & Malaysia (GMT+08:00)' },
-        { value: 'Asia/Tokyo', label: 'Japan (GMT+09:00)' },
-        { value: 'Australia/Sydney', label: 'Eastern Australia (GMT+10:00)' },
-        { value: 'Pacific/Noumea', label: 'New Caledonia (GMT+11:00)' },
-        { value: 'Pacific/Auckland', label: 'New Zealand (GMT+12:00)' }
-      ];
+  // Populate timezones
+  try {
+    const popularTimezones = [
+      { value: 'Pacific/Midway', label: 'Midway Island (GMT-11:00)' },
+      { value: 'Pacific/Honolulu', label: 'Hawaii (GMT-10:00)' },
+      { value: 'America/Anchorage', label: 'Alaska (GMT-09:00)' },
+      { value: 'America/Los_Angeles', label: 'Pacific Time (GMT-08:00)' },
+      { value: 'America/Denver', label: 'Mountain Time (GMT-07:00)' },
+      { value: 'America/Chicago', label: 'Central Time (GMT-06:00)' },
+      { value: 'America/New_York', label: 'Eastern Time (GMT-05:00)' },
+      { value: 'America/Halifax', label: 'Atlantic Time (GMT-04:00)' },
+      { value: 'America/Sao_Paulo', label: 'Brazil (GMT-03:00)' },
+      { value: 'Atlantic/South_Georgia', label: 'Mid-Atlantic (GMT-02:00)' },
+      { value: 'Atlantic/Azores', label: 'Azores (GMT-01:00)' },
+      { value: 'Europe/London', label: 'UK & Ireland (GMT+00:00)' },
+      { value: 'Europe/Paris', label: 'Western Europe (GMT+01:00)' },
+      { value: 'Europe/Athens', label: 'Eastern Europe (GMT+02:00)' },
+      { value: 'Europe/Moscow', label: 'Russia - Moscow (GMT+03:00)' },
+      { value: 'Asia/Dubai', label: 'UAE (GMT+04:00)' },
+      { value: 'Asia/Karachi', label: 'Pakistan (GMT+05:00)' },
+      { value: 'Asia/Kolkata', label: 'India (GMT+05:30)' },
+      { value: 'Asia/Dhaka', label: 'Bangladesh (GMT+06:00)' },
+      { value: 'Asia/Bangkok', label: 'Thailand & Vietnam (GMT+07:00)' },
+      { value: 'Asia/Singapore', label: 'Singapore & Malaysia (GMT+08:00)' },
+      { value: 'Asia/Tokyo', label: 'Japan (GMT+09:00)' },
+      { value: 'Australia/Sydney', label: 'Eastern Australia (GMT+10:00)' },
+      { value: 'Pacific/Noumea', label: 'New Caledonia (GMT+11:00)' },
+      { value: 'Pacific/Auckland', label: 'New Zealand (GMT+12:00)' }
+    ];
 
-      const localTz = existingConfig.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
-      let matchedLocal = false;
+    const localTz = existingConfig.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    let matchedLocal = false;
 
-      popularTimezones.forEach(tz => {
-        const option = document.createElement('option');
-        option.value = tz.value;
-        option.textContent = tz.label;
-        option.style.background = '#1c1c1e';
-        option.style.color = '#fff';
-        if (tz.value === localTz) {
-          option.selected = true;
-          matchedLocal = true;
-        }
-        timezoneSelect.appendChild(option);
-      });
-
-      if (!matchedLocal && localTz) {
-        const option = document.createElement('option');
-        option.value = localTz;
-        const date = new Date();
-        const offset = -date.getTimezoneOffset();
-        const sign = offset >= 0 ? '+' : '-';
-        const hours = Math.floor(Math.abs(offset) / 60).toString().padStart(2, '0');
-        const mins = (Math.abs(offset) % 60).toString().padStart(2, '0');
-        const loc = localTz.split('/').pop().replace(/_/g, ' ');
-        option.textContent = `${loc} (GMT${sign}${hours}:${mins})`;
-        option.style.background = '#1c1c1e';
-        option.style.color = '#fff';
-        option.selected = true;
-        timezoneSelect.insertBefore(option, timezoneSelect.firstChild);
-      }
-    } catch(e) {
-      console.warn("Timezone API not fully supported.", e);
-    }
-
-    // Apply existing config settings to UI
-    if (existingConfig.teams) {
-      input.value = existingConfig.teams;
-    }
-    
-    if (existingConfig.sports) {
-      if (existingConfig.sports === 'none') {
-        checkboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
-      } else if (existingConfig.sports !== 'all') {
-        const sports = existingConfig.sports.split(',');
-        checkboxes.forEach(cb => {
-          cb.checked = sports.includes(cb.value);
-          if (cb.checked) cb.closest('.checkbox-label').classList.add('active');
-          else cb.closest('.checkbox-label').classList.remove('active');
-        });
-      }
-    }
-
-    if (existingConfig.sources) {
-      if (existingConfig.sources === 'none') {
-        sourceCheckboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
-      } else if (existingConfig.sources !== 'all') {
-        const sources = existingConfig.sources.split(',');
-        sourceCheckboxes.forEach(cb => {
-          cb.checked = sources.includes(cb.value);
-          if (cb.checked) cb.closest('.checkbox-label').classList.add('active');
-          else cb.closest('.checkbox-label').classList.remove('active');
-        });
-      }
-    }
-
-    let currentManifestUrl = '';
-
-    function updateLink() {
-      const teams = input.value.trim();
-      const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
-      const selectedSources = Array.from(sourceCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
-      const tz = timezoneSelect.value;
-
-      let manifestUrl = window.location.origin + '/manifest.json';
-
-      const config = {};
-      if (teams) config.teams = teams;
-      if (tz) config.timezone = tz;
-
-      if (selectedSports.length < checkboxes.length) {
-        config.sports = selectedSports.join(',');
-        if (config.sports === '') config.sports = 'none';
-      }
-
-      if (selectedSources.length < sourceCheckboxes.length) {
-        config.sources = selectedSources.join(',');
-        if (config.sources === '') config.sources = 'none';
-      }
-
-      if (Object.keys(config).length > 0) {
-        const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
-        const encoded = base64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-        manifestUrl = window.location.origin + '/' + encoded + '/manifest.json';
-      }
-
-      currentManifestUrl = manifestUrl;
-      const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
-      btn.href = installUrl;
-    }
-
-    copyBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      navigator.clipboard.writeText(currentManifestUrl).then(() => {
-        const originalText = copyBtn.innerText;
-        copyBtn.innerText = 'COPIED TO CLIPBOARD!';
-        copyBtn.style.background = '#10b981';
-        setTimeout(() => {
-          copyBtn.innerText = originalText;
-          copyBtn.style.background = '#333';
-        }, 2000);
-      });
+    popularTimezones.forEach(tz => {
+      const option = document.createElement('option');
+      option.value = tz.value;
+      option.textContent = tz.label;
+      if (tz.value === localTz) { option.selected = true; matchedLocal = true; }
+      timezoneSelect.appendChild(option);
     });
 
-    input.addEventListener('input', updateLink);
-    timezoneSelect.addEventListener('change', updateLink);
-    [...checkboxes, ...sourceCheckboxes].forEach(cb => {
-      cb.addEventListener('change', (e) => {
-        const label = e.target.closest('.checkbox-label');
-        if (e.target.checked) label.classList.add('active');
-        else label.classList.remove('active');
-        updateLink();
+    if (!matchedLocal && localTz) {
+      const option = document.createElement('option');
+      option.value = localTz;
+      const date = new Date();
+      const offset = -date.getTimezoneOffset();
+      const sign = offset >= 0 ? '+' : '-';
+      const hours = Math.floor(Math.abs(offset) / 60).toString().padStart(2, '0');
+      const mins = (Math.abs(offset) % 60).toString().padStart(2, '0');
+      const loc = localTz.split('/').pop().replace(/_/g, ' ');
+      option.textContent = `${loc} (GMT${sign}${hours}:${mins})`;
+      option.selected = true;
+      timezoneSelect.insertBefore(option, timezoneSelect.firstChild);
+    }
+  } catch (e) {
+    console.warn("Timezone API not fully supported.", e);
+  }
+
+  // Apply existing config settings to UI
+  if (existingConfig.teams) input.value = existingConfig.teams;
+
+  function applyExistingSelection(cbs, configValue) {
+    if (!configValue) return;
+    if (configValue === 'none') {
+      cbs.forEach(cb => { cb.checked = false; cb.closest('.check').classList.remove('active'); });
+    } else if (configValue !== 'all') {
+      const values = configValue.split(',');
+      cbs.forEach(cb => {
+        cb.checked = values.includes(cb.value);
+        cb.closest('.check').classList.toggle('active', cb.checked);
       });
+    }
+  }
+  applyExistingSelection(checkboxes(), existingConfig.sports);
+  applyExistingSelection(sourceCheckboxes(), existingConfig.sources);
+
+  let currentManifestUrl = '';
+
+  function updateLink() {
+    const teams = input.value.trim();
+    const selectedSports = Array.from(checkboxes()).filter(cb => cb.checked).map(cb => cb.value);
+    const selectedSources = Array.from(sourceCheckboxes()).filter(cb => cb.checked).map(cb => cb.value);
+    const tz = timezoneSelect.value;
+
+    let manifestUrl = window.location.origin + '/manifest.json';
+    const config = {};
+    if (teams) config.teams = teams;
+    if (tz) config.timezone = tz;
+
+    const allCbs = checkboxes();
+    if (selectedSports.length < allCbs.length) {
+      config.sports = selectedSports.join(',') || 'none';
+    }
+    const allSourceCbs = sourceCheckboxes();
+    if (selectedSources.length < allSourceCbs.length) {
+      config.sources = selectedSources.join(',') || 'none';
+    }
+
+    if (Object.keys(config).length > 0) {
+      const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
+      const encoded = base64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      manifestUrl = window.location.origin + '/' + encoded + '/manifest.json';
+    }
+
+    currentManifestUrl = manifestUrl;
+    btn.href = manifestUrl.replace(/^https?:\/\//, 'stremio://');
+  }
+
+  function wireGrid(grid) {
+    grid.addEventListener('change', (e) => {
+      if (e.target.type !== 'checkbox') return;
+      e.target.closest('.check').classList.toggle('active', e.target.checked);
+      updateLink();
     });
-    
-    updateLink();
-  </script>
+  }
+  wireGrid(sportsGrid);
+  wireGrid(sourcesGrid);
+
+  document.getElementById('sportsAll').onclick = () => { checkboxes().forEach(cb => { cb.checked = true; cb.closest('.check').classList.add('active'); }); updateLink(); };
+  document.getElementById('sportsNone').onclick = () => { checkboxes().forEach(cb => { cb.checked = false; cb.closest('.check').classList.remove('active'); }); updateLink(); };
+  document.getElementById('sourcesAll').onclick = () => { sourceCheckboxes().forEach(cb => { cb.checked = true; cb.closest('.check').classList.add('active'); }); updateLink(); };
+  document.getElementById('sourcesNone').onclick = () => { sourceCheckboxes().forEach(cb => { cb.checked = false; cb.closest('.check').classList.remove('active'); }); updateLink(); };
+
+  copyBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    navigator.clipboard.writeText(currentManifestUrl).then(() => toast('Link copied to clipboard.'));
+  });
+
+  input.addEventListener('input', updateLink);
+  timezoneSelect.addEventListener('change', updateLink);
+
+  updateLink();
+</script>
 </body>
-
 </html>

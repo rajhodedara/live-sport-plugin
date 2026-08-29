@@ -1,0 +1,196 @@
+/* ══════════════════════════════════════════════════════════════════
+   SLEEVE — design tokens & components, adapted for Nuvio Live Sports
+   Ink: pink = live / primary action. Blue = configure / informational.
+   ══════════════════════════════════════════════════════════════════ */
+:root{
+  --ink-pink:#FF4FA3;
+  --ink-blue:#5B86FF;
+
+  --stock-base:#121026;
+  --stock-raised:#1D1A3A;
+  --stock-raised-2:#252150;
+  --stock-line:#2E2A55;
+  --stock-line-strong:#454078;
+
+  --text-primary:#F2EFE6;
+  --text-secondary:#A7A2C8;
+  --text-inverse:#121026;
+
+  --sem-positive:#5B86FF;
+  --sem-warning:#FFB84D;
+  --sem-danger:#FF6B6B;
+
+  --font-display:'Bricolage Grotesque',system-ui,sans-serif;
+  --font-ui:'IBM Plex Sans',system-ui,sans-serif;
+  --font-data:'IBM Plex Mono',ui-monospace,monospace;
+
+  --size-xs:.75rem;   --size-sm:.875rem;  --size-md:1rem;
+  --size-lg:1.125rem; --size-xl:1.375rem; --size-2xl:1.75rem;
+  --size-3xl:2.25rem; --size-4xl:3rem;
+
+  --sp-1:4px;  --sp-2:8px;  --sp-3:12px; --sp-4:16px;
+  --sp-5:24px; --sp-6:32px; --sp-7:48px; --sp-8:64px;
+
+  --r-sm:6px; --r-md:10px; --r-lg:14px; --r-xl:20px; --r-full:999px;
+
+  --el-1:0 1px 2px rgba(0,0,0,.4);
+  --el-2:0 6px 24px rgba(0,0,0,.5);
+
+  --motion-fast:120ms cubic-bezier(.2,.8,.2,1);
+  --motion-base:220ms cubic-bezier(.2,.8,.2,1);
+
+  --focus:3px solid var(--ink-pink);
+  --focus-offset:3px;
+  --tap-min:44px;
+}
+
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}
+body{
+  margin:0;background:var(--stock-base);color:var(--text-primary);
+  font-family:var(--font-ui);font-size:var(--size-md);line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+:focus-visible{outline:var(--focus);outline-offset:var(--focus-offset);border-radius:var(--r-sm)}
+img{max-width:100%;display:block}
+button{font:inherit;color:inherit}
+a{color:inherit}
+
+/* ─── Typography ─── */
+.t-display{font-family:var(--font-display);font-weight:800;letter-spacing:-.03em;line-height:1.02}
+.t-title{font-family:var(--font-display);font-weight:700;letter-spacing:-.02em;line-height:1.1}
+.t-body{font-family:var(--font-ui);font-size:var(--size-md);line-height:1.6}
+.t-meta{font-family:var(--font-data);font-size:var(--size-xs);letter-spacing:.13em;
+        text-transform:uppercase;color:var(--text-secondary)}
+.t-data{font-family:var(--font-data);font-size:var(--size-sm);color:var(--text-secondary)}
+.t-secondary{color:var(--text-secondary)}
+
+/* ─── Buttons ─── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:var(--sp-2);
+  font-family:var(--font-ui);font-weight:600;font-size:var(--size-sm);
+  min-height:var(--tap-min);padding:0 var(--sp-5);
+  border:1px solid transparent;border-radius:var(--r-full);
+  background:var(--ink-pink);color:var(--text-inverse);
+  cursor:pointer;text-decoration:none;white-space:nowrap;
+  transition:transform var(--motion-fast),opacity var(--motion-fast),background var(--motion-fast);
+}
+.btn:hover:not(:disabled){opacity:.88}
+.btn:active:not(:disabled){transform:scale(.97)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn--secondary{background:transparent;color:var(--text-primary);border-color:var(--stock-line-strong)}
+.btn--secondary:hover:not(:disabled){background:var(--stock-raised);opacity:1}
+.btn--curate{background:var(--ink-blue);color:var(--text-inverse)}
+.btn--ghost{background:transparent;color:var(--text-secondary);border-color:transparent;padding:0 var(--sp-3)}
+.btn--ghost:hover:not(:disabled){color:var(--text-primary);background:var(--stock-raised);opacity:1}
+.btn--sm{min-height:34px;font-size:var(--size-xs);padding:0 var(--sp-4)}
+.btn--lg{min-height:52px;font-size:var(--size-md);padding:0 var(--sp-6)}
+.btn--icon{padding:0;width:var(--tap-min);min-height:var(--tap-min);border-radius:var(--r-full)}
+.btn--block{width:100%}
+
+/* ─── Form controls ─── */
+.field{display:flex;flex-direction:column;gap:var(--sp-2)}
+.label{font-size:var(--size-sm);font-weight:500}
+.hint{font-size:var(--size-xs);color:var(--text-secondary)}
+.input,.select{
+  width:100%;min-height:var(--tap-min);padding:var(--sp-3) var(--sp-4);
+  background:var(--stock-raised);color:var(--text-primary);
+  border:1px solid var(--stock-line-strong);border-radius:var(--r-md);
+  font-family:var(--font-ui);font-size:var(--size-md);
+  transition:border-color var(--motion-fast);
+}
+.input::placeholder{color:var(--text-secondary)}
+.input:hover,.select:hover{border-color:var(--text-secondary)}
+.input:focus,.select:focus{outline:none;border-color:var(--ink-pink)}
+.select{cursor:pointer}
+.search{position:relative}
+.search .input{padding-left:44px}
+.search svg{position:absolute;left:var(--sp-4);top:50%;transform:translateY(-50%);
+            color:var(--text-secondary);pointer-events:none}
+
+/* Checkbox */
+.check{display:inline-flex;align-items:center;gap:var(--sp-3);cursor:pointer;
+  min-height:var(--tap-min);padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);
+  background:rgba(255,255,255,.03);border:1px solid transparent;transition:all var(--motion-fast)}
+.check:hover{background:var(--stock-raised)}
+.check.active{border-color:rgba(255,79,163,.35);background:rgba(255,79,163,.1)}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.check .box{width:20px;height:20px;border-radius:var(--r-sm);flex:none;
+  border:2px solid var(--stock-line-strong);display:grid;place-items:center;
+  transition:background var(--motion-fast),border-color var(--motion-fast)}
+.check .box svg{opacity:0;color:var(--text-inverse);transition:opacity var(--motion-fast)}
+.check input:checked + .box{background:var(--ink-pink);border-color:var(--ink-pink)}
+.check input:checked + .box svg{opacity:1}
+.check input:focus-visible + .box{outline:var(--focus);outline-offset:2px}
+
+/* ─── Badge & chip ─── */
+.badge{display:inline-flex;align-items:center;gap:var(--sp-1);
+  font-family:var(--font-data);font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+  padding:4px var(--sp-2);border-radius:var(--r-sm);
+  background:var(--stock-raised-2);color:var(--text-secondary)}
+.badge--pink{background:var(--ink-pink);color:var(--text-inverse);animation:pulseBadge 2s infinite}
+.badge--outline{background:rgba(18,16,38,.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.15);color:var(--text-primary)}
+@keyframes pulseBadge{0%{box-shadow:0 0 0 0 rgba(255,79,163,.6)}70%{box-shadow:0 0 0 8px rgba(255,79,163,0)}100%{box-shadow:0 0 0 0 rgba(255,79,163,0)}}
+
+.chip{display:inline-flex;align-items:center;gap:var(--sp-2);
+  min-height:var(--tap-min);padding:0 var(--sp-4);border-radius:var(--r-full);
+  border:1px solid var(--stock-line-strong);background:var(--stock-raised);
+  color:var(--text-secondary);font-size:var(--size-sm);font-weight:600;cursor:pointer;
+  white-space:nowrap;transition:all var(--motion-fast)}
+.chip:hover{color:var(--text-primary);border-color:var(--text-secondary)}
+.chip[aria-pressed="true"]{background:var(--ink-pink);border-color:var(--ink-pink);color:var(--text-inverse)}
+
+.divider{height:1px;background:var(--stock-line);border:0;margin:var(--sp-5) 0}
+
+.skeleton{background:linear-gradient(90deg,var(--stock-raised) 25%,var(--stock-raised-2) 50%,var(--stock-raised) 75%);
+  background-size:200% 100%;animation:shimmer 1.4s infinite;border-radius:var(--r-sm)}
+@keyframes shimmer{to{background-position:-200% 0}}
+
+/* ─── Cards & artwork ─── */
+.card{background:var(--stock-raised);border:1px solid var(--stock-line);
+  border-radius:var(--r-lg);transition:border-color var(--motion-fast),transform var(--motion-fast)}
+.card--interactive{cursor:pointer}
+.card--interactive:hover{border-color:var(--stock-line-strong);transform:translateY(-4px)}
+
+.art{position:relative;overflow:hidden;background:var(--stock-raised-2)}
+.art--scrim::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(to top,rgba(18,16,38,.92) 5%,rgba(18,16,38,.55) 45%,transparent 80%)}
+
+/* ─── App bar ─── */
+.appbar{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-3);
+  padding:var(--sp-3) var(--sp-5);background:var(--stock-raised);
+  border-bottom:1px solid var(--stock-line);position:sticky;top:0;z-index:50;
+  backdrop-filter:blur(16px);background:rgba(29,26,58,.85)}
+.appbar .brand{display:flex;align-items:center;gap:var(--sp-2);
+  font-family:var(--font-display);font-weight:800;letter-spacing:.02em;font-size:var(--size-lg)}
+
+/* ─── Feedback: toast, empty, sheet ─── */
+#toastHost{position:fixed;bottom:var(--sp-5);left:50%;transform:translateX(-50%);
+  z-index:200;display:flex;flex-direction:column;gap:var(--sp-2);align-items:center;
+  width:100%;padding:0 var(--sp-4);pointer-events:none}
+.toast{display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-3) var(--sp-4);
+  background:var(--stock-raised-2);border:1px solid var(--stock-line-strong);
+  border-radius:var(--r-md);box-shadow:var(--el-2);font-size:var(--size-sm);
+  max-width:420px;pointer-events:auto;animation:toastIn var(--motion-base)}
+.toast--danger{border-left:3px solid var(--sem-danger)}
+.toast--pink{border-left:3px solid var(--ink-pink)}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--sp-3);
+  padding:var(--sp-8) var(--sp-4);border:1px dashed var(--stock-line-strong);
+  border-radius:var(--r-lg);grid-column:1/-1}
+.empty .title{font-family:var(--font-display);font-weight:700;font-size:var(--size-xl)}
+.empty .sub{color:var(--text-secondary);font-size:var(--size-sm);max-width:44ch}
+
+.sheet-backdrop{position:fixed;inset:0;background:rgba(9,8,20,.7);backdrop-filter:blur(4px);
+  z-index:150;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--stock-raised);border:1px solid var(--stock-line-strong);
+  border-radius:var(--r-xl) var(--r-xl) 0 0;padding:var(--sp-5) var(--sp-4) var(--sp-6);
+  box-shadow:var(--el-2);max-width:480px;width:100%;animation:sheetIn var(--motion-base)}
+@keyframes sheetIn{from{transform:translateY(24px);opacity:.6}to{transform:translateY(0);opacity:1}}
+.sheet .grabber{width:38px;height:4px;border-radius:var(--r-full);
+  background:var(--stock-line-strong);margin:0 auto var(--sp-4)}

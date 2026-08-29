@@ -6,6 +6,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
+# Install the standalone resolver's own dependencies
+COPY resolver/package*.json ./resolver/
+RUN cd resolver && npm install --omit=dev
+
 # Copy source code and assets
 COPY . .
 

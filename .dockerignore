@@ -6,5 +6,5 @@ npm-debug.log
 .DS_Store
 dist/impit-node.win32-x64-msvc.node
 nuvio-proxy-2
-resolver
+resolver/node_modules
 dist_wasm
