@@ -105,73 +105,92 @@ pm2 startup
 
 ## ✨ Key Features
 
-- **🏟️ Multi-Source Aggregator:** Combines matches and streams from multiple sources (StreamFree, Streamed.pk, BinTV, TimStreams, SportyHunter, WatchFooty, etc.) into a unified catalog.
-- **⚡ Dynamic Host Routing:** Automatically generates manifest and stream URLs based on incoming request headers — works seamlessly behind Cloudflare, Ngrok, or custom domains.
-- **🖼️ Built-in Image Proxy:** Proxies and normalizes thumbnails with SVG fallbacks to guarantee 100% visible posters across Stremio.
-- **🛡️ Opossum Circuit Breakers:** Provider requests are isolated via circuit breakers to instantly fail-over if a streaming site goes down.
-- **🧠 Algorithmic Stream Scoring:** Prioritizes high-resolution direct `.m3u8` links over external web players.
-- **🌐 Built-in Stream Resolver:** Automatically bypasses CORS and referrer restrictions natively.
-- **⚙️ Dynamic Configuration:** Features a responsive configuration page (`/configure`) to curate your favorite sports, teams, and timezones.
+- **🏟️ Multi-Source Live Aggregator:** Concurrently scrapes and unifies live fixtures from 8+ scrapers (Streamed.pk, StreamFree, WatchFooty, SportyHunter, TimStreams, StreamSports99, Streamic, CDNLiveTV) into a deduplicated catalog with merged stream choices.
+- **⚡ Coalescing Zero-Lag HLS Manifest Proxy (`/api/manifest`):** High-speed HLS proxy powered by `impit` with persistent keep-alive connections. Coalesces concurrent in-flight upstream requests (`manifestInFlight`) to eliminate duplicate fetches during live player segment polls and prevent ISP/upstream throttling.
+- **🔐 Native WebAssembly (WASM) Decryption:** Executes native WebAssembly binaries (`stream-lock.wasm`, `gasm.wasm`, `gasm_india.wasm`) directly in Node.js to decrypt obfuscated tokens and unlock protected third-party stream endpoints.
+- **🌐 Universal Dynamic Host Routing:** Zero hardcoded local IPs. Automatically inspects incoming `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto`, and `cf-visitor` headers to dynamically rewrite all manifests, streams, and asset URLs to match the client's gateway (local LAN, Cloudflare Tunnels, Ngrok, or custom domains).
+- **🛡️ Opossum Circuit Breakers & Negative Caching:** Every provider scraper is isolated via an Opossum circuit breaker to instantly trip on timeouts or failures. Dead upstreams are negatively cached for 15s so video players seamlessly fail over to alternate sources without freezing.
+- **🖼️ Resilient 100% 200 OK Image Pipeline (`/img`):** High-performance image proxy with LRU caching (`stale-while-revalidate`), protocol-relative normalization (`//`), and dynamic inline SVG fallback cards to ensure clients never encounter broken posters or missing team crests.
+- **🧠 Algorithmic Stream Scoring & Ranking:** Evaluates and sorts stream links in real time based on resolution (1080p > 720p > SD), latency, direct M3U8 vs. webview embeds, audio commentary language, and live viewer counts.
+- **🧱 Clean Architecture & Awilix IoC:** Built with Domain-Driven Design (DDD) entities (`MatchEntity`, `StreamEntity`), modular service layers, and an Awilix Inversion of Control (IoC) dependency injection container.
+- **📄 Declarative YAML Provider Engine:** Includes a dynamic `YamlProviderBuilder` allowing developers to configure and plug in new stream scrapers via declarative YAML definitions without writing boilerplate.
+- **⚙️ Responsive Glassmorphic Web Dashboard:** Includes a local browser player (`/`) and a full configuration interface (`/configure`) to filter sports categories, toggle active providers, localize match kickoffs to your timezone, and track favorite clubs.
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Runtime:** [Node.js](https://nodejs.org/) (v22+)
-- **Framework:** [Express.js](https://expressjs.com/)
-- **Scraping & DOM:** [Cheerio](https://cheerio.js.org/), [Happy DOM](https://github.com/capricorn86/happy-dom)
-- **Dependency Injection:** [Awilix](https://github.com/jeffijoe/awilix)
-- **Resilience:** [Opossum](https://nodeshift.dev/opossum/) (Circuit Breakers)
-- **Addon SDK:** [stremio-addon-sdk](https://github.com/Stremio/stremio-addon-sdk)
-- **Bundler:** [@vercel/ncc](https://github.com/vercel/ncc)
+| Layer | Technologies |
+|---|---|
+| **Runtime & Core** | [Node.js](https://nodejs.org/) (v22+ LTS), [Express.js](https://expressjs.com/) |
+| **Addon Protocol** | [stremio-addon-sdk](https://github.com/Stremio/stremio-addon-sdk) (Stremio v1 Protocol) |
+| **Architecture & IoC** | [Awilix](https://github.com/jeffijoe/awilix) (Dependency Injection / IoC Container), Domain-Driven Design (DDD) |
+| **High-Performance HTTP & TLS** | [Impit](https://github.com/impit-dev/impit) (Native HTTP client with TLS/browser fingerprint impersonation), [Undici](https://undici.nodejs.org/) |
+| **WASM Decryption Engines** | Native WebAssembly execution (`stream-lock.wasm`, `gasm.wasm`, `gasm_india.wasm`) |
+| **Scraping & DOM Extraction** | [Cheerio](https://cheerio.js.org/), [Happy DOM](https://github.com/capricorn86/happy-dom), [jsdom](https://github.com/jsdom/jsdom), [got-scraping](https://github.com/apify/got-scraping) |
+| **Resilience & Fault Tolerance** | [Opossum](https://nodeshift.dev/opossum/) (Circuit Breakers), In-Flight Request Coalescing, Negative Cache Maps |
+| **Streaming & Playlists** | [m3u8-parser](https://github.com/videojs/m3u8-parser), Dynamic M3U8 segment rewriter |
+| **Background Scheduling** | [node-cron](https://github.com/node-cron/node-cron) (Periodic match aggregator sync) |
+| **Encoding & Compression** | [lz-string](https://github.com/pieroxy/lz-string) (URL-safe base64url configuration compression) |
+| **Production Bundler** | [@vercel/ncc](https://github.com/vercel/ncc) (Single CJS distribution with native WASM asset copying) |
 
 ---
 
 ## 📋 Prerequisites
 
 Before setting up the project locally:
-- **Node.js**: Version 22.0.0 or higher
-- **npm**: Installed with Node.js
-- **Git**: For version control
+- **Node.js**: Version `22.0.0` or higher (LTS recommended)
+- **npm**: Version `10.0.0` or higher (bundled with Node.js)
+- **Git**: Installed and accessible from your terminal
 
 ---
 
 ## 🚀 Development Workflow
 
 ```bash
-# Install dependencies
+# 1. Install dependencies
 npm install
 
-# Start development mode
+# 2. Start development mode with native watch reload
 npm run dev
 
-# Build for production
+# 3. Build for production (bundles with @vercel/ncc and copies WASM runtimes)
 npm run build
 
-# Start production server
+# 4. Launch the compiled production server
 npm start
+
+# 5. Scaffold a new scraper from template
+npm run generate:provider
 ```
 
 ---
 
 ## 🎛️ Configuration Options
 
-Through the local `/configure` UI, you can customize:
-- **Sports:** Filter specific sports categories (e.g. Football, Basketball, Cricket, Motorsport, MMA, etc.).
-- **Favorite Teams:** Add your favorite clubs/teams for priority tracking under the "⭐ Your Teams" tab.
-- **Timezone:** Display match kick-off times in your exact local timezone.
+Through the interactive `/configure` UI (or via URL-safe base64 config segments), you can customize:
+- **Sports Filtering:** Select from 14+ sports categories (Soccer, Basketball, Cricket, F1 & Racing, NFL, Hockey, Baseball, MMA, Golf, Tennis, Rugby, College Sports, Darts, Other).
+- **Streaming Sources Selection:** Individually enable or disable scrapers (StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLiveTV, StreamSports99, Streamic).
+- **Localization & Timezones:** Auto-detects or manually configures your local IANA timezone to render match kick-off schedules in your local time.
+- **Priority Tracking ("⭐ Your Teams"):** Enter comma-separated favorite clubs or athletes (e.g. `Arsenal, Lakers, Ferrari`) to dynamically generate a dedicated priority catalog.
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing & Verification Suites
 
-The project includes unit, integration, and end-to-end simulation test suites.
+The project features a multi-tiered test suite including unit tests, adversarial stress tests, and automated Stremio client simulations:
 
 ```bash
-# Run unit & integration tests
+# Run unit & service test suites with Jest
 npm test
 
-# Run simulated Stremio client E2E test
-node scripts/test-e2e-simulated-client.js
+# Run simulated Stremio client E2E test (verifies manifest, catalogs, and streams)
+npm run test:e2e-client
+
+# Run live upstream scraper health check across all providers
+npm run check-sources
+
+# Validate 24/7 channel and live TV endpoints
+npm run test:247
 ```
 
