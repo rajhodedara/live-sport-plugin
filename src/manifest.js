@@ -14,7 +14,7 @@ const manifest = {
   description:
     'The ultimate live sports aggregator. Stream live Football, NBA, NFL, NHL, F1, and more. ' +
     'Scrapes high-speed streams from multiple providers including StreamFree, TimStreams, and IPTV. Zero-lag proxy included.',
-  logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/e/e3/Soccer_ball.svg/512px-Soccer_ball.svg.png',
+  logo: '/logo.png',
 
   types: ['tv'],
   resources: ['catalog', 'meta', 'stream'],
