@@ -1,8 +1,13 @@
 const https = require('https');
 
-const API_KEY = 'rnd_l3myN3T82ZONLqyi5ysQWWhZsoQe';
-const SERVICE_ID = 'srv-d9dvflrrjlhs73behjtg';
-const OWNER_ID = 'tea-d55futbuibrs7391q0r0';
+const API_KEY = process.env.RENDER_API_KEY;
+const SERVICE_ID = process.env.RENDER_SERVICE_ID || 'srv-d9dvflrrjlhs73behjtg';
+const OWNER_ID = process.env.RENDER_OWNER_ID || 'tea-d55futbuibrs7391q0r0';
+
+if (!API_KEY) {
+  console.error('Missing RENDER_API_KEY environment variable.');
+  process.exit(1);
+}
 
 function renderReq(path) {
   return new Promise((resolve, reject) => {
