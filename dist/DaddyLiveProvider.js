@@ -627,7 +627,7 @@ class DaddyLiveProvider extends BaseProvider {
           }
 
           if (m3u8Url) {
-            const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(embedReferer)}&origin=${encodeURIComponent(embedOrigin)}&proxyChunks=1`;
+            const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(embedReferer)}&origin=${encodeURIComponent(embedOrigin)}`;
             const label = channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`;
 
             streams.push(new StreamEntity({

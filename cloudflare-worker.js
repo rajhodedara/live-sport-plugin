@@ -39,7 +39,6 @@ export default {
     newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
     newHeaders.delete('Host');
 
-
     // --- EDGE SCRAPER FOR STREAMSPORTS99 ---
     if (action === 'streamsports99') {
       try {
@@ -172,6 +171,8 @@ export default {
               if (decoded.includes('.m3u8')) {
                 const u = decoded.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
                 if (u) m3u8Url = u[1];
+              } else if (/^https?:\/\//i.test(decoded.trim())) {
+                // Could be a partial URL piece — keep scanning
               }
             } catch(_) {}
           }
@@ -304,10 +305,37 @@ export default {
       } else if (targetUrl.includes('.key')) {
         responseHeaders.set('Content-Type', 'application/octet-stream');
       } else {
-        // Force video/mp2t for chunks (StreamFree hides them as .js which breaks mobile players)
+        // Force video/mp2t for chunks
         responseHeaders.set('Content-Type', 'video/mp2t');
       }
       
+      // For Streamed.pk / TikTok CDN .image chunks, strip the 42-byte fake WebP header in flight
+      if (targetUrl.includes('.image')) {
+        let skipped = 0;
+        const transformStream = new TransformStream({
+          transform(chunk, controller) {
+            if (skipped < 42) {
+              const needed = 42 - skipped;
+              if (chunk.length <= needed) {
+                skipped += chunk.length;
+              } else {
+                controller.enqueue(chunk.subarray(needed));
+                skipped = 42;
+              }
+            } else {
+              controller.enqueue(chunk);
+            }
+          }
+        });
+
+        response.body.pipeTo(transformStream.writable).catch(() => {});
+
+        return new Response(transformStream.readable, {
+          status: response.status,
+          headers: responseHeaders
+        });
+      }
+
       // For video chunks (.ts, .js) and everything else, return the stream directly
       return new Response(response.body, {
         status: response.status,
@@ -322,3 +350,13 @@ export default {
     }
   }
 };
+
+// Trigger deployment
+
+// Trigger deployment 2
+
+// Trigger deployment 3
+// Force deploy CF workers
+// Force trigger for proxy 5 deployment
+// Fix wrangler prompt
+// Trigger proxy 5 deployment

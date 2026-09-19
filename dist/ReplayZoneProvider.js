@@ -321,17 +321,16 @@ class ReplayZoneProvider {
                 for (const v of filteredVideos) {
                     if (!v.url) continue;
                     const qName = qMap[v.name] || v.name;
-                    const isOkRu = /okcdn\.ru|vkuser\.net|mycdn\.me|\.ok\.ru/i.test(v.url);
-                    const playUrl = isOkRu
-                        ? `${CONFIG_BASE_URL}/api/fastmp4?url=${encodeURIComponent(v.url)}&referer=${encodeURIComponent('https://ok.ru/')}`
-                        : v.url;
+                    // ok.ru CDN: srcIp in token is routing metadata only, NOT enforced.
+                    // Confirmed by live cross-IP test (mobile data, different IP → 206 OK).
+                    // Players fetch directly from okcdn.ru using proxyHeaders. Server bandwidth: 0.
                     streams.push({
                         name: 'ReplayZone',
                         title: partName.trim() ? `${partName.trim()} (${qName})` : `Stream (${qName})`,
                         resolution: qName,
-                        url: playUrl,
+                        url: v.url,
                         behaviorHints: {
-                            notWebReady: false,
+                            notWebReady: true,
                             proxyHeaders: {
                                 request: {
                                     'Referer': 'https://ok.ru/',

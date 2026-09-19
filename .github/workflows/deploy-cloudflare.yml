@@ -1,0 +1,55 @@
+name: Deploy Multiple Cloudflare Workers
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'cloudflare-worker/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Your 1st Cloudflare account (odedararaj456)
+          - proxy_num: 1
+            account_id: CF_ACCOUNT_ID_1
+            api_token: CF_API_TOKEN_1
+            worker_name: nuvio-proxy
+
+          # Your 2nd Cloudflare account (rajodedara360)
+          - proxy_num: 2
+            account_id: CF_ACCOUNT_ID_2
+            api_token: CF_API_TOKEN_2
+            worker_name: nuvio-proxy2
+
+          # When you create a 3rd Cloudflare account, add secrets CF_ACCOUNT_ID_3 and CF_API_TOKEN_3, then uncomment below:
+          - proxy_num: 3
+            account_id: CF_ACCOUNT_ID_3
+            api_token: CF_API_TOKEN_3
+            worker_name: nuvio-proxy3
+            
+          # 4th Cloudflare account
+          - proxy_num: 4
+            account_id: CF_ACCOUNT_ID_4
+            api_token: CF_API_TOKEN_4
+            worker_name: spring-brook-5c1e
+
+          # 5th Cloudflare account
+          - proxy_num: 5
+            account_id: CF_ACCOUNT_ID_5
+            api_token: CF_API_TOKEN_5
+            worker_name: falling-unit-ffa6
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Proxy ${{ matrix.proxy_num }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          wranglerVersion: '3'
+          apiToken: ${{ secrets[matrix.api_token] }}
+          accountId: ${{ secrets[matrix.account_id] }}
+          command: deploy cloudflare-worker/index.js --name ${{ matrix.worker_name }} --compatibility-date 2024-01-01
