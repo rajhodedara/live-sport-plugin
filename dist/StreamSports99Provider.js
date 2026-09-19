@@ -76,7 +76,7 @@ class StreamSports99Provider extends BaseProvider {
             let status = 'upcoming';
             if (item.status === 'live' || item.status === 'in') status = 'live';
 
-            const matchTime = item.start ? new Date(item.start).getTime() : Date.now();
+            const matchTime = item.start ? (parseTimezone(item.start, 'UTC') || Date.now()) : Date.now();
 
             // Drop far-out fixtures: they never get channels and resolve to nothing.
             // Live-flagged events are always kept (clock-skew tolerant).

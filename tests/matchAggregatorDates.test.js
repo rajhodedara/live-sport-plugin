@@ -88,3 +88,31 @@ describe('match merge isolation (regression)', () => {
     expect(agg._sameEventPre(pa, pb)).toBe(true);
   });
 });
+
+describe('Kickoff timestamp parsing and timezone formatting', () => {
+  const { getKickoff, mapMatchToMetaPreview } = require('../src/catalog');
+
+  test('getKickoff parses UTC date strings correctly into epoch milliseconds', () => {
+    // 2026-09-20 17:00 UTC = 1789923600000 ms
+    expect(getKickoff('2026-09-20 17:00')).toBe(1789923600000);
+    expect(getKickoff('2026-09-20T17:00:00Z')).toBe(1789923600000);
+    expect(getKickoff(1789923600000)).toBe(1789923600000);
+    expect(getKickoff('1789923600000')).toBe(1789923600000);
+  });
+
+  test('mapMatchToMetaPreview formats kickoff at 10:00 AM for America/Los_Angeles (Chicago Bears vs Minnesota Vikings)', () => {
+    const match = {
+      id: 'bears_vikings',
+      title: 'Chicago Bears vs Minnesota Vikings',
+      category: 'american_football',
+      date: '1789923600000', // 2026-09-20 17:00:00 UTC
+      status: 'upcoming',
+      sources: [{ source: 'streamedpk', id: '123' }]
+    };
+
+    const meta = mapMatchToMetaPreview(match, { timezone: 'America/Los_Angeles' }, 'tv');
+    expect(meta.releaseInfo).toBe('10:00 AM (America/Los_Angeles)');
+    expect(meta.description).toContain('⏱️ Kickoff at 10:00 AM (America/Los_Angeles)');
+  });
+});
+

@@ -284,6 +284,19 @@ class MatchAggregator {
           finalPres[idx].category = 'college';
         }
 
+        // Reconcile kickoff date: if existing date is missing or 0, adopt incoming date.
+        // Also prefer high-precision epoch ms from dedicated event providers (e.g. streamedpk)
+        // over coarse dates.
+        const existingDateMs = _parseEventDate(existing.date);
+        const incomingDateMs = _parseEventDate(match.date);
+        if ((!existingDateMs || existingDateMs <= 0) && incomingDateMs > 0) {
+          existing.date = match.date;
+          finalPres[idx].date = incomingDateMs;
+        } else if (existingDateMs > 0 && incomingDateMs > 0 && match.sources && match.sources.some(s => s.source === 'streamedpk')) {
+          existing.date = match.date;
+          finalPres[idx].date = incomingDateMs;
+        }
+
         // Canonical naming: prefer a team-vs-team fixture title over a
         // channel-like listing title, so the merged event keeps the most
         // informative name regardless of which provider arrived first.

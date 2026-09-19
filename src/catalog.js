@@ -3,6 +3,7 @@ const { getChannelLogo } = require('./services/ChannelLogoService');
 const { prewarmMatch } = require('./streams');
 const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
+const { parseTimezone } = require('./timezone');
 
 function getKickoff(d) {
   if (!d) return 0;
@@ -10,12 +11,8 @@ function getKickoff(d) {
   if (!isNaN(n) && Number.isFinite(n) && n > 0) return n;
   const s = String(d).trim();
   if (!s) return 0;
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(s)) {
-    const clean = s.replace(' ', 'T');
-    const iso = clean + (clean.length === 16 ? ':00Z' : (clean.length === 19 ? 'Z' : ''));
-    const t = new Date(iso).getTime();
-    if (!isNaN(t)) return t;
-  }
+  const parsed = parseTimezone(s, 'UTC');
+  if (parsed && !isNaN(parsed) && parsed > 0) return parsed;
   const time = new Date(s).getTime();
   return isNaN(time) ? 0 : time;
 }
@@ -332,7 +329,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
         const dateObj = new Date(ko);
         if (!isNaN(dateObj.getTime())) {
           releasedIso = dateObj.toISOString();
-          const options = { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+          const options = { hour: 'numeric', minute: '2-digit', hour12: true };
           const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
           
           if (config && config.timezone) {
@@ -352,11 +349,11 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
             const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
             if (hours > 24) {
               const days = Math.floor(hours / 24);
-              relativeTimeStr = `in ${days}d ${hours % 24}h`;
+              relativeTimeStr = ` (in ${days}d ${hours % 24}h)`;
             } else if (hours > 0) {
-              relativeTimeStr = `in ${hours}h ${minutes}m`;
+              relativeTimeStr = ` (in ${hours}h ${minutes}m)`;
             } else {
-              relativeTimeStr = `in ${minutes}m`;
+              relativeTimeStr = ` (in ${minutes}m)`;
             }
           }
         }
