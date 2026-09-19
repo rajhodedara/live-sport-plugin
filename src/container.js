@@ -16,7 +16,9 @@ const StreamicProvider = require('./providers/StreamicProvider');
 const EmbedIndiaProvider = require('./providers/EmbedIndiaProvider');
 const EmbedStProvider = require('./providers/EmbedStProvider');
 const StreamedPkProvider = require('./providers/StreamedPkProvider');
+const DaddyLiveProvider = require('./providers/DaddyLiveProvider');
 
+const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
 
@@ -33,7 +35,8 @@ container.register({
   cronService: asClass(CronService).singleton(),
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),
-  streamResolveCache: asValue(new StreamResolveCache())
+  streamResolveCache: asValue(new StreamResolveCache()),
+  teamLogoService: asClass(TeamLogoService).singleton()
 });
 
 // Build dynamic YAML Providers
@@ -51,6 +54,7 @@ container.register({
   embedIndiaProvider: asClass(EmbedIndiaProvider).singleton(),
   embedStProvider: asClass(EmbedStProvider).singleton(),
   streamedPkProvider: asClass(StreamedPkProvider).singleton(),
+  daddyLiveProvider: asClass(DaddyLiveProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 

@@ -20,8 +20,16 @@ const REPLAY_RETENTION_DAYS = 30;
 function _parseEventDate(raw) {
   if (raw == null || raw === '') return 0;
   const n = Number(raw);
-  if (!Number.isNaN(n) && n > 0) return n;
-  const parsed = Date.parse(String(raw));
+  if (!Number.isNaN(n) && Number.isFinite(n) && n > 0) return n;
+  const str = String(raw).trim();
+  if (!str) return 0;
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(str)) {
+    const clean = str.replace(' ', 'T');
+    const iso = clean + (clean.length === 16 ? ':00Z' : (clean.length === 19 ? 'Z' : ''));
+    const parsedIso = Date.parse(iso);
+    if (!Number.isNaN(parsedIso) && parsedIso > 0) return parsedIso;
+  }
+  const parsed = Date.parse(str);
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
@@ -137,9 +145,10 @@ function _tryExtractTeams(title) {
 // ────────────────────────────────────────────────────────────────────────────
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, cacheService, yamlProviders , replayzoneProvider}) {
-    this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider];
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService }) {
+    this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamicProvider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider, ...(daddyLiveProvider ? [daddyLiveProvider] : [])];
     this.cacheService = cacheService;
+    this.teamLogoService = teamLogoService;
   }
 
   /**
@@ -171,7 +180,11 @@ class MatchAggregator {
    */
   _sameEventPre(p1, p2) {
     // 1. Category mismatch guard
-    if (p1.category && p2.category && p1.category !== 'other' && p2.category !== 'other' && p1.category !== p2.category) {
+    const c1 = p1.category;
+    const c2 = p2.category;
+    const isCollegeFootball = (c1 === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
+                             (c2 === 'college' && (c1 === 'american_football' || c1 === 'football'));
+    if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeFootball) {
       return false;
     }
     // 2. Exact ID match
@@ -229,6 +242,7 @@ class MatchAggregator {
       if (!providerMatches || !Array.isArray(providerMatches)) return;
       providerMatches.forEach(match => {
         if (!match.id || !match.title) return;
+        if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) return;
 
         const pre = this._precompute(match);
         let idx = -1;
@@ -262,6 +276,12 @@ class MatchAggregator {
         else if (existing.team2 && !existing.team2.logo && match.team2 && match.team2.logo) existing.team2.logo = match.team2.logo;
         if (existing.description === 'No description' && match.description && match.description !== 'No description') {
           existing.description = match.description;
+        }
+
+        // Prefer specific 'college' category if any merged source has it
+        if (existing.category !== 'college' && match.category === 'college') {
+          existing.category = 'college';
+          finalPres[idx].category = 'college';
         }
 
         // Canonical naming: prefer a team-vs-team fixture title over a
@@ -333,8 +353,11 @@ class MatchAggregator {
       }
     });
 
-    // Filter out matches that are already over (kickoff was > 24 hours ago)
+    // Filter out matches that have 0 sources or are already over (kickoff was > 24 hours ago)
     const activeMatches = finalMatches.filter(match => {
+      if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) {
+        return false;
+      }
       let kickoff = 0;
       if (match.date) {
         const parsed = Number(match.date);
@@ -356,6 +379,13 @@ class MatchAggregator {
     console.log(`[MatchAggregator] Sync complete. Merged ${activeMatches.length} active events.`);
     if (anyProviderSucceeded) {
       this.cacheService.setMatches(activeMatches);
+
+      if (this.teamLogoService) {
+        // Asynchronously enrich live & upcoming matches with team badges without delaying sync
+        const enrichable = activeMatches.filter(m => (m.team1 && m.team1.name && !m.team1.logo) || !m.logo).slice(0, 50);
+        Promise.allSettled(enrichable.map(m => this.teamLogoService.enrichMatch(m))).catch(() => {});
+      }
+
       return activeMatches;
     }
     return null;

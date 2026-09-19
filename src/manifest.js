@@ -15,7 +15,7 @@ const manifest = {
     'Aggregates high-speed live streams and 24/7 sports TV networks with zero-lag playback.',
   logo: '/logo.png',
 
-  types: ['tv'],
+  types: ['tv', 'series', 'channel'],
   resources: ['catalog', 'meta', 'stream'],
 
   catalogs: [
@@ -24,10 +24,11 @@ const manifest = {
       { name: 'search', isRequired: false }
     ] },
     { type: 'tv', id: 'nuvio_sports_networks', name: '📺 24/7 Live TV', extra: [{ name: 'search', isRequired: false }] },
-    { type: 'tv', id: 'nuvio_sports_replays', name: '⏪ Sports Replays', extra: [
-      { name: 'genre', options: ['Football', 'Cricket', 'Basketball', 'Motorsport', 'Tennis', 'Baseball', 'Hockey', 'Rugby', 'American Football', 'MMA', 'Golf', 'Darts', 'Other'], isRequired: false },
+    { type: 'series', id: 'nuvio_sports_replays', name: '⏪ Sports Replays', extra: [
+      { name: 'genre', options: ['Football', 'Cricket', 'Basketball', 'Motorsport', 'Tennis', 'Baseball', 'Hockey', 'Rugby', 'American Football', 'MMA', 'Other'], isRequired: false },
       { name: 'search', isRequired: false }
     ] },
+
     { type: 'tv', id: 'nuvio_sports_football', name: '⚽ Soccer', extra: [{ name: 'search', isRequired: false }] },
     { type: 'tv', id: 'nuvio_sports_cricket', name: '🏏 Cricket', extra: [{ name: 'search', isRequired: false }] },
     { type: 'tv', id: 'nuvio_sports_basketball', name: '🏀 Basketball', extra: [{ name: 'search', isRequired: false }] },

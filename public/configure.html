@@ -306,6 +306,40 @@
              onclick="this.select()" onfocus="this.select()">
     </div>
 
+    <!-- ── Nuvio Native Collections Section ── -->
+    <div class="section" style="margin-top: 24px; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
+      <h3 style="display: flex; align-items: center; gap: 8px; color: #fff;">
+        <span>🏆</span> Nuvio Collections (Replay Hubs)
+      </h3>
+      <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 16px 0; line-height: 1.5;">
+        Get dedicated <strong>Landscape cards</strong> on your Nuvio home screen for each sport (like Netflix &amp; Prime Video). Clicking any sport opens organized match replay rows (Recent, Premier League, NBA, F1, etc.)!
+      </p>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+        <button id="copyCollectionsBtn" class="btn" style="background: rgba(239, 68, 68, 0.85); font-size: 13px; padding: 12px 10px; margin: 0;">
+          📋 Copy JSON
+        </button>
+        <a id="downloadCollectionsBtn" href="#" class="btn" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); font-size: 13px; padding: 12px 10px; margin: 0; text-decoration: none; text-align: center; display: flex; align-items: center; justify-content: center;">
+          📥 Download JSON
+        </a>
+      </div>
+
+      <div class="input-group" style="margin-top: 8px;">
+        <label>Collections Import URL (for Nuvio App):</label>
+        <input type="text" id="collectionsUrlInput" readonly spellcheck="false" autocomplete="off"
+               style="font-family: monospace; font-size: 12px; user-select: all;"
+               onclick="this.select()" onfocus="this.select()">
+      </div>
+
+      <div style="margin-top: 14px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 10px; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
+        <strong style="color: #fff;">How to import in Nuvio:</strong><br>
+        1. Click <strong>Copy JSON</strong> or <strong>Download JSON</strong>.<br>
+        2. In Nuvio app, open <strong>Settings</strong> ➔ <strong>Collections</strong> ➔ <strong>Import Collection</strong>.<br>
+        3. Paste the JSON or select the downloaded file.<br>
+        4. Enjoy Netflix-style sport replay hubs on your home screen!
+      </div>
+    </div>
+
     <div style="margin-top: 25px; padding: 20px; background: rgba(255, 95, 95, 0.06); border: 1px solid rgba(255, 95, 95, 0.2); border-radius: 16px;">
       <p style="margin: 0 0 16px 0; font-size: 14px; font-weight: 700; color: #fff; text-align: center; letter-spacing: 0.5px;">
         ❤️ Donation Center
@@ -358,6 +392,9 @@
     const btn = document.getElementById('installBtn');
     const copyBtn = document.getElementById('copyBtn');
     const manualUrl = document.getElementById('manualUrl');
+    const copyCollectionsBtn = document.getElementById('copyCollectionsBtn');
+    const downloadCollectionsBtn = document.getElementById('downloadCollectionsBtn');
+    const collectionsUrlInput = document.getElementById('collectionsUrlInput');
     const input = document.getElementById('teams');
     const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
     const sourceCheckboxes = document.querySelectorAll('#sourcesGrid input[type="checkbox"]');
@@ -474,6 +511,7 @@
     }
 
     let currentManifestUrl = '';
+    let currentCollectionsUrl = '';
 
     function updateLink() {
       const teams = input.value.trim();
@@ -487,6 +525,8 @@
       }
 
       let manifestUrl = window.location.origin + '/manifest.json';
+      let collectionsUrl = window.location.origin + '/collections.json';
+      let downloadUrl = window.location.origin + '/api/collections/download';
 
       const config = {};
       if (teams) config.teams = teams;
@@ -506,12 +546,18 @@
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
         const encoded = base64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         manifestUrl = window.location.origin + '/' + encoded + '/manifest.json';
+        collectionsUrl = window.location.origin + '/' + encoded + '/collections.json';
+        downloadUrl = window.location.origin + '/' + encoded + '/api/collections/download';
       }
 
       currentManifestUrl = manifestUrl;
+      currentCollectionsUrl = collectionsUrl;
       // Keep the manual field in sync — it is the guaranteed path on
       // plain-HTTP self-hosted instances where the Clipboard API is unavailable.
       if (manualUrl) manualUrl.value = manifestUrl;
+      if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
+      if (downloadCollectionsBtn) downloadCollectionsBtn.href = downloadUrl;
+
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
     }
@@ -563,15 +609,42 @@
           ok = legacyCopy(currentManifestUrl);
         }
       } catch (err) {
-        // Clipboard permission denied / API present but unusable — try the legacy path.
         ok = legacyCopy(currentManifestUrl);
       }
       if (!ok && manualUrl) {
-        // Never leave the user with no way forward: preselect the manual field.
         try { manualUrl.focus(); manualUrl.select(); } catch (err) {}
       }
       flashCopyButton(ok);
     });
+
+    if (copyCollectionsBtn) {
+      copyCollectionsBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const originalText = copyCollectionsBtn.innerText;
+        copyCollectionsBtn.innerText = 'FETCHING JSON...';
+        try {
+          const res = await fetch(currentCollectionsUrl);
+          const jsonText = await res.text();
+          let ok = false;
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(jsonText);
+            ok = true;
+          } else {
+            ok = legacyCopy(jsonText);
+          }
+          copyCollectionsBtn.innerText = ok ? 'COPIED JSON! ✓' : 'COPY FAILED';
+          copyCollectionsBtn.style.background = ok ? '#10b981' : '#b91c1c';
+        } catch (_) {
+          const ok = legacyCopy(currentCollectionsUrl);
+          copyCollectionsBtn.innerText = ok ? 'COPIED URL! ✓' : 'COPY FAILED';
+          copyCollectionsBtn.style.background = ok ? '#10b981' : '#b91c1c';
+        }
+        setTimeout(() => {
+          copyCollectionsBtn.innerText = originalText;
+          copyCollectionsBtn.style.background = 'rgba(239, 68, 68, 0.85)';
+        }, 2500);
+      });
+    }
 
     input.addEventListener('input', updateLink);
     timezoneSelect.addEventListener('change', updateLink);

@@ -16,11 +16,12 @@ class StreamScoringService {
     }
 
     // 2. Resolution
-    if (streamEntity.title.includes('1080p') || streamEntity.resolution === '1920x1080') {
+    const title = streamEntity.title || streamEntity.name || '';
+    if (title.includes('1080p') || streamEntity.resolution === '1920x1080') {
       score += 20;
-    } else if (streamEntity.title.includes('720p') || streamEntity.resolution === '1280x720') {
+    } else if (title.includes('720p') || streamEntity.resolution === '1280x720') {
       score += 10;
-    } else if (streamEntity.title.includes('540p') || streamEntity.title.includes('SD')) {
+    } else if (title.includes('540p') || title.includes('SD')) {
       score -= 5;
     }
 

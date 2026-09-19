@@ -11,7 +11,8 @@ const sources = [
   { name: 'PPV / BinTv', url: 'https://api.ppv.st/api/streams' },
   { name: 'NTV', url: 'http://ntv.cx' },
   { name: 'IptvOrg', url: 'https://iptv-org.github.io/api/channels.json' },
-  { name: 'CdnLive', url: 'https://api.cdnlivetv.tv/api/v1/events/sports/?user=cdnlivetv&plan=free' }
+  { name: 'CdnLive', url: 'https://api.cdnlivetv.tv/api/v1/events/sports/?user=cdnlivetv&plan=free' },
+  { name: 'DaddyLive', url: 'https://dlstreams.st/schedule/schedule-generated.json' }
 ];
 
 async function checkSources() {

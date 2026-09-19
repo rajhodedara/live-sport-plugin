@@ -43,7 +43,8 @@ class BaseProvider {
       cat = cat.name || cat.title || 'other';
     }
     cat = String(cat).toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (cat.includes('americanfootball') || cat.includes('nfl') || cat.includes('afl') || cat.includes('gridiron')) return 'american_football';
+    if (cat.includes('ncaa') || cat.includes('college')) return 'college';
+    if (cat.includes('americanfootball') || cat.includes('nfl') || cat.includes('afl') || cat.includes('gridiron') || cat.includes('aussierules')) return 'american_football';
     if (cat.includes('soccer') || cat.includes('football')) return 'football';
     // 'mixedmartialarts' must be caught before the generic checks below — the
     // upstream label "Mixed Martial Arts" normalized to 'mixedmartialarts', a
@@ -60,7 +61,6 @@ class BaseProvider {
     if (cat.includes('hockey') || cat.includes('nhl')) return 'hockey';
     if (cat.includes('baseball') || cat.includes('mlb')) return 'baseball';
     if (cat.includes('darts')) return 'darts';
-    if (cat.includes('ncaa') || cat.includes('college')) return 'college';
     if (cat.includes('liveshow') || cat.includes('uncategorized')) return 'other';
 
     // Canonical allowlist. Anything the catalogs do not know about belongs in
@@ -74,6 +74,7 @@ class BaseProvider {
     if (CANONICAL.has(cat)) return cat;
     return 'other';
   }
+
 
   /**
    * Fetch wrapper that routes through Cloudflare proxy if configured

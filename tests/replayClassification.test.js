@@ -195,7 +195,71 @@ describe('mapMatchToMetaPreview replay labelling', () => {
   test('the nuvio_sport_ id prefix is preserved for replays', () => {
     const meta = mapMatchToMetaPreview(finishedMatch());
     expect(meta.id).toBe('nuvio_sport_rz_test-fixture-1');
-    expect(meta.type).toBe('tv');
-    expect(meta.behaviorHints.defaultVideoId).toBe('nuvio_sport_rz_test-fixture-1');
+    expect(meta.type).toBe('series');
+    expect(meta.behaviorHints.defaultVideoId).toBe('nuvio_sport_rz_test-fixture-1:1:1');
+  });
+});
+
+describe('ReplayZone provider restriction & Live timing precision', () => {
+  const { getKickoff } = require('../src/catalog');
+
+  test('only replayzone source is classified as a replay', () => {
+    const liveSources = [
+      [{ source: 'streamedpk', id: '1' }],
+      [{ source: 'daddylive', id: '2' }],
+      [{ source: 'streamsports99', id: '3' }],
+      [{ source: 'watchfooty', id: '4' }]
+    ];
+
+    for (const src of liveSources) {
+      const pastEvent = {
+        id: 'past-match',
+        title: 'Team A vs Team B',
+        category: 'football',
+        date: String(now - 4 * HOUR),
+        status: 'finished',
+        sources: src
+      };
+      expect(isReplayMatch(pastEvent)).toBe(false);
+    }
+
+    const rzEvent = {
+      id: 'rz-match',
+      title: 'Team A vs Team B - Full Game Replay',
+      category: 'football',
+      date: String(now - 4 * HOUR),
+      status: 'finished',
+      sources: [{ source: 'replayzone', id: 'url', url: 'url' }]
+    };
+    expect(isReplayMatch(rzEvent)).toBe(true);
+  });
+
+  test('a baseball match starting in 10 minutes is NOT live', () => {
+    const upcomingBaseball = {
+      id: 'ss99_2581863',
+      title: 'Cincinnati Reds vs Chicago Cubs',
+      category: 'baseball',
+      status: 'upcoming',
+      date: String(now + 10 * 60 * 1000),
+      sources: [{ source: 'streamsports99', id: '2581863' }]
+    };
+    expect(isMatchLive(upcomingBaseball)).toBe(false);
+  });
+
+  test('a match with status "upcoming" starting in future is NOT live', () => {
+    const futureUpcoming = {
+      id: 'upcoming-future-1',
+      title: 'Team A vs Team B',
+      category: 'football',
+      status: 'upcoming',
+      date: String(now + 15 * 60 * 1000),
+      sources: [{ source: 'daddylive', id: '1' }]
+    };
+    expect(isMatchLive(futureUpcoming)).toBe(false);
+  });
+
+  test('getKickoff parses "YYYY-MM-DD HH:mm" as UTC', () => {
+    const epoch = getKickoff('2026-09-18 22:40');
+    expect(new Date(epoch).toISOString()).toBe('2026-09-18T22:40:00.000Z');
   });
 });

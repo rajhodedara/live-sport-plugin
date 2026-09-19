@@ -96,27 +96,58 @@ function extractPatternC(html) {
     const nums = arrayMatch[1].split(',').map(n => parseInt(n.trim(), 10));
     if (nums.length < 10) return null;
 
-    // Look for two numeric key variables near the array declaration
+    // Search for keys near the array declaration (within 500 chars before or after)
+    const arrayIdx = typeof arrayMatch.index === 'number' ? arrayMatch.index : 0;
+    const scopeStart = Math.max(0, arrayIdx - 300);
+    const scopeEnd = Math.min(html.length, arrayIdx + arrayMatch[0].length + 600);
+    const scopeText = html.slice(scopeStart, scopeEnd);
+
+    // Look for numeric key variables near the array declaration (supports minified ',key=123' or 'var key=123')
     const keyMatches = [];
-    const keyRegex = /var\s+[a-zA-Z_$][a-zA-Z0-9_$]*\s*=\s*(\d+)/g;
+    const keyRegex = /(?:var\s+|,\s*)[a-zA-Z_$][a-zA-Z0-9_$]*\s*=\s*(\d+)/g;
     let km;
-    while ((km = keyRegex.exec(html)) !== null) {
+    while ((km = keyRegex.exec(scopeText)) !== null) {
       keyMatches.push(parseInt(km[1], 10));
-      if (keyMatches.length >= 3) break;
+      if (keyMatches.length >= 8) break;
+    }
+
+    // If no keys found in immediate scope, fallback to scanning full html
+    if (keyMatches.length < 2) {
+      keyRegex.lastIndex = 0;
+      while ((km = keyRegex.exec(html)) !== null) {
+        keyMatches.push(parseInt(km[1], 10));
+        if (keyMatches.length >= 8) break;
+      }
     }
 
     if (keyMatches.length < 2) return null;
 
-    for (let ki = 0; ki < keyMatches.length - 1; ki++) {
-      const key1 = keyMatches[ki];
-      const key2 = keyMatches[ki + 1];
-      try {
-        const decoded = nums.map(n => String.fromCharCode((n ^ key1 - key2 + 256) % 256)).join('');
-        if (decoded.includes('.m3u8')) {
-          const urlMatch = decoded.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
-          if (urlMatch) return urlMatch[1];
+    for (let ki = 0; ki < keyMatches.length; ki++) {
+      for (let kj = 0; kj < keyMatches.length; kj++) {
+        if (ki === kj) continue;
+        const key1 = keyMatches[ki];
+        const key2 = keyMatches[kj];
+        // Try all arithmetic and precedence variants:
+        // 1. (n ^ (key1 - key2))
+        // 2. ((n ^ key1) - key2)
+        // 3. ((n ^ key1) + key2)
+        // 4. ((n - key2) ^ key1)
+        const decoders = [
+          n => String.fromCharCode((n ^ (key1 - key2) + 256) % 256),
+          n => String.fromCharCode((((n ^ key1) - key2 + 256) & 255)),
+          n => String.fromCharCode((((n ^ key1) + key2 + 256) & 255)),
+          n => String.fromCharCode((((n - key2) ^ key1 + 256) & 255))
+        ];
+        for (const dec of decoders) {
+          try {
+            const decoded = nums.map(dec).join('');
+            if (decoded.includes('.m3u8')) {
+              const urlMatch = decoded.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+              if (urlMatch) return urlMatch[1];
+            }
+          } catch (_) {}
         }
-      } catch (_) {}
+      }
     }
   } catch (_) {}
   return null;

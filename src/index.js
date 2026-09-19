@@ -20,7 +20,7 @@ const child_process = require('child_process');
 const path = require('path');
 
 const { builder } = require('./manifest');
-const { handleCatalog, handleMeta } = require('./catalog');
+const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
 const { PORT, BASE_URL, getRequestBaseUrl } = require('./config');
 const container = require('./container');
@@ -179,8 +179,11 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
-// Serve the web debugger UI and Configuration Page
+// Serve the web debugger UI, posters, and Configuration Page
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
+app.use(express.static(path.join(__dirname, 'public'), { index: false }));
+app.use('/posters', express.static(path.join(__dirname, '..', 'public', 'posters')));
+app.use('/posters', express.static(path.join(__dirname, 'public', 'posters')));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
@@ -188,6 +191,31 @@ app.get('/', (req, res) => {
 
 app.get(['/configure', '/:config/configure'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'configure.html'));
+});
+
+// ─── Nuvio Native Collections ─────────────────────────────────────────
+// Serves Nuvio Collections JSON schema for Sports Replays & Live Sports.
+// Compatible with Nuvio's Collection import from URL or file.
+const { generateCollections } = require('./collections');
+
+app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.json', '/:config/nuvio-collections.json'], (req, res) => {
+  const reqBaseUrl = getRequestBaseUrl(req);
+  const config = req.params.config || '';
+  const collections = generateCollections(reqBaseUrl, config);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.json(collections);
+});
+
+app.get(['/api/collections/download', '/:config/api/collections/download'], (req, res) => {
+  const reqBaseUrl = getRequestBaseUrl(req);
+  const config = req.params.config || '';
+  const collections = generateCollections(reqBaseUrl, config);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="nuvio-sports-collections.json"');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.send(JSON.stringify(collections, null, 2));
 });
 
 app.get('/api/matches', (req, res) => {
@@ -680,6 +708,7 @@ function createSegmentUncloakStream() {
 app.get('/api/hlschunk', (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer;
+  const origin = req.query.origin;
   if (!targetUrl) return res.status(400).send('Missing url');
 
   try {
@@ -692,6 +721,7 @@ app.get('/api/hlschunk', (req, res) => {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
     };
     if (referer) headers['Referer'] = referer;
+    if (origin) headers['Origin'] = origin;
     if (req.headers['range']) headers['Range'] = req.headers['range'];
 
     const upstreamReq = client.get(targetUrl, {
@@ -919,19 +949,14 @@ async function attemptRemint(rck, heldUrl = '') {
 
 app.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
-  const proxyChunks = req.query.proxyChunks === '1';
   const referer = req.query.referer || 'https://embed.st/';
   const origin = req.query.origin || 'https://embed.st';
 
   if (!targetUrl) return res.status(400).send('Missing url');
 
-  // Detect whether the client is a browser / web client requiring CORS proxying
-  const clientOrigin = req.headers['origin'] || '';
-  const isWebClient = proxyChunks || req.query.web === '1' ||
-                      (clientOrigin && (clientOrigin.includes('stremio') || clientOrigin.includes('localhost') || clientOrigin.includes('http'))) ||
-                      req.headers['sec-fetch-mode'] === 'cors';
-
-  const cacheKey = `${targetUrl}|${referer}|${origin}|${isWebClient ? 'web' : 'native'}`;
+  // Playlist-only proxy (same as WatchFooty / Streamed.pk .ts): this host fetches
+  // the m3u8 with the CDN Referer, then the player pulls every media byte from the CDN.
+  const cacheKey = `${targetUrl}|${referer}|${origin}`;
   // Recovery key for this stream, if the URL was emitted by our own resolver.
   const rck = readRck(req);
   const rckSuffix = rck ? '&rck=' + encodeURIComponent(rck) : '';
@@ -1032,11 +1057,7 @@ app.get('/api/manifest', async (req, res) => {
                   if (uriMatch) {
                       try {
                           const absUri = new URL(uriMatch[1], effectiveUrl).toString();
-                          if (proxyChunks) {
-                              resultLine = l.replace(uriMatch[1], `/api/hlschunk?url=${encodeURIComponent(absUri)}`);
-                          } else {
-                              resultLine = l.replace(uriMatch[1], absUri);
-                          }
+                          resultLine = l.replace(uriMatch[1], absUri);
                       } catch(e) {}
                   }
               }
@@ -1059,29 +1080,14 @@ app.get('/api/manifest', async (req, res) => {
           }
 
           if (absoluteUrl.includes('.m3u8')) {
-            const webSuffix = isWebClient ? '&web=1' : '';
-            return `/api/manifest?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${proxyChunks ? '&proxyChunks=1' : ''}${webSuffix}${rckSuffix}`;
+            return `/api/manifest?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${rckSuffix}`;
           }
 
-          // Cloaked segments must be proxied ONLY when the client needs it:
-          // 1. .image (Streamed.pk / TikTok CDN) genuinely contains a 42-byte WebP/RIFF header and needs unwrapping to MPEG-TS
-          // 2. Web clients (browser) where CORS forbids direct fetching from storage buckets without Access-Control-Allow-Origin
-          // 3. proxyChunks explicitly requested
-          //
-          // Pure MPEG-TS disguised as .png/.webp (WatchFooty / Alibaba / R2 / Tencent) has NO header wrapper (starts with 0x47 byte 0).
-          // Native players (Android, FireStick, Desktop, iOS) do not enforce browser CORS and can fetch directly from CDN without server double-hop.
-          const needsUnwrapping = absoluteUrl.includes('.image');
-          const isPureDisguisedTs = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js');
-
-          if (proxyChunks || needsUnwrapping || (isWebClient && isPureDisguisedTs)) {
-            let chunkUrl = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
-            if (referer) chunkUrl += `&referer=${encodeURIComponent(referer)}`;
-            return chunkUrl;
-          }
-
-          // For native clients playing pure MPEG-TS with disguised extension, append '#.ts'
-          // so any naive media parser knows it's transport stream without altering HTTP fetch
-          if (isPureDisguisedTs && !absoluteUrl.includes('.ts')) {
+          // WatchFooty / Streamed.pk: disguised names (.png, .webp, .js, .image)
+          // are still fetched from the CDN. '#.ts' is a local hint so the player
+          // treats the body as MPEG-TS; it does not change the HTTP URL.
+          const isDisguisedSegment = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js') || absoluteUrl.includes('.image');
+          if (isDisguisedSegment && !absoluteUrl.includes('.ts')) {
             return absoluteUrl + '#.ts';
           }
 
@@ -1264,12 +1270,12 @@ app.use((req, res, next) => {
         const rewriteUrl = (url) => {
           if (!url || typeof url !== 'string') return url;
           // Relative URLs
-          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk')) {
+          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/posters')) {
             modified = true;
             return `${currentBaseUrl}${url}`;
           }
           // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|logo)(?:[?\/].*)?)$/);
+          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|logo|posters)(?:[?\/].*)?)$/);
           if (match) {
             modified = true;
             return `${currentBaseUrl}${match[1]}`;
@@ -1277,7 +1283,7 @@ app.use((req, res, next) => {
           return url;
         };
 
-        // 1. Streams payload (/stream/tv/*.json)
+        // 1. Streams payload (/stream/*/*.json)
         if (body && Array.isArray(body.streams)) {
           body.streams.forEach(s => {
             if (s.url) s.url = rewriteUrl(s.url);
@@ -1285,7 +1291,7 @@ app.use((req, res, next) => {
           });
         }
 
-        // 2. Catalog payload (/catalog/tv/*.json)
+        // 2. Catalog payload (/catalog/*/*.json)
         if (body && Array.isArray(body.metas)) {
           body.metas.forEach(meta => {
             if (meta.poster) meta.poster = rewriteUrl(meta.poster);
@@ -1294,11 +1300,16 @@ app.use((req, res, next) => {
           });
         }
 
-        // 3. Meta detail payload (/meta/tv/*.json)
+        // 3. Meta detail payload (/meta/*/*.json)
         if (body && body.meta) {
           if (body.meta.poster) body.meta.poster = rewriteUrl(body.meta.poster);
           if (body.meta.background) body.meta.background = rewriteUrl(body.meta.background);
           if (body.meta.logo) body.meta.logo = rewriteUrl(body.meta.logo);
+          if (Array.isArray(body.meta.videos)) {
+            body.meta.videos.forEach(v => {
+              if (v.thumbnail) v.thumbnail = rewriteUrl(v.thumbnail);
+            });
+          }
         }
 
         // 4. Manifest payload (/manifest.json)
@@ -1362,7 +1373,7 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     const enabledSports = parsedConfig.sports.split(',');
     
     // General catalogs to always keep
-    const keepCatalogs = ['nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_teams', 'nuvio_sports_networks'];
+    const keepCatalogs = ['nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_teams', 'nuvio_sports_networks', 'nuvio_sports_replays'];
     
     // Add specific catalogs based on selection
     const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
@@ -1388,6 +1399,10 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     const cached = container.resolve('cacheService').getMatches();
     if (Array.isArray(cached) && cached.length > 0) {
       const present = new Set(cached.map(m => m && m.category).filter(Boolean));
+      const replaysAvailable = new Set(
+        cached.filter(m => isReplayMatch(m)).map(m => m.category).filter(Boolean)
+      );
+
       // Always-keep catalogs: not tied to a single sport.
       const ALWAYS_KEEP = new Set([
         'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_replays',
@@ -1395,6 +1410,15 @@ app.get('/:config?/manifest.json', (req, res, next) => {
       ]);
       newManifest.catalogs = newManifest.catalogs.filter((c) => {
         if (ALWAYS_KEEP.has(c.id)) return true;
+        // Never put sub-league rows on homepage (they are for collection folders only)
+        if (/nuvio_sports_replays_[a-z_]+_(recent|premier_league|ucl|nba|f1|mlb)/.test(c.id)) return false;
+
+        // Keep sport-specific replay catalogs if replays exist for that sport
+        if (c.id.startsWith('nuvio_sports_replays_')) {
+          const sport = c.id.replace('nuvio_sports_replays_', '');
+          return replaysAvailable.has(sport);
+        }
+
         const cat = c.id.replace('nuvio_sports_', '');
         // Keep 24/7 network-carried sports even when no fixture is scheduled.
         if (present.has(cat)) return true;
@@ -1424,6 +1448,37 @@ app.use((req, res, next) => {
     if (parsed !== null) {
       req.url = `/${encodeURIComponent(JSON.stringify(parsed))}${m[2]}`;
     }
+  }
+  next();
+});
+
+// ─── Direct Handler for Nuvio Collection Sub-Catalogs ─────────────────────────
+// Nuvio Collection folders query catalogs directly by ID (e.g. nuvio_sports_replays_football_recent).
+// Handling them before the SDK router allows collection folders to work seamlessly
+// without polluting the main manifest with 15+ home-screen rows.
+app.get([
+  '/catalog/:type/:id.json',
+  '/catalog/:type/:id/:extra.json',
+  '/:config/catalog/:type/:id.json',
+  '/:config/catalog/:type/:id/:extra.json'
+], async (req, res, next) => {
+  const { type, id } = req.params;
+  if (id && id.startsWith('nuvio_sports_replays_') && id !== 'nuvio_sports_replays') {
+    const config = req.params.config ? decodeConfigSegment(req.params.config) : {};
+    let extra = {};
+    if (req.params.extra) {
+      try {
+        const parts = req.params.extra.split('&');
+        for (const p of parts) {
+          const [k, v] = p.split('=');
+          if (k && v) extra[k] = decodeURIComponent(v);
+        }
+      } catch (_) {}
+    }
+    const result = await handleCatalog(type, id, extra, config);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.json(result);
   }
   next();
 });

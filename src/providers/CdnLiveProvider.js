@@ -168,6 +168,7 @@ class CdnLiveProvider extends BaseProvider {
       
       if (Array.isArray(soccerEvents)) {
         for (const item of soccerEvents) {
+          if (!item.channels || !Array.isArray(item.channels) || item.channels.length === 0) continue;
           const matchId = item.gameID || `${item.homeTeam}-vs-${item.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           const title = `${item.homeTeam || ''} vs ${item.awayTeam || ''}`;
           

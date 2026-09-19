@@ -119,7 +119,8 @@ class StreamedPkProvider extends BaseProvider {
             else if (titleLower.includes('cricket') || idLower.includes('cricket')) finalCategory = 'cricket';
             else if (titleLower.includes('tennis') || idLower.includes('tennis')) finalCategory = 'tennis';
             else if (titleLower.includes('rally') || titleLower.includes('f1') || titleLower.includes('motor')) finalCategory = 'motorsport';
-            else if (titleLower.includes('league') || titleLower.includes('rugby')) finalCategory = 'rugby';
+            else if (titleLower.includes('premier league') || titleLower.includes('champions league') || titleLower.includes('europa league') || titleLower.includes('la liga') || titleLower.includes('serie a') || titleLower.includes('bundesliga') || titleLower.includes('football') || titleLower.includes('soccer')) finalCategory = 'football';
+            else if (titleLower.includes('rugby') || titleLower.includes('nrl') || titleLower.includes('super league') || titleLower.includes('six nations') || titleLower.includes('fox league')) finalCategory = 'rugby';
             else finalCategory = 'networks';
           }
 

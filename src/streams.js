@@ -1,12 +1,29 @@
 const container = require('./container');
+const ChannelCountryService = require('./services/ChannelCountryService');
 
 // Source selection (shared by handleStream and prewarmMatch)
+function detectChannelCountry(channelName) {
+  return ChannelCountryService.detectChannelCountry(channelName);
+}
+
+function isEventStreamSource(src) {
+  if (!src) return false;
+  if (src.source === 'daddylive') {
+    const name = (src.channelName || src.channel_name || '').trim();
+    return /^event\s*[-_]?\s*(sd\s*[-_]?\s*)?stream/i.test(name) ||
+           /^event\s*[-_]?\s*sd\b/i.test(name) ||
+           /\bevent\s*(sd\s*)?stream\b/i.test(name);
+  }
+  return false;
+}
+
 function selectSources(matchSources, config) {
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'replayzone': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'timstreams': 9, 'streamsports': 13, 'embedindia': 15 };
-  const sortedSources = [...matchSources].sort((a, b) => {
+  const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'timstreams': 9, 'streamsports': 13, 'embedindia': 15 };
+  const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
-    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'replayzone'].includes(src) ? 99 : 1.5);
+    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'replayzone'].includes(src) ? 99 : 1.5);
     const pa = getPriority(a.source);
     const pb = getPriority(b.source);
     if (pa !== pb) return pa - pb;
@@ -15,7 +32,7 @@ function selectSources(matchSources, config) {
 
   if (config && typeof config.sources === 'string' && config.sources !== 'none') {
     const enabled = config.sources.split(',');
-    const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
+    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -26,7 +43,7 @@ function selectSources(matchSources, config) {
     });
   }
 
-  const KNOWN_FALLBACKS = ['watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedst', 'streamedpk', 'replayzone'];
+  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedst', 'streamedpk', 'replayzone'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -35,6 +52,9 @@ function selectSources(matchSources, config) {
 
 // Resolve a single source (extracted from handleStream, logic unchanged)
 async function resolveSource(src, match, config) {
+  if (isEventStreamSource(src)) {
+    return [];
+  }
   const streamScorer = container.resolve('streamScorer');
   const sourceName = src.source;
   let resStreams = [];
@@ -66,6 +86,9 @@ async function resolveSource(src, match, config) {
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
     } else if (sourceName === 'replayzone') {
       const provider = container.resolve('replayzoneProvider');
+      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    } else if (sourceName === 'daddylive') {
+      const provider = container.resolve('daddyLiveProvider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
     } else if (sourceName.startsWith('yaml_')) {
       const yamlProviders = container.resolve('yamlProviders');
@@ -189,6 +212,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
             const h = new URL(targetUrl).hostname;
             if (/\.wfty\.st$/.test(h) || /watchfooty/i.test(h)) guess = 'https://sportsembed.su/';
             else if (/\.strmd\.st$/.test(h) || /streamed/i.test(h)) guess = 'https://embed.st/';
+            else if (/tiestep|dlive|dlstreams|daddylive/i.test(h)) guess = 'https://tiestep.top/';
             else guess = `https://${h}/`;
           } catch (_) { guess = 'https://sportsembed.su/'; }
           console.log(`[Filter] ${res.status} with no referer; retrying once with ${guess}`);
@@ -285,14 +309,22 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER) {
 
 
 async function handleStream(type, id, config) {
-  if (type !== 'tv' || !id.startsWith('nuvio_sport_')) {
+  if ((type !== 'tv' && type !== 'series' && type !== 'channel') || !id.startsWith('nuvio_sport_')) {
     return { streams: [] };
   }
 
-  const matchId = id.replace('nuvio_sport_', '');
-  
   const cacheService = container.resolve('cacheService');
   const matches = cacheService.getMatches();
+  let rawId = id.replace('nuvio_sport_', '');
+  let episodeIndex = null;
+  if (rawId.includes(':')) {
+    const parts = rawId.split(':');
+    rawId = parts[0];
+    episodeIndex = parseInt(parts[2], 10);
+  }
+  const matchId = rawId;
+
+  if (!matchId) return { streams: [] };
   const match = matches.find(m => m.id === matchId);
 
   if (!match || !match.sources || match.sources.length === 0) {
@@ -301,7 +333,18 @@ async function handleStream(type, id, config) {
 
   const streams = [];
 
-  const activeSources = selectSources(match.sources, config);
+  let candidateSources = match.sources;
+  if (episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
+    const isMultiPart = match.sources.some(s => s.name && /(part|half|period)\s*\d+/i.test(s.name));
+    if (isMultiPart) {
+      const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
+      if (cleanSources[episodeIndex - 1]) {
+        candidateSources = [cleanSources[episodeIndex - 1]];
+      }
+    }
+  }
+
+  const activeSources = selectSources(candidateSources, config);
   const streamScorer = container.resolve('streamScorer');
 
   const resolveCache = container.resolve('streamResolveCache');
@@ -383,6 +426,7 @@ async function handleStream(type, id, config) {
   const icon = sportIcons[match.category] || '📡';
   
   const niceNames = {
+    daddylive: 'DaddyLive',
     timstreams: 'TimStreams',
     streamsports: 'StreamSports',
     streamsports99: 'StreamSports99',
@@ -407,7 +451,8 @@ async function handleStream(type, id, config) {
     // I can determine providerName from the string it already had.
     let providerName = niceNames[s._source] || niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] || 'Streamed.pk';
     
-    if (s.title && s.title.toLowerCase().includes('timstreams')) providerName = 'TimStreams';
+    if (s.title && s.title.toLowerCase().includes('daddylive')) providerName = 'DaddyLive';
+    else if (s.title && s.title.toLowerCase().includes('timstreams')) providerName = 'TimStreams';
     else if (s.title && s.title.toLowerCase().includes('watchfooty')) providerName = 'WatchFooty';
     else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
     else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
@@ -433,12 +478,16 @@ async function handleStream(type, id, config) {
     // Determine Group
     s.name = isWeb ? '🌐 Web Stream' : '⚡ Direct Stream';
     
+    let countryTag = '';
     if (channelName) {
-      // Don't format title case if it breaks our channel name. Actually, just clean it up slightly.
       channelName = channelName.trim();
+      const countryInfo = detectChannelCountry(channelName);
+      if (countryInfo) {
+        countryTag = ` ${countryInfo.flag} [${countryInfo.name} • ${countryInfo.language}]`;
+      }
     }
     
-    const channelDisplay = channelName ? ` | 📺 ${channelName}` : '';
+    const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
     s.title = `${icon} ${providerName}${channelDisplay}\n📺 Quality: ${quality}${viewersText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
@@ -450,7 +499,8 @@ async function handleStream(type, id, config) {
       s.behaviorHints.notWebReady = true;
       
       let referer = '';
-      if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
+      if (providerName === 'DaddyLive') referer = 'https://dlive.sx/';
+      else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
       else if (providerName === 'WatchFooty') referer = 'https://watchfooty.st/';
       else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
       else if (providerName === 'Streamic') referer = 'https://streamic.st/';
@@ -550,6 +600,7 @@ function suppressPreMatchTeamChannels(streams, match) {
 module.exports = {
   handleStream,
   prewarmMatch,
+  selectSources,
   // Exported so the manifest proxy can transparently re-mint a single expired
   // source without going through the full stream-list path (see src/index.js).
   resolveSource
