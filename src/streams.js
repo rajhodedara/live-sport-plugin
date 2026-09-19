@@ -501,7 +501,7 @@ async function handleStream(type, id, config) {
       let referer = '';
       if (providerName === 'DaddyLive') referer = 'https://dlive.sx/';
       else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
-      else if (providerName === 'WatchFooty') referer = 'https://watchfooty.st/';
+      else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
       else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
       else if (providerName === 'Streamic') referer = 'https://streamic.st/';
       else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';

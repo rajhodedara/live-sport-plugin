@@ -396,14 +396,19 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
     return await attempt();
   } catch (err) {
     // Transient upstream trouble: these load balancers (lb*.wfty.st, strmd.st) are
-    // observed to throw 500/502/503/504 intermittently. A single retry after a
-    // short pause recovers the large majority — the upstream is usually healthy
-    // again within a second. Without this the player received a 502 and stalled.
+    // observed to throw 500/502/503/504 intermittently or reset connections (ECONNRESET)
+    // during high load. A single retry after a short pause recovers the large majority.
     const status = err && err.statusCode;
-    const isTransient = status === 500 || status === 502 || status === 503 || status === 504;
+    const isNetworkTransient = err && (
+      err.code === 'ECONNRESET' ||
+      err.code === 'ETIMEDOUT' ||
+      err.code === 'UND_ERR_SOCKET' ||
+      (err.message && /reset|timeout|socket/i.test(err.message))
+    );
+    const isTransient = status === 500 || status === 502 || status === 503 || status === 504 || isNetworkTransient;
     if (!isTransient) throw err;
     await new Promise((r) => setTimeout(r, 400));
-    console.warn(`[ManifestProxy] Upstream ${status} — retrying once: ${String(targetUrl).slice(0, 90)}`);
+    console.warn(`[ManifestProxy] Upstream ${status || err.code || 'network glitch'} — retrying once: ${String(targetUrl).slice(0, 90)}`);
     return await attempt(); // a second failure propagates with statusCode intact
   }
 }
@@ -760,48 +765,104 @@ app.get('/api/hlschunk', (req, res) => {
 // player's next poll is refused by the CDN. Rather than handing that refusal to
 // the viewer, mint a fresh token server-side and serve the new manifest as if
 // nothing happened. Key format (`rck`, added by streams.js): `${source}:${matchId}:${srcId}`.
-const REMINT_TIMEOUT_MS = 9000;
+// ─── Silent upstream-token re-mint ──────────────────────────────────
+// Proxied stream URLs embed a time-limited upstream token. When it expires the
+// player's next poll is refused by the CDN. Rather than handing that refusal to
+// the viewer, mint a fresh token server-side and serve the new manifest as if
+// nothing happened. Key format (`rck`, added by streams.js): `${source}:${matchId}:${srcId}`.
+const REMINT_TIMEOUT_MS = 12000;
 // After a re-mint, hold the rewritten manifest at least this long so we do not
 // re-mint on every 3-6 s player poll (that would hammer the provider).
 const REMINT_MIN_CACHE_MS = 45 * 1000;
 const remintCache = new Map(); // rck -> { freshUrl, expiresAt }
 
-// Merge a freshly-minted URL into the URL the player is currently holding.
-//
-// Providers put their token in different places:
-//   streamed.pk / StreamFree : token in the QUERY  (?token=... / ?_t=...&_e=...)
-//   WatchFooty               : token AND expiry in the PATH  (/secure/<TOKEN>/.../<EXPIRY>/playlist.m3u8)
-//
-// Copying only search/host/protocol refreshes the token for the query providers
-// but leaves WatchFooty's path token dead, so the upstream keeps rejecting it.
-// Equally, blindly using the fresh URL would "crush" a variant request: a player
-// polling 1080p/chunklist.m3u8 would be handed the master playlist instead.
-//
-// So: adopt the fresh token/host/expiry, but keep whichever FILENAME the player
-// asked for. Same filename -> the fresh URL verbatim is already correct.
-function mergeRemintedUrl(heldUrl, freshUrl) {
-    try {
-      const held = new URL(heldUrl);
-      const fresh = new URL(freshUrl);
-      const heldParts = held.pathname.split('/');
-      const freshParts = fresh.pathname.split('/');
-      const dirCount = freshParts.length - 1;
-      const mergedParts = freshParts.slice(0, dirCount).concat(heldParts.slice(dirCount));
-      const merged = new URL(freshUrl);
-      merged.pathname = mergedParts.join('/');
+// ─── Provider-Specific Token Mechanisms ──────────────────────────────────────
+// Each provider structures and places its authorization tokens differently:
+// 1. WatchFooty: Token AND expiry timestamp in URL path:
+//    /secure/<TOKEN>/<FLAVOR>/<SLUG>/<NUM>/<MATCHID>/<EXPIRY>/<FILE>
+// 2. DaddyLive: Authorization signature & expiry in query parameters:
+//    /hls/<CHANNEL_KEY>.m3u8?s=<SIG>&e=<EXPIRY>
+// 3. Streamed.pk / embed.st: RTMP stream session hash and stream ID in path:
+//    /rtmp/stream/<SESSION_HASH>/<STREAM_NUM>/<VARIANT>
+
+function mergeRemintedUrl(heldUrl, freshUrl, rck = '') {
+  try {
+    const held = new URL(heldUrl);
+    const fresh = new URL(freshUrl);
+    const provider = rck ? String(rck).split(':')[0]?.toLowerCase() : '';
+
+    // 1. DaddyLive: Query-token replacement mechanism (?s=...&e=...)
+    if (provider === 'daddylive' || fresh.searchParams.has('s') || held.pathname.includes('/hls/')) {
+      const merged = new URL(heldUrl);
+      if (fresh.searchParams.has('s')) merged.searchParams.set('s', fresh.searchParams.get('s'));
+      if (fresh.searchParams.has('e')) merged.searchParams.set('e', fresh.searchParams.get('e'));
+      merged.host = fresh.host;
+      merged.protocol = fresh.protocol;
       return merged.toString();
-    } catch (_) {
-      return freshUrl;
     }
+
+    // 2. WatchFooty: Path-token replacement mechanism
+    // /secure/<NEW_TOKEN>/<FLAVOR>/<SLUG>/<NUM>/<MATCHID>/<NEW_EXPIRY>/<HELD_FILE>
+    if (provider === 'watchfooty' || fresh.pathname.includes('/secure/')) {
+      const freshDir = fresh.pathname.substring(0, fresh.pathname.lastIndexOf('/'));
+      const heldFile = held.pathname.substring(held.pathname.lastIndexOf('/') + 1) || 'playlist.m3u8';
+      const merged = new URL(freshUrl);
+      merged.pathname = `${freshDir}/${heldFile}`;
+      return merged.toString();
+    }
+
+    // 3. Streamed.pk / embed.st: Path-token replacement mechanism
+    if (provider === 'streamedpk' || provider === 'embedst' || fresh.pathname.includes('/rtmp/stream/')) {
+      const freshBase = fresh.pathname.replace(/\/playlist\.m3u8.*$/, '');
+      const heldSuffix = held.pathname.includes('/rtmp/stream/')
+        ? held.pathname.split(/\/rtmp\/stream\/[^/]+\/\d+\/?/)[1]
+        : '';
+      const merged = new URL(freshUrl);
+      if (heldSuffix && !heldSuffix.startsWith('playlist.m3u8')) {
+        merged.pathname = `${freshBase}/${heldSuffix}`;
+      }
+      return merged.toString();
+    }
+
+    // Generic fallback: preserve filename, update base directory & query
+    const heldParts = held.pathname.split('/');
+    const freshParts = fresh.pathname.split('/');
+    const dirCount = freshParts.length - 1;
+    const mergedParts = freshParts.slice(0, dirCount).concat(heldParts.slice(dirCount));
+    const merged = new URL(freshUrl);
+    merged.pathname = mergedParts.join('/');
+    return merged.toString();
+  } catch (_) {
+    return freshUrl;
   }
+}
 
 function getRemintCacheKey(rck, url) {
   if (!rck) return null;
   if (!url) return rck;
   try {
     const u = new URL(url);
-    const m = u.pathname.match(/\/(prime|sigma|alpha|delta|live|stream)\/[^/]+\/(\d+)\//i);
-    if (m) return `${rck}:${m[1].toLowerCase()}:${m[2]}`;
+    const provider = String(rck).split(':')[0]?.toLowerCase();
+
+    // 1. WatchFooty: Stable key based on flavor (any NATO/custom flavor) and stream number
+    if (provider === 'watchfooty' || u.pathname.includes('/secure/')) {
+      const wf = u.pathname.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/(\d+)\//i);
+      if (wf) return `${rck}:${wf[1].toLowerCase()}:${wf[2]}`;
+    }
+
+    // 2. DaddyLive: Stable key based on channel key in path
+    if (provider === 'daddylive' || u.pathname.includes('/hls/')) {
+      const dl = u.pathname.match(/\/hls\/([^/.]+)/i);
+      if (dl) return `${rck}:${dl[1]}`;
+    }
+
+    // 3. Streamed.pk / embed.st: Stable key based on stream number
+    if (provider === 'streamedpk' || provider === 'embedst' || u.pathname.includes('/rtmp/stream/')) {
+      const spk = u.pathname.match(/\/rtmp\/stream\/[^/]+\/(\d+)\//i);
+      if (spk) return `${rck}:${spk[1]}`;
+    }
+
+    // Generic fallback
     const parts = u.pathname.split('/').filter(Boolean);
     if (parts.length > 1) {
       return `${rck}:${parts.slice(0, parts.length - 1).join('/')}`;
@@ -829,11 +890,6 @@ function isExpiryStatus(err) {
 
 // Mint a fresh upstream URL for one source. Returns null when we cannot.
 // Never throws: a failed re-mint must degrade to the existing 404 behaviour.
-//
-// The key is `${source}:${matchId}:${srcId}`. matchId and srcId can themselves
-// contain colons, so the split point is ambiguous — instead of guessing, try each
-// candidate split and keep the one whose match+source actually resolve. Correct
-// splits are confirmed against the live cache, so a wrong guess is simply skipped.
 function rckCandidates(rck) {
   const parts = String(rck).split(':');
   if (parts.length < 3) return [];
@@ -855,7 +911,6 @@ async function attemptRemint(rck, heldUrl = '') {
     if (candidates.length === 0) return null;
 
     const matches = container.resolve('cacheService').getMatches();
-    // Resolve the ambiguous split by finding the candidate that actually exists.
     let resolved = null;
     for (const c of candidates) {
       const match = matches.find(m => m && m.id === c.matchId);
@@ -889,33 +944,51 @@ async function attemptRemint(rck, heldUrl = '') {
     }
     if (freshUrls.length === 0) return null;
 
-    // Match against currently held URL so we don't swap to an unrelated or broken sub-feed
+    const provider = String(rck).split(':')[0]?.toLowerCase();
+
+    // Match against currently held URL using provider-specific logic
     if (heldUrl) {
       try {
         const heldParsed = new URL(heldUrl);
         const heldPath = heldParsed.pathname;
 
-        // Match flavor and stream number (e.g. /prime/.../1/ or /sigma/.../2/)\
-        // WatchFooty pattern: /secure/TOKEN/FLAVOR/SLUG/NUM/EXPIRY/playlist.m3u8
-        const flavorMatch = heldPath.match(/\/(prime|sigma|alpha|delta|live|stream)\/[^/]+\/(\d+)\//i);
-        if (flavorMatch) {
-          const [, flavor, streamNum] = flavorMatch;
-          const matched = freshUrls.find(u => {
-            const up = new URL(u).pathname;
-            return up.includes(`/${flavor}/`) && up.includes(`/${streamNum}/`);
-          });
-          if (matched) return matched;
+        // 1. WatchFooty: Match by flavor (any NATO/custom flavor) and stream number
+        if (provider === 'watchfooty' || heldPath.includes('/secure/')) {
+          const wfMatch = heldPath.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/(\d+)\//i);
+          if (wfMatch) {
+            const [, flavor, streamNum] = wfMatch;
+            const matched = freshUrls.find(u => {
+              const up = new URL(u).pathname;
+              return up.toLowerCase().includes(`/${flavor.toLowerCase()}/`) && up.includes(`/${streamNum}/`);
+            });
+            if (matched) return matched;
 
-          // Match by flavor
-          const flavorMatched = freshUrls.find(u => new URL(u).pathname.includes(`/${flavor}/`));
-          if (flavorMatched) return flavorMatched;
+            const flavorMatched = freshUrls.find(u => new URL(u).pathname.toLowerCase().includes(`/${flavor.toLowerCase()}/`));
+            if (flavorMatched) return flavorMatched;
+          }
         }
 
-        // Segment overlap heuristic for other providers (e.g. strmd.st, embed.st).
-        // Strips hex tokens and pure numeric segments — this leaves slug words like
-        // the sport category and match-slug, which are stable across re-mints.
-        // We also score by stream-number match (/N/ suffix before filename) so
-        // stream 2 stays on stream 2 rather than slipping to stream 1.
+        // 2. DaddyLive: Match by channel key
+        if (provider === 'daddylive' || heldPath.includes('/hls/')) {
+          const dlMatch = heldPath.match(/\/hls\/([^/.]+)/i);
+          if (dlMatch) {
+            const channelKey = dlMatch[1];
+            const matched = freshUrls.find(u => new URL(u).pathname.includes(`/hls/${channelKey}`));
+            if (matched) return matched;
+          }
+        }
+
+        // 3. Streamed.pk / embed.st: Match by stream number
+        if (provider === 'streamedpk' || provider === 'embedst' || heldPath.includes('/rtmp/stream/')) {
+          const spkMatch = heldPath.match(/\/rtmp\/stream\/[^/]+\/(\d+)\//i);
+          if (spkMatch) {
+            const streamNum = spkMatch[1];
+            const matched = freshUrls.find(u => new URL(u).pathname.includes(`/${streamNum}/`));
+            if (matched) return matched;
+          }
+        }
+
+        // Fallback: Segment overlap heuristic
         const heldSegments = heldPath.split('/').filter(s => s.length > 2 && !/^[0-9a-fA-F_-]{16,}$/.test(s) && !/^\d+$/.test(s));
         const heldStreamNum = (heldPath.match(/\/(\d+)\/[^/]+$/) || [])[1] || null;
 
@@ -927,7 +1000,6 @@ async function attemptRemint(rck, heldUrl = '') {
           for (const seg of heldSegments) {
             if (cPath.includes(seg)) overlap++;
           }
-          // Bonus: stream number matches (strmd.st /N/ before filename)
           const candStreamNum = (cPath.match(/\/(\d+)\/[^/]+$/) || [])[1] || null;
           const numBonus = (heldStreamNum && candStreamNum && heldStreamNum === candStreamNum) ? 0.5 : 0;
           const score = overlap + numBonus;
@@ -1000,7 +1072,7 @@ app.get('/api/manifest', async (req, res) => {
           const subKey = getRemintCacheKey(rck, effectiveUrl);
           const cached = (subKey ? remintCache.get(subKey) : null) || remintCache.get(rck);
           if (cached && Date.now() < cached.expiresAt) {
-            effectiveUrl = mergeRemintedUrl(effectiveUrl, cached.freshUrl);
+            effectiveUrl = mergeRemintedUrl(effectiveUrl, cached.freshUrl, rck);
             reminted = true;
           }
         }
@@ -1018,7 +1090,7 @@ app.get('/api/manifest', async (req, res) => {
           remintCache.set(rck, { freshUrl: fresh, expiresAt: Date.now() + 15 * 60 * 1000 });
           
           // Preserve the variant the player asked for (see mergeRemintedUrl).
-          effectiveUrl = mergeRemintedUrl(targetUrl, fresh);
+          effectiveUrl = mergeRemintedUrl(targetUrl, fresh, rck);
           reminted = true;
           out = await fetchUpstreamManifest(effectiveUrl, referer, origin);
         }
