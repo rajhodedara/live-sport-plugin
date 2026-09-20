@@ -48,42 +48,50 @@ function escapeXml(s) {
     .replace(/'/g, '&apos;');
 }
 
+const { generateSportSvg, generateDateSvg } = require('./MinimalistPosterService');
+
 /**
- * Generated poster card: dark background, category-colored accent bar and the
- * title split across up to three centered lines. Replaces placehold.co.
+ * Generated minimalist poster card: balanced, modern dark slate background,
+ * refined category accent, and clean typography. Replaces high-contrast dark imagery.
  */
-function svgPlaceholder(text, color, w = 800, h = 450) {
-  const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
+function svgPlaceholder(text, color, w = 800, h = 450, shape = 'landscape') {
+  if (shape === 'poster') {
+    w = 600;
+    h = 900;
+  }
+  const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#3b82f6';
   const rawLines = String(text || 'Live Sports').split('\n').map(l => l.trim()).filter(Boolean).slice(0, 3);
   const lines = rawLines.length ? rawLines : ['Live Sports'];
-  const fontSize = lines.length >= 3 ? 38 : lines.length === 2 ? 46 : 54;
+  const isPoster = h > w;
+  const fontSize = isPoster 
+    ? (lines.length >= 3 ? 28 : lines.length === 2 ? 34 : 40)
+    : (lines.length >= 3 ? 32 : lines.length === 2 ? 40 : 48);
   const startY = h / 2 - ((lines.length - 1) * (fontSize + 12)) / 2 + fontSize * 0.35;
+  const maxChars = isPoster ? 18 : 26;
   const textEls = lines.map((line, i) => {
     let l = line;
-    if (l.length > 26) l = l.slice(0, 25) + '…';
+    if (l.length > maxChars) l = l.slice(0, maxChars - 1) + '…';
     const y = startY + i * (fontSize + 12);
-    return `<text x="50%" y="${y.toFixed(1)}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="${fontSize}" font-weight="700" fill="#ffffff" text-anchor="middle" dominant-baseline="middle" filter="url(#textShadow)">${escapeXml(l)}</text>`;
+    return `<text x="50%" y="${y.toFixed(1)}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="${fontSize}" font-weight="700" letter-spacing="1.5" fill="#f8fafc" text-anchor="middle" dominant-baseline="middle">${escapeXml(l)}</text>`;
   }).join('\n  ');
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
   <defs>
     <linearGradient id="holderBg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#181b22"/>
-      <stop offset="50%" stop-color="#101217"/>
-      <stop offset="100%" stop-color="#08090c"/>
+      <stop offset="0%" stop-color="#141a29"/>
+      <stop offset="60%" stop-color="#0d111c"/>
+      <stop offset="100%" stop-color="#080a11"/>
     </linearGradient>
     <radialGradient id="holderSpot" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.08"/>
-      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.02"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.45"/>
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.01"/>
+      <stop offset="100%" stop-color="transparent"/>
     </radialGradient>
-    <filter id="textShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000000" flood-opacity="0.7"/>
-    </filter>
   </defs>
   <rect width="${w}" height="${h}" fill="url(#holderBg)"/>
   <rect width="${w}" height="${h}" fill="url(#holderSpot)"/>
-  <rect x="0" y="0" width="${w}" height="4" fill="${bg}"/>
-  <rect x="0" y="${h - 4}" width="${w}" height="4" fill="${bg}"/>
+  <rect x="1.5" y="1.5" width="${w - 3}" height="${h - 3}" rx="12" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
+  <rect x="${(w - 60) / 2}" y="10" width="60" height="3" rx="1.5" fill="${bg}" opacity="0.85"/>
   ${textEls}
 </svg>`;
 }
@@ -186,8 +194,18 @@ function proxyUrl(baseUrl, sourceUrl, { text = '', color = '333333', embed = fal
   return url;
 }
 
-function placeholderUrl(baseUrl, text, color) {
-  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '333333'}`;
+function placeholderUrl(baseUrl, text, color, shape = 'landscape') {
+  return `${baseUrl}/img/placeholder?text=${encodeURIComponent(text || '')}&color=${color || '3b82f6'}&shape=${shape}`;
+}
+
+function sportPosterUrl(baseUrl, sport, shape = 'poster') {
+  return `${baseUrl}/img/sport/${encodeURIComponent(sport)}?shape=${shape}`;
+}
+
+function datePosterUrl(baseUrl, displayDate, count = 0, sportKey = null, shape = 'poster') {
+  let url = `${baseUrl}/img/date?date=${encodeURIComponent(displayDate)}&count=${encodeURIComponent(count)}&shape=${shape}`;
+  if (sportKey) url += `&sport=${encodeURIComponent(sportKey)}`;
+  return url;
 }
 
 module.exports = {
@@ -195,5 +213,9 @@ module.exports = {
   getImage,
   proxyUrl,
   placeholderUrl,
+  sportPosterUrl,
+  datePosterUrl,
+  generateSportSvg,
+  generateDateSvg,
   normalizeUrl
 };

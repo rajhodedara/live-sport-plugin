@@ -53,7 +53,8 @@
   "jest": {
     "testPathIgnorePatterns": [
       "/node_modules/",
-      "<rootDir>/nuvio-proxy-2/"
+      "/test-scripts/",
+      "/scratch/"
     ]
   },
   "overrides": {

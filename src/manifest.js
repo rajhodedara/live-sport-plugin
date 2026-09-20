@@ -24,10 +24,39 @@ const manifest = {
       { name: 'search', isRequired: false }
     ] },
     { type: 'tv', id: 'nuvio_sports_networks', name: '📺 24/7 Live TV', extra: [{ name: 'search', isRequired: false }] },
-    { type: 'series', id: 'nuvio_sports_replays', name: '⏪ Sports Replays', extra: [
-      { name: 'genre', options: ['Football', 'Cricket', 'Basketball', 'Motorsport', 'Tennis', 'Baseball', 'Hockey', 'Rugby', 'American Football', 'MMA', 'Other'], isRequired: false },
-      { name: 'search', isRequired: false }
-    ] },
+    { type: 'tv', id: 'nuvio_sports_replays', name: '⏪ Sports Replays', extra: [{ name: 'skip', isRequired: true }] },
+    
+    // Football Sub-catalogs for Collections
+    { type: 'tv', id: 'nuvio_sports_replays_football', name: '⚽ Football Replays', extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_today', name: "📅 Today's Replays", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_yesterday', name: "📅 Yesterday's Replays", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_this_week', name: "📅 This Week's Replays", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_older', name: "📅 Older Replays", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_premier_league', name: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_football_ucl', name: "⭐ Champions League", extra: [{ name: 'skip', isRequired: true }] },
+
+    // Motorsport Sub-catalogs for Collections
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport', name: '🏎️ Motorsport Replays', extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport_today', name: "📅 Today's Races", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport_yesterday', name: "📅 Yesterday's Races", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport_this_week', name: "📅 This Week's Races", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport_older', name: "📅 Older Races", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_motorsport_f1', name: "🏎️ Formula 1", extra: [{ name: 'skip', isRequired: true }] },
+
+    // Baseball Sub-catalogs for Collections
+    { type: 'tv', id: 'nuvio_sports_replays_baseball', name: '⚾ Baseball Replays', extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_baseball_today', name: "📅 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_baseball_yesterday', name: "📅 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_baseball_this_week', name: "📅 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_baseball_older', name: "📅 Older Games", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_baseball_mlb', name: "⚾ MLB", extra: [{ name: 'skip', isRequired: true }] },
+
+    // Rugby Sub-catalogs for Collections
+    { type: 'tv', id: 'nuvio_sports_replays_rugby', name: '🏉 Rugby Replays', extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_rugby_today', name: "📅 Today's Matches", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_rugby_yesterday', name: "📅 Yesterday's Matches", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_rugby_this_week', name: "📅 This Week's Matches", extra: [{ name: 'skip', isRequired: true }] },
+    { type: 'tv', id: 'nuvio_sports_replays_rugby_older', name: "📅 Older Matches", extra: [{ name: 'skip', isRequired: true }] },
 
     { type: 'tv', id: 'nuvio_sports_football', name: '⚽ Soccer', extra: [{ name: 'search', isRequired: false }] },
     { type: 'tv', id: 'nuvio_sports_cricket', name: '🏏 Cricket', extra: [{ name: 'search', isRequired: false }] },

@@ -12,7 +12,6 @@ const TimStreamsProvider = require('./providers/TimStreamsProvider');
 const WatchFootyProvider = require('./providers/WatchFootyProvider');
 const CdnLiveProvider = require('./providers/CdnLiveProvider');
 const StreamSports99Provider = require('./providers/StreamSports99Provider');
-const StreamicProvider = require('./providers/StreamicProvider');
 const EmbedIndiaProvider = require('./providers/EmbedIndiaProvider');
 const EmbedStProvider = require('./providers/EmbedStProvider');
 const StreamedPkProvider = require('./providers/StreamedPkProvider');
@@ -50,7 +49,6 @@ container.register({
   watchFootyProvider: asClass(WatchFootyProvider).singleton(),
   cdnLiveProvider: asClass(CdnLiveProvider).singleton(),
   streamSports99Provider: asClass(StreamSports99Provider).singleton(),
-  streamicProvider: asClass(StreamicProvider).singleton(),
   embedIndiaProvider: asClass(EmbedIndiaProvider).singleton(),
   embedStProvider: asClass(EmbedStProvider).singleton(),
   streamedPkProvider: asClass(StreamedPkProvider).singleton(),

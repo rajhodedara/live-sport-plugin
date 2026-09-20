@@ -205,7 +205,7 @@ app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.j
   const collections = generateCollections(reqBaseUrl, config);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json(collections);
 });
 
@@ -244,10 +244,23 @@ app.get('/api/matches', (req, res) => {
 const imageService = require('./services/ImageService');
 
 app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res) => {
-  const sport = (req.params.sport || 'football').toLowerCase();
-  const svg = imageService.generateSportSvg(sport, 'landscape', {
-    badge: 'REPLAYS'
-  });
+  const sport = (req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '');
+  const candidatePaths = [
+    path.join(__dirname, '..', 'public', 'posters', 'collections', `${sport}.jpg`),
+    path.join(__dirname, 'public', 'posters', 'collections', `${sport}.jpg`),
+    path.join(process.cwd(), 'public', 'posters', 'collections', `${sport}.jpg`),
+    path.join(process.cwd(), 'dist', 'public', 'posters', 'collections', `${sport}.jpg`)
+  ];
+  for (const p of candidatePaths) {
+    if (fs.existsSync(p)) {
+      res.setHeader('Content-Type', 'image/jpeg');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+      return res.sendFile(p);
+    }
+  }
+  const svg = imageService.generateSportSvg(sport, 'landscape', { badge: 'REPLAYS' });
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');

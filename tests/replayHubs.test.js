@@ -44,7 +44,7 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     const res = await handleCatalog('series', 'nuvio_sports_replays', {}, {});
     expect(res).toBeDefined();
     expect(Array.isArray(res.metas)).toBe(true);
-    expect(res.metas.length).toBeGreaterThanOrEqual(11);
+    expect(res.metas.length).toBeGreaterThanOrEqual(5);
 
     // Verify Sport Hub posters
     const fbHub = res.metas.find(m => m.id === 'nuvio_sport_replay_football');
@@ -104,11 +104,12 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     expect(streamRes.streams[0].title).toContain('ReplayZone');
   });
 
-  test('generateCollections returns valid Nuvio Collections schema with 10 Landscape folders', () => {
+  test('generateCollections returns valid Nuvio Collections schema with 4 Landscape folders', () => {
     const { generateCollections, FOLDER_DEFINITIONS } = require('../src/collections');
     const collections = generateCollections('http://localhost:7000', 'testConfig');
     expect(Array.isArray(collections)).toBe(true);
     expect(collections.length).toBe(1);
+    expect(FOLDER_DEFINITIONS.length).toBe(4);
 
     const c = collections[0];
     expect(c.id).toBe('collection-sports-replays');
@@ -138,7 +139,8 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     expect(catRes.metas.length).toBe(2);
     expect(catRes.metas[0].id).toBe('nuvio_sport_rz_match_fb_1');
     expect(catRes.metas[0].name).toContain('Arsenal vs Chelsea');
-    expect(catRes.metas[0].posterShape).toBe('regular');
+    expect(catRes.metas[0].type).toBe('tv');
+    expect(catRes.metas[0].posterShape).toBe('landscape');
 
     const premierRes = await handleCatalog('tv', 'nuvio_sports_replays_football_premier_league', {}, {});
     expect(premierRes.metas.length).toBe(1);
@@ -148,23 +150,29 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     const date18Res = await handleCatalog('tv', 'nuvio_sports_replays_football_date_2026-09-18', {}, {});
     expect(date18Res.metas.length).toBe(1);
     expect(date18Res.metas[0].id).toBe('nuvio_sport_rz_match_fb_1');
+    expect(date18Res.metas[0].type).toBe('tv');
+    expect(date18Res.metas[0].posterShape).toBe('landscape');
     expect(date18Res.metas[0].name).toContain('Arsenal vs Chelsea');
 
     const date17Res = await handleCatalog('tv', 'nuvio_sports_replays_football_date_2026-09-17', {}, {});
     expect(date17Res.metas.length).toBe(1);
     expect(date17Res.metas[0].id).toBe('nuvio_sport_rz_match_fb_2');
+    expect(date17Res.metas[0].type).toBe('tv');
     expect(date17Res.metas[0].name).toContain('Real Madrid vs Barcelona');
   });
 
-  test('generateCollections produces date-wise catalog rows for sport replay folders', () => {
+  test('generateCollections produces rolling relative date rows and competition rows for sport replay folders', () => {
     const { generateCollections } = require('../src/collections');
     const collections = generateCollections('http://localhost:7000', 'testConfig');
     const fbFolder = collections[0].folders.find(f => f.id === 'folder-football-replays');
     expect(fbFolder).toBeDefined();
 
     const catIds = fbFolder.catalogSources.map(c => c.catalogId);
-    expect(catIds).toContain('nuvio_sports_replays_football_date_2026-09-18');
-    expect(catIds).toContain('nuvio_sports_replays_football_date_2026-09-17');
+    expect(catIds).toContain('nuvio_sports_replays_football_today');
+    expect(catIds).toContain('nuvio_sports_replays_football_yesterday');
+    expect(catIds).toContain('nuvio_sports_replays_football_this_week');
+    expect(catIds).toContain('nuvio_sports_replays_football_premier_league');
+    expect(catIds).toContain('nuvio_sports_replays_football_older');
     expect(catIds).toContain('nuvio_sports_replays_football');
   });
 

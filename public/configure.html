@@ -287,11 +287,10 @@
       <div class="sports-grid" id="sourcesGrid">
         <label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label>
         <label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label>
-        <label class="checkbox-label active"><input type="checkbox" value="sportyhunter" checked> 📺 SportyHunter</label>
+        <label class="checkbox-label active"><input type="checkbox" value="daddylive" checked> 📺 DaddyLive</label>
         <label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label>
         <label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label>
         <label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamic" checked> 🌐 Streamic</label>
       </div>
     </div>
 
@@ -512,6 +511,7 @@
 
     let currentManifestUrl = '';
     let currentCollectionsUrl = '';
+    let effectiveOrigin = window.location.origin;
 
     function updateLink() {
       const teams = input.value.trim();
@@ -524,9 +524,9 @@
         tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
       }
 
-      let manifestUrl = window.location.origin + '/manifest.json';
-      let collectionsUrl = window.location.origin + '/collections.json';
-      let downloadUrl = window.location.origin + '/api/collections/download';
+      let manifestUrl = effectiveOrigin + '/manifest.json';
+      let collectionsUrl = effectiveOrigin + '/collections.json';
+      let downloadUrl = effectiveOrigin + '/api/collections/download';
 
       const config = {};
       if (teams) config.teams = teams;
@@ -623,7 +623,8 @@
         const originalText = copyCollectionsBtn.innerText;
         copyCollectionsBtn.innerText = 'FETCHING JSON...';
         try {
-          const res = await fetch(currentCollectionsUrl);
+          const fetchUrl = currentCollectionsUrl + (currentCollectionsUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
+          const res = await fetch(fetchUrl, { cache: 'no-store' });
           const jsonText = await res.text();
           let ok = false;
           if (navigator.clipboard && window.isSecureContext) {
@@ -658,6 +659,18 @@
     });
     
     updateLink();
+
+    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+      fetch('/api/server-info')
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.baseUrl) {
+            effectiveOrigin = data.baseUrl;
+            updateLink();
+          }
+        })
+        .catch(() => {});
+    }
   </script>
 </body>
 

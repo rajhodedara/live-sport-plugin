@@ -63,6 +63,9 @@ function getRequestBaseUrl(req) {
   }
 
   if (host) {
+    if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
+      return BASE_URL;
+    }
     return `${proto}://${host}`.replace(/\/$/, '');
   }
 

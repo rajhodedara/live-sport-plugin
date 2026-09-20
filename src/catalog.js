@@ -43,14 +43,8 @@ const DEFAULT_EVENT_DURATION_MS = 12 * 60 * 60 * 1000;
 const REPLAY_SPORTS = [
   { id: 'football',          name: '⚽ Football Replays',          poster: '/posters/replays/football.jpg' },
   { id: 'motorsport',        name: '🏎️ Motorsport Replays',        poster: '/posters/replays/motorsport.jpg' },
-  { id: 'basketball',        name: '🏀 Basketball Replays',        poster: '/posters/replays/basketball.jpg' },
   { id: 'baseball',          name: '⚾ Baseball Replays',          poster: '/posters/replays/baseball.jpg' },
   { id: 'rugby',             name: '🏉 Rugby Replays',             poster: '/posters/replays/rugby.jpg' },
-  { id: 'american_football', name: '🏈 American Football Replays', poster: '/posters/replays/american_football.jpg' },
-  { id: 'hockey',            name: '🏒 Hockey Replays',            poster: '/posters/replays/hockey.jpg' },
-  { id: 'cricket',           name: '🏏 Cricket Replays',           poster: '/posters/replays/cricket.jpg' },
-  { id: 'tennis',            name: '🎾 Tennis Replays',            poster: '/posters/replays/tennis.jpg' },
-  { id: 'mma',               name: '🥊 MMA & Fighting Replays',    poster: '/posters/replays/mma.jpg' },
   { id: 'all',               name: '⏪ All Sports Replays',        poster: '/posters/replays/football.jpg' }
 ];
 
@@ -377,11 +371,11 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
         : (isReplay ? `⏪ Replay (${replayReleaseInfo})` : `⏱️ Kickoff at ${timeString}${relativeTimeStr}`));
   const desc = `${leagueStr}📅 Category: ${match.category.toUpperCase()}\n⏰ Status: ${statusStr}`;
 
-  const isSeriesReplay = reqType === 'series' || isReplay;
+  const isSeriesReplay = reqType === 'series';
 
   const metaPreview = {
     id: `nuvio_sport_${match.id}`,
-    type: isSeriesReplay ? 'series' : reqType,
+    type: reqType,
     name: `${prefix}${match.title}`,
     genres: [match.category.toUpperCase()],
     poster: poster,
@@ -673,8 +667,8 @@ async function buildReplayHubMeta(id, config = {}) {
 async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   const sub = id.replace('nuvio_sports_replays_', '');
   
-  // Known sports
-  const sports = ['football', 'motorsport', 'basketball', 'baseball', 'rugby', 'american_football', 'hockey', 'cricket', 'tennis', 'mma'];
+  // Known sports for replays
+  const sports = ['football', 'motorsport', 'baseball', 'rugby'];
   let targetSport = sports.find(s => sub === s || sub.startsWith(s + '_')) || 'other';
   let filterType = sub.replace(targetSport, '').replace(/^_/, ''); // e.g. '', 'recent', 'premier_league', 'ucl', 'f1', 'nba', 'mlb'
 
@@ -705,6 +699,26 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   if (dateMatch) {
     const targetDate = dateMatch[1];
     matches = matches.filter(m => m.date && m.date.startsWith(targetDate));
+  } else if (filterType === 'today') {
+    const todayStr = new Date().toISOString().slice(0, 10);
+    matches = matches.filter(m => m.date && m.date.startsWith(todayStr));
+  } else if (filterType === 'yesterday') {
+    const yDate = new Date(Date.now() - 86400000);
+    const yesterdayStr = yDate.toISOString().slice(0, 10);
+    matches = matches.filter(m => m.date && m.date.startsWith(yesterdayStr));
+  } else if (filterType === 'this_week') {
+    const twoDaysAgo = Date.now() - 2 * 86400000;
+    const sevenDaysAgo = Date.now() - 7 * 86400000;
+    matches = matches.filter(m => {
+      const ko = m.date ? getKickoff(m.date) : 0;
+      return ko <= twoDaysAgo && ko >= sevenDaysAgo;
+    });
+  } else if (filterType === 'older') {
+    const sevenDaysAgo = Date.now() - 7 * 86400000;
+    matches = matches.filter(m => {
+      const ko = m.date ? getKickoff(m.date) : 0;
+      return ko < sevenDaysAgo;
+    });
   } else if (filterType === 'recent') {
     const twoWeeksAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
     const recent = matches.filter(m => {
@@ -968,7 +982,7 @@ async function handleCatalog(type, id, extra, config) {
     return { metas: [...hubMetas, ...dateMetas] };
   }
 
-  let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf, isReplayMode ? 'series' : type));
+  let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf, type));
 
   // ── Genre filter (Replays / Live Now / Upcoming) ──────────────────────────
   const GENRE_FILTERABLE = { replays: 1, live: 1, upcoming: 1 };
@@ -1042,7 +1056,7 @@ async function handleMeta(type, id, config) {
     }
   } catch (_) {}
 
-  const effectiveType = isReplayMatch(match) ? 'series' : type;
+  const effectiveType = type === 'series' ? 'series' : 'tv';
   return { meta: mapMatchToMetaPreview(match, config || {}, effectiveType) };
 }
 

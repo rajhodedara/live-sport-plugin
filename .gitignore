@@ -3,6 +3,8 @@ node_modules/
 *.log
 .DS_Store
 scratch/
+scratch_pup/
+test-scripts/
 cloudflared.exe
 *.exe
 
