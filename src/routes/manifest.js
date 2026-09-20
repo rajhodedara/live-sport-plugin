@@ -15,22 +15,7 @@ const {
 const {
   readRck, getRemintCacheKey, remintCache, mergeRemintedUrl, isExpiryStatus, attemptRemint
 } = require('../remint');
-
-// ─── Cloudflare Worker Pool (.image only) ─────────────────────────────────────
-// Used EXCLUSIVELY for Streamed.pk / TikTok CDN .image segments.
-// Each worker strips the 42-byte fake WebP/RIFF header in-flight at the edge.
-// All other traffic goes direct or through /api/hlschunk as before.
-const CF_IMAGE_WORKER_POOL = [
-  'https://nuvio-proxy.odedararaj456.workers.dev',
-  'https://nuvio-proxy2.rajodedara360.workers.dev',
-  'https://nuvio-proxy3.raj-odedara.workers.dev',
-  'https://spring-brook-5c1e.rajodedara456.workers.dev',
-  'https://falling-unit-ffa6.rajcfproxy1.workers.dev',
-];
-function getCfImageWorker() {
-  if (!CF_IMAGE_WORKER_POOL.length) return null;
-  return CF_IMAGE_WORKER_POOL[Math.floor(Math.random() * CF_IMAGE_WORKER_POOL.length)];
-}
+const { rewriteHlsUri } = require('../services/HlsRewriteService');
 
 router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
@@ -149,51 +134,7 @@ router.get('/api/manifest', async (req, res) => {
               return resultLine;
           }
 
-          let absoluteUrl = l;
-          try {
-            const chunkUrl = new URL(l, effectiveUrl);
-            const manifestUrl = new URL(effectiveUrl);
-
-            manifestUrl.searchParams.forEach((val, key) => {
-              if (!chunkUrl.searchParams.has(key)) {
-                chunkUrl.searchParams.set(key, val);
-              }
-            });
-            absoluteUrl = chunkUrl.toString();
-          } catch (err) {
-            absoluteUrl = l;
-          }
-
-          if (absoluteUrl.includes('.m3u8')) {
-            return `/api/manifest?url=${encodeURIComponent(absoluteUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${rckSuffix}`;
-          }
-
-          // .image = Streamed.pk / TikTok CDN — has a real 42-byte fake WebP/RIFF header
-          // that must be stripped before the player sees MPEG-TS. Route to CF worker (edge strip).
-          // Fallback to /api/hlschunk if no CF worker configured.
-          const needsUnwrapping = absoluteUrl.includes('.image');
-          if (needsUnwrapping) {
-            const cfWorker = getCfImageWorker();
-            if (cfWorker) {
-              let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
-              if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
-              if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
-              return workerChunkUrl;
-            }
-            // fallback: strip on server
-            let chunkUrl = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
-            if (referer) chunkUrl += `&referer=${encodeURIComponent(referer)}`;
-            return chunkUrl;
-          }
-
-          // WatchFooty / Alibaba / R2 / Tencent: pure MPEG-TS with disguised extension (.png, .webp, .js)
-          // No header wrapper — starts with 0x47 byte 0. Just append #.ts hint for naive parsers.
-          const isPureDisguisedTs = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js');
-          if (isPureDisguisedTs && !absoluteUrl.includes('.ts')) {
-            return absoluteUrl + '#.ts';
-          }
-
-          return absoluteUrl;
+          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix });
         });
 
         const rewrittenResult = rewritten.join('\n');

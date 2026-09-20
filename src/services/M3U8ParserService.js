@@ -134,6 +134,40 @@ class M3U8ParserService {
       return null;
     }
   }
+
+  /**
+   * Synchronously parse a media playlist for speed-probe inputs: the
+   * playlist's target duration and its first segment (URI + EXTINF duration).
+   * Media playlists (single rendition, no #EXT-X-STREAM-INF) are what our
+   * providers actually serve, so this — not parseManifestText — is the input
+   * the speed probe relies on.
+   */
+  parseMediaPlaylistInfo(manifestText) {
+    if (!manifestText || !manifestText.includes('#EXT')) return null;
+    try {
+      const parser = new m3u8Parser.Parser();
+      parser.push(manifestText);
+      parser.end();
+
+      const segments = parser.manifest.segments || [];
+      const firstSegment = segments.find((seg) => seg && seg.uri);
+      if (!firstSegment) {
+        return {
+          targetDuration: parser.manifest.targetDuration || null,
+          firstSegmentUri: null,
+          firstSegmentDuration: null,
+        };
+      }
+
+      return {
+        targetDuration: parser.manifest.targetDuration || null,
+        firstSegmentUri: firstSegment.uri,
+        firstSegmentDuration: firstSegment.duration || null,
+      };
+    } catch (e) {
+      return null;
+    }
+  }
 }
 
 module.exports = M3U8ParserService;

@@ -1,6 +1,9 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
+const { rewriteHlsUri } = require('./services/HlsRewriteService');
+const { BASE_URL } = require('./config');
+const { performance } = require('perf_hooks');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -160,6 +163,12 @@ const VERIFY_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 5000);
 const VERIFY_TOTAL_BUDGET_MS = Number(process.env.VERIFY_TOTAL_BUDGET_MS || 9000);
 const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
 
+// Speed probe: one ranged segment fetch per stream, used to derive speedScore.
+// The range must be large enough that transfer time dominates TTFB, otherwise
+// the measured rate just reflects latency instead of throughput.
+const SPEED_PROBE_TIMEOUT_MS = Number(process.env.SPEED_PROBE_TIMEOUT_MS || 5000);
+const SPEED_PROBE_RANGE_BYTES = Number(process.env.SPEED_PROBE_RANGE_BYTES || 524288);
+
 // Proxied /api/manifest URLs wrap an upstream token that expires on its own
 // schedule. Tag the URL with the resolve-cache key that produced it so the
 // manifest proxy can evict that entry the moment upstream reports it dead,
@@ -170,6 +179,136 @@ function withResolveKey(url, cacheKey) {
   if (!url.includes('/api/manifest?')) return url;
   if (/[?&]rck=/.test(url)) return url;
   return url + '&rck=' + encodeURIComponent(cacheKey);
+}
+
+// ─── Speed scoring ───────────────────────────────────────────────────────────
+
+function parseManifestProxyUrl(rawUrl) {
+  try {
+    const urlObj = new URL(rawUrl, 'http://localhost');
+    if (!urlObj.pathname.includes('/api/manifest')) return null;
+    return {
+      targetUrl: urlObj.searchParams.get('url') || rawUrl,
+      referer: urlObj.searchParams.get('referer') || '',
+      origin: urlObj.searchParams.get('origin') || '',
+    };
+  } catch (_) {
+    return null;
+  }
+}
+
+// Build the exact URL the player would fetch for this segment, so the probe
+// measures the real playback path (CF worker / hlschunk / direct) and not a
+// shortcut that bypasses it.
+function buildPlayerSegmentUrl(segmentUri, manifestUrl, referer, origin) {
+  return rewriteHlsUri(segmentUri, manifestUrl, { referer, origin, absoluteAddonBaseUrl: BASE_URL });
+}
+
+/**
+ * Total object size from a Content-Range header ("bytes 0-65535/4084906").
+ * Returns null when absent — a partial byte count cannot yield a valid
+ * implied bitrate, so callers must skip scoring in that case.
+ */
+function getContentRangeTotal(headers) {
+  try {
+    const raw = headers && typeof headers.get === 'function' ? headers.get('content-range') : null;
+    const match = raw && raw.match(/\/(\d+)$/);
+    return match ? Number(match[1]) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * 0-100 speed score blending throughput headroom (75%) with latency (25%).
+ * headroom = implied bitrate / measured download rate: 1.0 means the link can
+ * only just sustain realtime playback, so >=2 is comfortable.
+ */
+function calculateSpeedScore({ segmentTtfbMs, measuredDownloadRate, impliedBitrate }) {
+  if (!measuredDownloadRate || !impliedBitrate) return null;
+  const headroom = impliedBitrate / measuredDownloadRate;
+  const throughputScore = Math.max(0, Math.min(100, Math.round((1 / Math.max(headroom, 0.01)) * 35 + 35)));
+  const latencyScore = Math.max(0, Math.min(100, Math.round(100 - (segmentTtfbMs / 25))));
+  return Math.max(0, Math.min(100, Math.round((throughputScore * 0.75) + (latencyScore * 0.25))));
+}
+
+/**
+ * Best-effort probe of one segment. Never throws and never drops the stream:
+ * a missing/slow/failed probe just leaves speedScore unset.
+ *
+ * deadlineAt is the shared verify deadline, so the probe cannot extend the
+ * whole verification with a fresh timeout tail of its own.
+ */
+async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, origin, m3u8Parser, deadlineAt) {
+  try {
+    const timeLeft = deadlineAt ? deadlineAt - Date.now() : SPEED_PROBE_TIMEOUT_MS;
+    if (timeLeft < 250) return;
+
+    const info = m3u8Parser && typeof m3u8Parser.parseMediaPlaylistInfo === 'function'
+      ? m3u8Parser.parseMediaPlaylistInfo(manifestText)
+      : null;
+
+    if (info && info.targetDuration) {
+      stream.targetDuration = info.targetDuration;
+    }
+    if (!info || !info.firstSegmentUri || !info.firstSegmentDuration) return;
+
+    const segmentUrl = buildPlayerSegmentUrl(info.firstSegmentUri, manifestUrl, referer, origin);
+    const controller = new AbortController();
+    const probeTimeoutMs = Math.max(1, Math.min(SPEED_PROBE_TIMEOUT_MS, timeLeft - 150));
+    const timer = setTimeout(() => controller.abort(), probeTimeoutMs);
+    const probeHeaders = {
+      'Range': `bytes=0-${Math.max(0, SPEED_PROBE_RANGE_BYTES - 1)}`,
+    };
+    if (referer) probeHeaders['Referer'] = referer;
+    if (origin) probeHeaders['Origin'] = origin;
+
+    try {
+      const start = performance.now();
+      const response = await withRetry(
+        () => fetch(segmentUrl, { signal: controller.signal, headers: probeHeaders }),
+        {
+          attempts: 1,
+          deadlineAt,
+          label: 'speed-probe',
+        }
+      );
+      const headersAt = performance.now();
+      if (!response || !response.ok) return;
+      const bytes = Buffer.byteLength(Buffer.from(await response.arrayBuffer()));
+      const end = performance.now();
+      const segmentBytes = getContentRangeTotal(response.headers);
+      if (!segmentBytes) return;
+      // Exclude TTFB from the rate denominator: with a small ranged read the
+      // body lands almost instantly, so including connect+first-byte latency
+      // would make the "rate" a latency measurement and understate fast links.
+      const transferSeconds = Math.max((end - headersAt) / 1000, 0.001);
+      const measuredDownloadRate = (bytes * 8) / transferSeconds;
+      const impliedBitrate = (segmentBytes * 8) / info.firstSegmentDuration;
+      const speedScore = calculateSpeedScore({
+        segmentTtfbMs: headersAt - start,
+        measuredDownloadRate,
+        impliedBitrate,
+      });
+
+      if (speedScore === null) return;
+      stream.speedScore = speedScore;
+      stream.segmentTtfbMs = Math.round(headersAt - start);
+      stream.downloadMbps = Math.round((measuredDownloadRate / 1000000) * 10) / 10;
+      stream.targetDuration = info.targetDuration || stream.targetDuration || null;
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    console.log(`[SpeedProbe] Skipped stream timing: ${err.message}`);
+  }
+}
+
+function getSpeedLabel(speedScore) {
+  if (typeof speedScore !== 'number') return null;
+  if (speedScore >= 75) return 'Fast';
+  if (speedScore >= 45) return 'Average';
+  return 'Slow';
 }
 
 
@@ -189,18 +328,12 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
     let origin = '';
     // If the stream is routed through our manifest proxy, we extract the true upstream URL to ping
     if (targetUrl.includes('/api/manifest')) {
-      try {
-        const urlObj = new URL('http://localhost' + targetUrl);
-        if (urlObj.searchParams.has('url')) {
-          targetUrl = urlObj.searchParams.get('url');
-        }
-        if (urlObj.searchParams.has('referer')) {
-          referer = urlObj.searchParams.get('referer');
-        }
-        if (urlObj.searchParams.has('origin')) {
-          origin = urlObj.searchParams.get('origin');
-        }
-      } catch (e) {}
+      const proxyInfo = parseManifestProxyUrl(targetUrl);
+      if (proxyInfo) {
+        targetUrl = proxyInfo.targetUrl;
+        referer = proxyInfo.referer;
+        origin = proxyInfo.origin;
+      }
     }
 
     try {
@@ -332,6 +465,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
         if (parsedQuality.resolution) s.resolution = parsedQuality.resolution;
         if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
       }
+
+      await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
@@ -555,7 +690,9 @@ async function handleStream(type, id, config) {
     }
     
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
-    s.title = `${icon} ${providerName}${channelDisplay}\n📺 Quality: ${quality}${viewersText}`;
+    const speedLabel = getSpeedLabel(s.speedScore);
+    const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
+    s.title = `${icon} ${providerName}${channelDisplay}\n📺 Quality: ${quality}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};

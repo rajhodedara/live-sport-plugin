@@ -4,6 +4,10 @@
 // path, so a transient answer must not be treated as proof that a stream is
 // dead. Before the retry policy, one ECONNRESET or one 503 dropped a working
 // stream AND negative-cached it, leaving the user with no source for minutes.
+//
+// Second behaviour: verifyStreams also runs a best-effort speed probe (one
+// ranged segment fetch). It must enrich streams with speed metrics when it can,
+// and must never drop or break a stream when it cannot.
 
 jest.mock('../src/impitClient', () => ({
   safeFetch: jest.fn(),
@@ -13,8 +17,9 @@ jest.mock('../src/impitClient', () => ({
 
 const { safeFetch } = require('../src/impitClient');
 const { verifyStreams } = require('../src/streams');
+const M3U8ParserService = require('../src/services/M3U8ParserService');
 
-const PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXTINF:4.0,\nseg0.ts\n';
+const PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:4.0,\nseg0.ts\n';
 
 const ok = (body = PLAYLIST) => ({ status: 200, text: async () => body });
 const status = (code) => ({ status: code, text: async () => 'error' });
@@ -26,9 +31,8 @@ const stream = (url = 'https://edge.example/live.m3u8') => ({
   behaviorHints: { proxyHeaders: { request: { Referer: 'https://embed.st/' } } },
 });
 
-// Minimal collaborators: the parser only enriches quality metadata, and the
-// cache just records the verdict.
-const parser = { parseManifestText: () => null };
+// The parser now enriches both quality metadata and speed-probe inputs.
+const parser = new M3U8ParserService();
 function makeCache() {
   return {
     failures: 0,
@@ -38,10 +42,18 @@ function makeCache() {
   };
 }
 
+// A successful ranged segment response: 200 KB body + a Content-Range total.
+const segmentResponse = () => ({
+  ok: true,
+  arrayBuffer: async () => Buffer.alloc(200000).buffer,
+  headers: { get: () => 'bytes 0-199999/4084906' },
+});
+
 // VERIFY_ATTEMPTS and friends are read when streams.js loads, so these tests
 // run against the defaults (3 attempts, 9s total budget).
 beforeEach(() => {
   jest.clearAllMocks();
+  global.fetch = jest.fn().mockResolvedValue(segmentResponse());
 });
 
 describe('verifyStreams retry policy', () => {
@@ -138,5 +150,57 @@ describe('verifyStreams retry policy', () => {
       expect.any(String),
       expect.objectContaining({ attempts: 1 })
     );
+  });
+});
+
+describe('verifyStreams speed probe', () => {
+  it('adds speed metrics from one timed media segment without affecting keep/drop', async () => {
+    safeFetch.mockResolvedValue(ok());
+
+    const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, makeCache());
+
+    expect(out).toHaveLength(1);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(out[0]).toEqual(expect.objectContaining({
+      speedScore: expect.any(Number),
+      segmentTtfbMs: expect.any(Number),
+      downloadMbps: expect.any(Number),
+      targetDuration: 5,
+    }));
+  });
+
+  it('sends a bounded Range header rather than downloading the whole segment', async () => {
+    safeFetch.mockResolvedValue(ok());
+    await verifyStreams([stream()], null, parser, makeCache());
+
+    const headers = global.fetch.mock.calls[0][1].headers;
+    expect(headers.Range).toBe('bytes=0-524287');
+    expect(headers.Referer).toBe('https://embed.st/');
+  });
+
+  it('keeps the stream when speed timing fails', async () => {
+    safeFetch.mockResolvedValue(ok());
+    global.fetch.mockRejectedValue(new Error('probe failed'));
+
+    const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, makeCache());
+
+    expect(out).toHaveLength(1);
+    expect(out[0].speedScore).toBeUndefined();
+  });
+
+  it('keeps the stream but skips speed scoring when Content-Range is missing', async () => {
+    safeFetch.mockResolvedValue(ok());
+    global.fetch.mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => Buffer.alloc(200000).buffer,
+      headers: { get: () => null },
+    });
+
+    const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, makeCache());
+
+    expect(out).toHaveLength(1);
+    expect(out[0].speedScore).toBeUndefined();
+    // targetDuration is still useful and comes from the playlist itself.
+    expect(out[0].targetDuration).toBe(5);
   });
 });
