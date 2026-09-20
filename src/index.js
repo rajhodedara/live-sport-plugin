@@ -22,7 +22,7 @@ const path = require('path');
 const { builder } = require('./manifest');
 const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
-const { PORT, BASE_URL, getRequestBaseUrl } = require('./config');
+const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
 const container = require('./container');
 const https = require('https');
 const http = require('http');
@@ -48,8 +48,9 @@ const hlsChunkHttpAgent = new http.Agent({
 
 // ─── Spawn the Streamed.pk Resolver ───────────────────────────────────────────
 
-// Use a dynamic random port between 20000-60000 for the internal resolver to prevent EADDRINUSE on shared hosts
-const RESOLVER_PORT = process.env.RESOLVER_PORT || "7003";
+// In PM2 cluster mode, each worker gets its own isolated resolver port (7003, 7004, 7005, 7006...)
+const workerOffset = parseInt(process.env.NODE_APP_INSTANCE || process.env.pm_id || "0", 10);
+const RESOLVER_PORT = process.env.RESOLVER_PORT || String(7003 + workerOffset);
 let resolverProcess = null;
 let isShuttingDown = false;
 let resolverRestarts = 0;
@@ -218,6 +219,17 @@ app.get(['/api/collections/download', '/:config/api/collections/download'], (req
   res.send(JSON.stringify(collections, null, 2));
 });
 
+app.get('/api/server-info', (req, res) => {
+  const reqBaseUrl = getRequestBaseUrl(req);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.json({
+    baseUrl: reqBaseUrl,
+    localIp: getLocalIp ? getLocalIp() : '127.0.0.1',
+    port: PORT
+  });
+});
+
 app.get('/api/matches', (req, res) => {
   const matches = container.resolve('cacheService').getMatches();
   res.json(matches);
@@ -230,6 +242,18 @@ app.get('/api/matches', (req, res) => {
 // /img/placeholder?...  → generated poster card. Replaces the external
 //                         placehold.co dependency.
 const imageService = require('./services/ImageService');
+
+app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res) => {
+  const sport = (req.params.sport || 'football').toLowerCase();
+  const svg = imageService.generateSportSvg(sport, 'landscape', {
+    badge: 'REPLAYS'
+  });
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.send(svg);
+});
 
 app.get('/img/placeholder', (req, res) => {
   const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
@@ -1483,11 +1507,19 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     // Add specific catalogs based on selection
     const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
     for (const sport of sportCatalogs) {
-      if (enabledSports.includes(sport)) keepCatalogs.push(`nuvio_sports_${sport}`);
+      if (enabledSports.includes(sport)) {
+        keepCatalogs.push(`nuvio_sports_${sport}`);
+      }
     }
     if (enabledSports.includes('other')) keepCatalogs.push('nuvio_sports_other');
     
-    newManifest.catalogs = newManifest.catalogs.filter(c => keepCatalogs.includes(c.id));
+    newManifest.catalogs = newManifest.catalogs.filter(c => {
+      if (keepCatalogs.includes(c.id)) return true;
+      if (c.id.startsWith('nuvio_sports_replays_')) {
+        return enabledSports.some(sport => c.id.startsWith(`nuvio_sports_replays_${sport}`));
+      }
+      return false;
+    });
   }
   
   // Remove teams catalog if the user hasn't configured any teams
@@ -1510,18 +1542,16 @@ app.get('/:config?/manifest.json', (req, res, next) => {
 
       // Always-keep catalogs: not tied to a single sport.
       const ALWAYS_KEEP = new Set([
-        'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_replays',
+        'nuvio_sports_live', 'nuvio_sports_upcoming',
         'nuvio_sports_teams', 'nuvio_sports_other', 'nuvio_sports_networks'
       ]);
       newManifest.catalogs = newManifest.catalogs.filter((c) => {
         if (ALWAYS_KEEP.has(c.id)) return true;
-        // Never put sub-league rows on homepage (they are for collection folders only)
-        if (/nuvio_sports_replays_[a-z_]+_(recent|premier_league|ucl|nba|f1|mlb)/.test(c.id)) return false;
 
-        // Keep sport-specific replay catalogs if replays exist for that sport
-        if (c.id.startsWith('nuvio_sports_replays_')) {
-          const sport = c.id.replace('nuvio_sports_replays_', '');
-          return replaysAvailable.has(sport);
+        // Keep all replay catalogs in manifest so Nuvio Collections can query them!
+        // Because they have isRequired: true on 'skip', Stremio/Nuvio will NOT display them on the Home screen.
+        if (c.id === 'nuvio_sports_replays' || c.id.startsWith('nuvio_sports_replays_')) {
+          return true;
         }
 
         const cat = c.id.replace('nuvio_sports_', '');
@@ -2098,7 +2128,10 @@ app.get('/health', (_, res) => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
-container.resolve('cronService').start();
+// In cluster mode, only the primary worker instance runs background cron syncs
+if (workerOffset === 0) {
+  container.resolve('cronService').start();
+}
 
 const BIND_HOST = process.env.HOST || process.env.IP || '0.0.0.0';
 app.listen(PORT, BIND_HOST, () => {
