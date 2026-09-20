@@ -415,7 +415,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
             const h = new URL(targetUrl).hostname;
             if (/\.wfty\.st$/.test(h) || /watchfooty/i.test(h)) guess = 'https://sportsembed.su/';
             else if (/\.strmd\.st$/.test(h) || /streamed/i.test(h)) guess = 'https://embed.st/';
-            else if (/tiestep|dlive|dlstreams|daddylive/i.test(h)) guess = 'https://tiestep.top/';
+            else if (/tiestep|dlive|dlstreams|daddylive|assetrage|romponalis/i.test(h) || /\.7odxv0l067ka\.net$/.test(h)) guess = 'https://assetrage.net/';
             else guess = `https://${h}/`;
           } catch (_) { guess = 'https://sportsembed.su/'; }
           console.log(`[Filter] ${res.status} with no referer; retrying once with ${guess}`);
