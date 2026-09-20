@@ -100,17 +100,41 @@ describe('Kickoff timestamp parsing and timezone formatting', () => {
     expect(getKickoff('1789923600000')).toBe(1789923600000);
   });
 
+  // The fixture used to hardcode 1789923600000 (2026-09-20T17:00Z). Once that
+  // instant passed, isMatchLive() resolved the match as LIVE and the expected
+  // "10:00 AM" rendering became "LIVE", so the test rotted with wall-clock
+  // time. The kickoff is now built relative to now, on a fixed local wall time
+  // in the target zone, so the expected string is stable forever.
+  const LA_TZ = 'America/Los_Angeles';
+  function laOffsetMs(utcMs) {
+    const p = {};
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: LA_TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
+    }).formatToParts(new Date(utcMs)).forEach(x => { p[x.type] = x.value; });
+    return Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second) - utcMs;
+  }
+  function laWallToUtc(y, mo, d, h, mi) {
+    const wall = Date.UTC(y, mo - 1, d, h, mi);
+    return wall - laOffsetMs(wall - laOffsetMs(wall));
+  }
+
   test('mapMatchToMetaPreview formats kickoff at 10:00 AM for America/Los_Angeles (Chicago Bears vs Minnesota Vikings)', () => {
+    const target = new Date(Date.now() + 5 * 86400000);
+    const kickoff = laWallToUtc(
+      target.getUTCFullYear(), target.getUTCMonth() + 1, target.getUTCDate(), 10, 0
+    );
+
     const match = {
       id: 'bears_vikings',
       title: 'Chicago Bears vs Minnesota Vikings',
       category: 'american_football',
-      date: '1789923600000', // 2026-09-20 17:00:00 UTC
+      date: String(kickoff),
       status: 'upcoming',
       sources: [{ source: 'streamedpk', id: '123' }]
     };
 
-    const meta = mapMatchToMetaPreview(match, { timezone: 'America/Los_Angeles' }, 'tv');
+    const meta = mapMatchToMetaPreview(match, { timezone: LA_TZ }, 'tv');
     expect(meta.releaseInfo).toBe('10:00 AM (America/Los_Angeles)');
     expect(meta.description).toContain('⏱️ Kickoff at 10:00 AM (America/Los_Angeles)');
   });

@@ -11,6 +11,11 @@ function getKickoff(d) {
   if (!isNaN(n) && Number.isFinite(n) && n > 0) return n;
   const s = String(d).trim();
   if (!s) return 0;
+  // "0"/"00" are the sentinel for "no kickoff" (24/7 channels). Number() maps
+  // them to 0, which the guard above rejects, but the final `new Date(s)`
+  // fallback below would otherwise parse the *string* "0" as year ~2000 and
+  // leak a bogus timestamp that is also host-timezone dependent.
+  if (/^0+$/.test(s)) return 0;
   const parsed = parseTimezone(s, 'UTC');
   if (parsed && !isNaN(parsed) && parsed > 0) return parsed;
   const time = new Date(s).getTime();
@@ -37,7 +42,6 @@ const SPORT_MAX_DURATION_MS = {
   darts: 4 * 60 * 60 * 1000,
   college: 4 * 60 * 60 * 1000
 };
-const LIVE_LEAD_MS = 15 * 60 * 1000;
 const DEFAULT_EVENT_DURATION_MS = 12 * 60 * 60 * 1000;
 
 const REPLAY_SPORTS = [
@@ -75,8 +79,8 @@ function getEventDurationMs(category) {
 /**
  * Accurately determines if an event is currently live right now.
  * 24/7 networks are always live.
- * Fixtures with a kickoff time are live starting 15 minutes before kickoff
- * up to the sport-specific max game duration.
+ * Fixtures with a kickoff time become live at kickoff (there is no pre-kickoff
+ * lead-in) and stay live up to the sport-specific max game duration.
  */
 function isMatchLive(match) {
   if (!match) return false;
@@ -326,14 +330,19 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
           const options = { hour: 'numeric', minute: '2-digit', hour12: true };
           const dateOptions = { month: 'short', day: 'numeric', year: 'numeric' };
           
-          if (config && config.timezone) {
-            options.timeZone = config.timezone;
-            dateOptions.timeZone = config.timezone;
-          } else {
-            dateOptions.timeZone = 'UTC';
-          }
-          
-          timeString = dateObj.toLocaleTimeString('en-US', options) + (options.timeZone ? ` (${options.timeZone})` : '');
+          // Date and time must always render in the SAME zone. Previously the
+          // no-config branch left `options` on the host zone while forcing
+          // `dateOptions` to UTC, so a user with no timezone configured could see
+          // a time and a calendar day that belonged to different days (7-8h split
+          // on the America/Los_Angeles deploy). Both now default to UTC.
+          const configuredZone = config && config.timezone;
+          const displayZone = configuredZone || 'UTC';
+          options.timeZone = displayZone;
+          dateOptions.timeZone = displayZone;
+
+          // Suffix semantics unchanged: only an explicitly configured zone is
+          // named, so unconfigured listings look the same as before.
+          timeString = dateObj.toLocaleTimeString('en-US', options) + (configuredZone ? ` (${configuredZone})` : '');
           dateString = dateObj.toLocaleDateString('en-US', dateOptions);
           
           const now = Date.now();

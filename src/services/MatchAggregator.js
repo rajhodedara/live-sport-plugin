@@ -5,17 +5,26 @@
 // standard 24h window.
 const REPLAY_RETENTION_DAYS = 30;
 
+const { parseTimezone } = require('../timezone');
+
 /**
  * Parses a provider-supplied match date into epoch milliseconds.
  *
  * Providers are inconsistent: most send a numeric epoch (as number or numeric
  * string), but ReplayZone sends ISO date strings ("2026-09-14"). A plain
- * Number() cast turns those into NaN, which the caller then coerces to 0 —
+ * Number() cast turns those into NaN, which the caller then coerces to 0 -
  * silently disabling the date-window guard in _sameEventPre. That guard is what
  * stops the same fixture on different days from merging, so losing it merges
  * unrelated events (observed: a "Chicago Cubs @ Atlanta Braves" replay from May
  * merged into the September Cubs vs Braves fixture, attaching replay streams to
  * a live/upcoming listing).
+ *
+ * Parsing goes through the shared timezone parser rather than raw Date.parse.
+ * Date.parse resolves an unqualified string such as "2026-09-14T20:00:00.000"
+ * in the HOST zone, so the merge guard disagreed with the display path
+ * (getKickoff) whenever the server was not on UTC - a silent multi-hour skew on
+ * the merge window. The shared parser treats unqualified input as UTC, keeping
+ * both paths consistent and host-independent.
  */
 function _parseEventDate(raw) {
   if (raw == null || raw === '') return 0;
@@ -23,14 +32,11 @@ function _parseEventDate(raw) {
   if (!Number.isNaN(n) && Number.isFinite(n) && n > 0) return n;
   const str = String(raw).trim();
   if (!str) return 0;
-  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(str)) {
-    const clean = str.replace(' ', 'T');
-    const iso = clean + (clean.length === 16 ? ':00Z' : (clean.length === 19 ? 'Z' : ''));
-    const parsedIso = Date.parse(iso);
-    if (!Number.isNaN(parsedIso) && parsedIso > 0) return parsedIso;
-  }
-  const parsed = Date.parse(str);
-  return Number.isNaN(parsed) ? 0 : parsed;
+  const parsed = parseTimezone(str, 'UTC');
+  if (parsed && !Number.isNaN(parsed) && parsed > 0) return parsed;
+  // Last resort for non-ISO shapes (e.g. "September 14, 2026").
+  const fallback = Date.parse(str);
+  return Number.isNaN(fallback) ? 0 : fallback;
 }
 
 /**

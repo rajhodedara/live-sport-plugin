@@ -1,10 +1,86 @@
 /**
  * Parses a date string and a timezone into a stable UTC UNIX timestamp (milliseconds).
- * 
+ *
+ * The incoming value is treated as a WALL-CLOCK time in `timeZone` (never in the
+ * server's own zone), so the result does not depend on the host's TZ setting.
+ *
  * @param {string|number} dateValue - The date string or UNIX timestamp.
  * @param {string} [timeZone='UTC'] - IANA Timezone string (e.g., 'America/New_York', 'UTC').
  * @returns {number|null} - UTC UNIX timestamp in milliseconds, or null if invalid.
  */
+
+/**
+ * Offset of `timeZone` at the given UTC instant, in milliseconds
+ * (wall clock minus UTC, so America/New_York in summer is -4h).
+ *
+ * Intl is used purely as a formatter here; the caller is responsible for
+ * solving the intended wall time against it.
+ */
+function _zoneOffsetMs(utcMs, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date(utcMs));
+
+  const p = {};
+  parts.forEach(part => { p[part.type] = part.value; });
+
+  let hour = parseInt(p.hour, 10);
+  if (hour === 24) hour = 0; // Intl.DateTimeFormat can return 24 for midnight
+
+  const asUtc = Date.UTC(
+    parseInt(p.year, 10),
+    parseInt(p.month, 10) - 1,
+    parseInt(p.day, 10),
+    hour,
+    parseInt(p.minute, 10),
+    parseInt(p.second, 10)
+  );
+
+  return asUtc - utcMs;
+}
+
+/**
+ * Resolve a wall-clock time in `timeZone` to its UTC instant.
+ *
+ * The old implementation derived the offset by formatting the naive instant
+ * itself (`walltime + 'Z'`). Inside the hour after a DST transition that offset
+ * belongs to the wrong side of the change, so every conversion in that window
+ * came out one hour wrong (observed: 2026-03-08T03:30 America/New_York resolved
+ * to 08:30Z instead of 07:30Z).
+ *
+ * Instead we solve for the instant whose rendering in `timeZone` equals the
+ * requested wall clock. We consider the offsets in force a day either side of
+ * the target so both sides of a transition are tested, keep only solutions that
+ * round-trip, and for the ambiguous repeated hour of a fall-back we return the
+ * EARLIER instant. A wall time that does not exist (the skipped hour of a
+ * spring-forward) has no round-tripping solution and falls back to interpreting
+ * it with the pre-transition offset, which shifts it forward by the gap.
+ */
+function _wallTimeToUtc(wallMs, timeZone) {
+  const candidates = [];
+  const seenOffsets = new Set();
+
+  for (const probe of [wallMs - 86400000, wallMs, wallMs + 86400000]) {
+    const offset = _zoneOffsetMs(probe, timeZone);
+    if (seenOffsets.has(offset)) continue;
+    seenOffsets.add(offset);
+
+    const instant = wallMs - offset;
+    if (_zoneOffsetMs(instant, timeZone) === offset) candidates.push(instant);
+  }
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => a - b);
+    return candidates[0]; // earliest wins for the ambiguous fall-back hour
+  }
+
+  // Nonexistent wall time: keep the pre-transition offset (shifts forward).
+  return wallMs - _zoneOffsetMs(wallMs, timeZone);
+}
+
 function parseTimezone(dateValue, timeZone = 'UTC') {
   if (dateValue === null || dateValue === undefined) return null;
 
@@ -24,7 +100,7 @@ function parseTimezone(dateValue, timeZone = 'UTC') {
     return numeric < 1e11 ? numeric * 1000 : numeric;
   }
 
-  // If the string contains an explicit explicit timezone offset like Z or +05:30
+  // If the string contains an explicit timezone offset like Z or +05:30
   // we can just let native Date parse it, as it overrides local timezone assumptions
   const hasTimezoneOffset = str.endsWith('Z') || str.match(/[+-]\d{2}:?\d{2}$/);
   if (hasTimezoneOffset) {
@@ -34,7 +110,7 @@ function parseTimezone(dateValue, timeZone = 'UTC') {
 
   // Replace spaces with T for proper ISO format compatibility
   let cleanStr = str.replace(' ', 'T');
-  
+
   // If the string is just a time (e.g. "21:30" or "21:30:00"), prepend today's date in target timezone.
   if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(cleanStr)) {
     const tzDateStr = new Intl.DateTimeFormat('en-US', {
@@ -46,37 +122,15 @@ function parseTimezone(dateValue, timeZone = 'UTC') {
     if (timePart.length === 4) timePart = '0' + timePart; // e.g. "9:30" -> "09:30"
     cleanStr = `${yyyy}-${mm}-${dd}T${timePart}`;
   }
-  
+
   // We treat the incoming local time string as if it were UTC.
   // Example: "2026-08-16T16:05" -> "2026-08-16T16:05Z"
+  // The UTC fields of this instant are exactly the requested wall-clock fields.
   const localDate = new Date(cleanStr + 'Z');
   if (isNaN(localDate.getTime())) return null;
 
-  // Format this time in the target timezone to determine the offset.
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-    hour12: false
-  });
-  
-  const parts = formatter.formatToParts(localDate);
-  const p = {};
-  parts.forEach(part => { p[part.type] = part.value; });
-  
-  let hour = parseInt(p.hour, 10);
-  if (hour === 24) hour = 0; // Intl.DateTimeFormat can return 24 for midnight
-  const hourStr = hour.toString().padStart(2, '0');
-  
-  // Create a UTC date representing what the time actually is in the target timezone
-  const formattedStr = `${p.year}-${p.month}-${p.day}T${hourStr}:${p.minute}:${p.second}Z`;
-  const formattedDate = new Date(formattedStr);
-  
-  // The difference between localDate and formattedDate is the exact timezone offset for that specific moment.
-  const offsetMs = localDate.getTime() - formattedDate.getTime();
-  
   // Apply the offset to get the true UTC UNIX timestamp
-  const trueUtcTime = localDate.getTime() + offsetMs;
+  const trueUtcTime = _wallTimeToUtc(localDate.getTime(), timeZone);
   return trueUtcTime > 0 ? trueUtcTime : null;
 }
 
