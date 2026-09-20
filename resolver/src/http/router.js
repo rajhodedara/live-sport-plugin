@@ -43,6 +43,11 @@ export async function route(req, res) {
   const { pathname, searchParams, origin } = loc
 
   try {
+    if (pathname === '/health' || pathname === '/api/health') {
+      json(res, 200, { ok: true, uptime: process.uptime() })
+      return
+    }
+
     if (pathname === '/api/stream') {
       if (req.method !== 'POST') {
         json(res, 405, { error: 'POST required' })

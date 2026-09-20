@@ -10,5 +10,14 @@ function boot() {
   console.log(`http://${host}/`)
 }
 
+srv.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[Resolver] Port ${port} is already in use.`);
+    process.exit(98);
+  }
+  console.error('[Resolver Server Error]', err);
+  process.exit(1);
+});
+
 if (process.env.HOST) srv.listen(port, process.env.HOST, boot)
 else srv.listen(port, boot)
