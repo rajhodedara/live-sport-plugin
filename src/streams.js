@@ -549,6 +549,8 @@ async function handleStream(type, id, config) {
       const countryInfo = detectChannelCountry(channelName);
       if (countryInfo) {
         countryTag = ` ${countryInfo.flag} [${countryInfo.name} • ${countryInfo.language}]`;
+        s.language = countryInfo.language;
+        s.country = countryInfo.name;
       }
     }
     
@@ -599,12 +601,17 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Hid ${hidden} non-RZ web fallback(s) — ${directOnly.length} stream(s) kept`);
   }
 
-  // Sort streams: Direct streams first, then by score descending
+  // English first, then unknown, then other languages.
+  const langTier = (s) => (s.language === 'English' ? 0 : (s.language ? 2 : 1));
+
   streams.sort((a, b) => {
     const aIsDirect = a.name === '⚡ Direct Stream' ? 1 : 0;
     const bIsDirect = b.name === '⚡ Direct Stream' ? 1 : 0;
     if (aIsDirect !== bIsDirect) return bIsDirect - aIsDirect;
-    return b.score - a.score;
+    const lt = langTier(a) - langTier(b);
+    if (lt) return lt;
+    const rankScore = (stream) => ((stream.score || 0) * 0.8) + ((stream.speedScore ?? 50) * 0.2);
+    return rankScore(b) - rankScore(a);
   });
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
