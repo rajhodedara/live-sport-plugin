@@ -109,8 +109,17 @@ function spawnResolver() {
   }
 
   resolverProcess = child_process['sp' + 'awn']('node', [scriptPath], {
-    stdio: 'inherit',
+    stdio: 'pipe',
     env: spawnEnv
+  });
+
+  resolverProcess.stdout?.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg) console.log(`[Resolver #${workerOffset}] ${msg}`);
+  });
+  resolverProcess.stderr?.on('data', (d) => {
+    const msg = d.toString().trim();
+    if (msg) console.error(`[Resolver Error #${workerOffset}] ${msg}`);
   });
 
   resolverProcess.on('error', (err) => console.error('[FATAL] Resolver spawn error:', err));
