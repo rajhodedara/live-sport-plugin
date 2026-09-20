@@ -82,6 +82,27 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
   }
 
+  // Plain MPEG-TS segments (e.g. the Streamed.pk 540p variant served by
+  // lb*.strmd.st) are intermittently refused on a direct fetch — observed ~1/3
+  // success, with the rest failing at the connection level. The same worker
+  // pool relays them reliably (verified 5/5 workers, valid 0x47 sync byte), so
+  // plain .ts goes through the workers too. /api/hlschunk stays as the
+  // server-side fallback when no worker is configured.
+  if (/\.ts(\?|$)/.test(absoluteUrl)) {
+    const cfWorker = getCfImageWorker();
+    if (cfWorker) {
+      let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
+      if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
+      if (origin) workerChunkUrl += `&origin=${encodeURIComponent(origin)}`;
+      return workerChunkUrl;
+    }
+
+    let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
+    if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
+    if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+    return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
+  }
+
   const isPureDisguisedTs = absoluteUrl.includes('.png') || absoluteUrl.includes('.webp') || absoluteUrl.includes('.js');
   if (isPureDisguisedTs && !absoluteUrl.includes('.ts')) {
     return absoluteUrl + '#.ts';

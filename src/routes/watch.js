@@ -122,7 +122,12 @@ router.get('/watch', (req, res) => {
         stage.style.display = 'none';
         video.style.display = 'block';
         if (Hls.isSupported()) {
-          const hls = new Hls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 5, lowLatencyMode: true });
+          // Live-window reality: these providers publish ~4 segments (~15 s) per
+          // playlist. lowLatencyMode is a no-op (no EXT-X-PART) and only tightens
+          // targets, so it is dropped. Syncing 2 segments back leaves ~2 segments
+          // of slack inside a 4-segment window, and the max-latency ceiling (3)
+          // stays below the window instead of being unreachable at 5.
+          const hls = new Hls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 3 });
           hls.loadSource(url);
           hls.attachMedia(video);
           hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
@@ -431,8 +436,8 @@ router.get('/watch', (req, res) => {
           var engine = new p2pml.hlsjs.Engine();
           engine.on('peer_connect', function () { p2pStatus.innerText = 'P2P Active'; });
           // enableWorker disabled: TV engines frequently lack Worker support.
-          startHls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 5,
-                     lowLatencyMode: true, enableWorker: false,
+          startHls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 3,
+                     enableWorker: false,
                      loader: engine.createLoaderClass() });
           started = true;
         }
@@ -444,8 +449,8 @@ router.get('/watch', (req, res) => {
       // 2) Plain hls.js, worker disabled for maximum TV compatibility.
       if (!started && window.Hls && Hls.isSupported()) {
         try {
-          startHls({ liveSyncDurationCount: 3, liveMaxLatencyDurationCount: 5,
-                     lowLatencyMode: true, enableWorker: false });
+          startHls({ liveSyncDurationCount: 2, liveMaxLatencyDurationCount: 3,
+                     enableWorker: false });
           started = true;
         } catch (e) {
           console.warn('[player] hls.js failed:', e && e.message);
