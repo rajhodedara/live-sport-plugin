@@ -416,6 +416,16 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
             if (/\.wfty\.st$/.test(h) || /watchfooty/i.test(h)) guess = 'https://sportsembed.su/';
             else if (/\.strmd\.st$/.test(h) || /streamed/i.test(h)) guess = 'https://embed.st/';
             else if (/tiestep|dlive|dlstreams|daddylive|assetrage|romponalis/i.test(h) || /\.7odxv0l067ka\.net$/.test(h)) guess = 'https://assetrage.net/';
+            // Terminal hosts discovered by the DaddyLive iframe-domain audit. These
+            // are the endpoints the embed decoders actually point at, so the
+            // referer must be the page that served the manifest, not a generic
+            // origin. Verified live: each returns #EXTM3U with the matching referer.
+            else if (/dynproclaim\.net$/.test(h)) guess = `https://${h}/`;
+            else if (/hockey\.do$/.test(h)) guess = 'https://play.matchli.st/';
+            // streame.center rotates its edge nodes (edgestream2/5/7.pro all
+            // observed live), so match the family, not one numbered host.
+            else if (/edgestream[0-9]*\.pro$/.test(h)) guess = 'https://streame.center/';
+            else if (/\.a737cozfwjmm\.net$/.test(h)) guess = 'https://assetrage.net/';
             else guess = `https://${h}/`;
           } catch (_) { guess = 'https://sportsembed.su/'; }
           console.log(`[Filter] ${res.status} with no referer; retrying once with ${guess}`);

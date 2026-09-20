@@ -1,0 +1,131 @@
+{
+  "_comment": "Iframe-domain knowledge base for the DaddyLive family. Maintained by scripts/selfheal-iframe-domains.js. 'family' keys are registrable-domain-ish suffixes; rotating node prefixes are collapsed onto them.",
+  "updated": "2026-09-21",
+  "families": {
+    "assetrage.net": {
+      "role": "embed",
+      "strategy": "econfig",
+      "referer": "https://assetrage.net/",
+      "first_seen": "2026-09-18",
+      "note": "Dominant embed domain (~80% of live channels). Existing decodeEconfig works."
+    },
+    "dynproclaim.net": {
+      "role": "embed",
+      "strategy": "econfig",
+      "referer": "https://<node>.dynproclaim.net/",
+      "first_seen": "2026-09-21",
+      "note": "Reached as a nested hop (e.g. from w1.sportsonlinee.click). 32-hex per-channel subdomain. Same decodeEconfig as assetrage; terminal host is a737cozfwjmm.net / 7odxv0l067ka.net."
+    },
+    "sportsonlinee.click": {
+      "role": "wrapper",
+      "strategy": "nested",
+      "referer": "https://sportsonlinee.click/",
+      "first_seen": "2026-09-21",
+      "note": "Thin wrapper; its only content is an iframe pointing at *.dynproclaim.net."
+    },
+    "streame.center": {
+      "role": "wrapper",
+      "strategy": "nested",
+      "referer": "https://streame.center/",
+      "first_seen": "2026-09-21",
+      "note": "Needs TWO hops: /embed/chN.php -> /embed/hls2.php?stream= -> manifest on edgestream*.pro."
+    },
+    "vertex.st": {
+      "role": "wrapper",
+      "strategy": "json-hop",
+      "referer": "https://vertex.st/",
+      "first_seen": "2026-09-21",
+      "note": "Page calls api/player.php?id=N which returns {\"url\":\"https://play.matchli.st/...\"}. No _econfig, no iframe src. Id must be taken from loadPlayerChannel(N), not the template string."
+    },
+    "matchli.st": {
+      "role": "embed",
+      "strategy": "direct",
+      "referer": "https://play.matchli.st/",
+      "first_seen": "2026-09-21",
+      "note": "Terminal embed for vertex.st. Manifest sits in window.PP_CLAPPR_CONFIG as JSON with escaped \\u0026."
+    },
+    "rockystream.st": {
+      "role": "wrapper",
+      "strategy": "atob-embed",
+      "referer": "https://rockystream.st/",
+      "first_seen": "2026-09-21",
+      "note": "atob decodes to an already-registered provider (embed.st); no new decoder needed."
+    },
+    "videocdn-4726.website": {
+      "role": "embed",
+      "strategy": "unknown",
+      "referer": "https://videocdn-4726.website/",
+      "first_seen": "2026-09-21",
+      "note": "Returned HTTP 403 on every attempt; unresolved. Likely geo-gated. Left alone deliberately."
+    },
+    "embed.st": {
+      "role": "embed",
+      "strategy": "wasm",
+      "referer": "https://embed.st/",
+      "first_seen": "",
+      "note": "Already registered provider; handled by EmbedStProvider/EmbedIndiaProvider."
+    },
+    "embedindia.st": {
+      "role": "embed",
+      "strategy": "wasm",
+      "referer": "https://embedindia.st/",
+      "first_seen": "",
+      "note": "Already registered (CF_PROTECTED_DOMAINS)."
+    },
+    "embedindia.com": {
+      "role": "embed",
+      "strategy": "wasm",
+      "referer": "https://embedindia.com/",
+      "first_seen": "",
+      "note": "Already registered (CF_PROTECTED_DOMAINS)."
+    },
+    "embedsport.xyz": {
+      "role": "embed",
+      "strategy": "wasm",
+      "referer": "https://embedsport.xyz/",
+      "first_seen": "",
+      "note": "Already registered (CF_PROTECTED_DOMAINS)."
+    },
+    "sportsembed.su": {
+      "role": "embed",
+      "strategy": "wasm",
+      "referer": "https://sportsembed.su/",
+      "first_seen": "",
+      "note": "Already registered; WatchFooty fallback."
+    },
+    "dlstreams.st": {
+      "role": "provider",
+      "strategy": "direct",
+      "referer": "https://dlstreams.st/",
+      "first_seen": "",
+      "note": "DaddyLive primary base domain."
+    },
+    "dlive.sx": {
+      "role": "provider",
+      "strategy": "direct",
+      "referer": "https://dlive.sx/",
+      "first_seen": "",
+      "note": "DaddyLive mirror base domain."
+    }
+  },
+  "terminal_hosts": {
+    "7odxv0l067ka.net": {
+      "referer": "https://assetrage.net/",
+      "first_seen": "2026-09-18"
+    },
+    "a737cozfwjmm.net": {
+      "referer": "https://assetrage.net/",
+      "first_seen": "2026-09-21"
+    },
+    "edgestream.pro": {
+      "referer": "https://streame.center/",
+      "first_seen": "2026-09-21",
+      "note": "Node number rotates (edgestream2/5/7.pro all observed). Match the family."
+    },
+    "hockey.do": {
+      "referer": "https://play.matchli.st/",
+      "first_seen": "2026-09-21",
+      "note": "FLAKY: 200/live, 403, 404 and timeouts observed within minutes; outcome did not correlate with Referer. URL construction verified correct. Left as-is by decision."
+    }
+  }
+}

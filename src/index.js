@@ -117,6 +117,12 @@ app.get('/api/matches', (req, res) => {
 //                         placehold.co dependency.
 const imageService = require('./services/ImageService');
 
+// Memoized composed match cards: an identical query set skips both the badge
+// fetch and the base64 re-encode. Bounded so a hostile query space cannot grow
+// it without limit.
+const matchCardMemo = new Map();
+const MATCH_CARD_MEMO_MAX = 500;
+
 app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res) => {
   const sport = (req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '');
   const candidatePaths = [
@@ -148,6 +154,69 @@ app.get('/img/placeholder', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.send(svg);
+});
+
+// /img/match?...         → composed "broadcast" match card. Used when a fixture
+//                          has no official provider artwork: the server designs a
+//                          card from whatever badges/league/channel it could
+//                          resolve, instead of a bare centred-text tile.
+app.get(['/img/match', '/:config/img/match'], async (req, res) => {
+  const qs = (v) => (typeof v === 'string' ? v.trim() : '');
+  const query = req.query || {};
+  const shape = qs(query.shape) === 'poster' ? 'poster' : 'landscape';
+
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+
+  const memoKey = [
+    qs(query.cat), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
+    qs(query.lg), qs(query.lb), qs(query.ch), qs(query.cb),
+    qs(query.st), qs(query.tm), shape
+  ].join('|');
+
+  const cached = matchCardMemo.get(memoKey);
+  if (cached) {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    return res.send(cached);
+  }
+
+  // Embed each badge as a data URI so the card never references a remote host
+  // (dead upstream image → cleanly omitted element, never a broken image).
+  const embed = async (raw) => {
+    if (!raw) return null;
+    const entry = await imageService.getImage(raw);
+    if (!entry) return null;
+    return `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
+  };
+
+  const [badge1, badge2, leagueBadge, channelBadge] = await Promise.all([
+    embed(qs(query.b1)),
+    embed(qs(query.b2)),
+    embed(qs(query.lb)),
+    embed(qs(query.cb))
+  ]);
+
+  const svg = imageService.generateMatchCardSvg({
+    category: qs(query.cat),
+    team1: qs(query.t1),
+    team2: qs(query.t2),
+    badge1,
+    badge2,
+    leagueBadge,
+    channelBadge,
+    league: qs(query.lg),
+    channel: qs(query.ch),
+    status: qs(query.st),
+    time: qs(query.tm),
+    shape
+  });
+
+  if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
+  matchCardMemo.set(memoKey, svg);
+
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.send(svg);
 });
 

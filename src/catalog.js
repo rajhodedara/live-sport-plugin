@@ -22,6 +22,23 @@ function getKickoff(d) {
   return isNaN(time) ? 0 : time;
 }
 
+/**
+ * Formats a kickoff value for the composed match card (display only).
+ * Mirrors the zone handling of the meta preview time string so the card and the
+ * listing agree, without depending on that block's later position.
+ */
+function formatKickoffForCard(dateValue, config) {
+  if (!dateValue || dateValue === '0') return '';
+  const ko = getKickoff(dateValue);
+  if (!ko || isNaN(ko)) return '';
+  try {
+    const zone = (config && config.timezone) || 'UTC';
+    return new Date(ko).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: zone });
+  } catch (_) {
+    return '';
+  }
+}
+
 // How long an event can plausibly still be running after kickoff. Providers
 // cache match status at fetch time, so status flags alone cannot tell us
 // whether a fixture has finished; elapsed time against these windows can.
@@ -243,14 +260,23 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const providerLogo = match.logo ? normalizeImageUrl(match.logo) : null;
   const providerThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
   const providerTeamLogo = match.team1 && match.team1.logo ? normalizeImageUrl(match.team1.logo) : null;
+  const providerTeamLogo2 = match.team2 && match.team2.logo ? normalizeImageUrl(match.team2.logo) : null;
 
   // ─── TIER 2: Fallback Lookups (Only evaluated if provider didn't supply artwork) ───
   let fallbackTeamLogo = null;
+  let fallbackTeamLogo2 = null;
   let leagueEmblem = null;
   let broadcasterLogo = null;
+  let broadcasterName = null;
 
   const needsLogo = !providerLogo && !providerTeamLogo && !providerThumb;
   const needsPoster = !providerPoster && !providerThumb;
+
+  // A provider thumbnail that is really a crest/icon (rather than landscape
+  // artwork) cannot serve as a poster; it only suits the embedded single-crest
+  // card. When that is the case — or when there is no provider artwork at all —
+  // we compose a designed match card, so the lookups below are worth running.
+  const isThumbLogo = providerThumb && (match.category === 'networks' || providerThumb.toLowerCase().includes('logo') || providerThumb.toLowerCase().includes('icon'));
 
   if (needsLogo || needsPoster) {
     let teamLogoService = null;
@@ -266,18 +292,27 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
       }
     }
 
+    // A2. Same for the away side. The second crest was previously never
+    // resolved, which left composed cards half-empty.
+    if (match.team2 && match.team2.name && teamLogoService) {
+      fallbackTeamLogo2 = teamLogoService.getCachedLogo(match.team2.name);
+      if (!fallbackTeamLogo2) {
+        teamLogoService.findTeamLogo(match.team2.name).catch(() => {});
+      }
+    }
+
     // B. Fallback league / competition emblem
-    if (!fallbackTeamLogo && teamLogoService) {
+    if (teamLogoService) {
       leagueEmblem = teamLogoService.getLeagueLogo(match.league, match.title, match.category);
     }
 
     // C. Fallback broadcaster logo from attached sources
     if (match.sources && Array.isArray(match.sources)) {
       for (const s of match.sources) {
-        if (s.channelName) {
-          const l = getChannelLogo(s.channelName);
-          if (l) { broadcasterLogo = l; break; }
-        }
+        if (!s.channelName) continue;
+        if (!broadcasterName) broadcasterName = s.channelName;
+        const l = getChannelLogo(s.channelName);
+        if (l) { broadcasterLogo = l; broadcasterName = s.channelName; break; }
       }
     }
   }
@@ -285,24 +320,35 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // Channel logo for 24/7 channels where title IS the channel name
   const channelLogo = getChannelLogo(match.title);
 
-  // ─── Resolve Effective Poster (Provider First) ───
-  const isThumbLogo = providerThumb && (match.category === 'networks' || providerThumb.toLowerCase().includes('logo') || providerThumb.toLowerCase().includes('icon'));
-  let poster = fallbackPoster;
+  // ─── Resolve Effective Poster ───
+  // Precedence: PROVIDER artwork wins outright. Anything the provider gives us
+  // (poster, thumbnail, logo) is used as-is. Only when the provider supplies no
+  // artwork at all do we fall back to the composed cinematic card — and our own
+  // crest/league/channel lookups are fed INTO that card as ingredients rather
+  // than pre-empting it with a lone crest on an empty background.
+  let poster;
 
   if (providerPoster) {
     poster = buildImg(providerPoster, posterText, color) || fallbackPoster;
   } else if (providerThumb) {
     poster = buildImg(providerThumb, posterText, color, isThumbLogo) || fallbackPoster;
-  } else if (providerTeamLogo) {
-    poster = buildImg(providerTeamLogo, posterText, color, true) || fallbackPoster;
-  } else if (fallbackTeamLogo) {
-    poster = buildImg(fallbackTeamLogo, posterText, color, true) || fallbackPoster;
-  } else if (leagueEmblem && (match.category === 'motorsport' || match.category === 'mma' || match.category === 'golf' || !broadcasterLogo)) {
-    poster = buildImg(leagueEmblem, match.title, '161616', true) || fallbackPoster;
-  } else if (channelLogo) {
-    poster = buildImg(channelLogo, match.title, '161616', true) || fallbackPoster;
-  } else if (broadcasterLogo) {
-    poster = buildImg(broadcasterLogo, match.title, '161616', true) || fallbackPoster;
+  } else if (providerLogo) {
+    poster = buildImg(providerLogo, posterText, color, true) || fallbackPoster;
+  } else {
+    poster = imageService.matchCardUrl(BASE_URL, {
+      category: match.category,
+      team1: match.team1 && match.team1.name,
+      team2: match.team2 && match.team2.name,
+      badge1: providerTeamLogo || fallbackTeamLogo,
+      badge2: providerTeamLogo2 || fallbackTeamLogo2,
+      league: match.league,
+      leagueBadge: leagueEmblem,
+      channel: broadcasterName,
+      channelBadge: broadcasterLogo || channelLogo,
+      status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
+      time: formatKickoffForCard(match.date, config),
+      shape: reqType === 'series' ? 'poster' : 'landscape'
+    }) || fallbackPoster;
   }
 
   // ─── Branded Player / Buffering Logo ───

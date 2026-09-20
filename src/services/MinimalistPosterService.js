@@ -146,6 +146,140 @@ const SPORT_CONFIGS = {
       </g>
     `
   },
+  hockey: {
+    title: 'ICE HOCKEY',
+    badge: 'MATCH ARCHIVE',
+    accent: '#06b6d4', // cyan
+    bgTop: '#0a1a1f',
+    bgBottom: '#060f12',
+    glow: 'rgba(6, 182, 212, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Hockey Stick & Puck -->
+      <g transform="translate(${cx - 36}, ${cy - 36})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M26 6 L26 42 Q26 54 38 54 L58 54" stroke="#f8fafc"/>
+        <rect x="46" y="58" width="22" height="9" rx="3" fill="rgba(6, 182, 212, 0.30)" stroke="#06b6d4"/>
+        <circle cx="18" cy="58" r="7" stroke="#06b6d4"/>
+      </g>
+    `
+  },
+  american_football: {
+    title: 'AMERICAN FOOTBALL',
+    badge: 'MATCH ARCHIVE',
+    accent: '#3b82f6', // blue
+    bgTop: '#0d1524',
+    bgBottom: '#080d16',
+    glow: 'rgba(59, 130, 246, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Gridiron Ball -->
+      <g transform="translate(${cx - 38}, ${cy - 30})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <ellipse cx="38" cy="30" rx="34" ry="21" transform="rotate(-20 38 30)" fill="rgba(59, 130, 246, 0.18)" stroke="#f8fafc"/>
+        <line x1="26" y1="30" x2="50" y2="30" stroke="#3b82f6"/>
+        <line x1="32" y1="24" x2="32" y2="36"/>
+        <line x1="38" y1="23" x2="38" y2="37"/>
+        <line x1="44" y1="24" x2="44" y2="36"/>
+      </g>
+    `
+  },
+  mma: {
+    title: 'MMA',
+    badge: 'FIGHT ARCHIVE',
+    accent: '#dc2626', // crimson
+    bgTop: '#1c1012',
+    bgBottom: '#0f0809',
+    glow: 'rgba(220, 38, 38, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Fight Octagon -->
+      <g transform="translate(${cx - 36}, ${cy - 36})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="36,4 62,18 62,46 36,60 10,46 10,18" stroke="rgba(248,250,252,0.85)" fill="rgba(220, 38, 38, 0.10)"/>
+        <circle cx="36" cy="32" r="12" fill="rgba(220, 38, 38, 0.25)" stroke="#dc2626"/>
+      </g>
+    `
+  },
+  golf: {
+    title: 'GOLF',
+    badge: 'TOUR ARCHIVE',
+    accent: '#22c55e', // green
+    bgTop: '#0c1a10',
+    bgBottom: '#07100a',
+    glow: 'rgba(34, 197, 94, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Flag & Ball -->
+      <g transform="translate(${cx - 34}, ${cy - 34})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="10" x2="22" y2="58"/>
+        <path d="M22 12 L48 20 L22 30 Z" fill="rgba(34, 197, 94, 0.25)" stroke="#22c55e"/>
+        <circle cx="48" cy="56" r="6" stroke="#22c55e"/>
+      </g>
+    `
+  },
+  darts: {
+    title: 'DARTS',
+    badge: 'TOUR ARCHIVE',
+    accent: '#eab308', // yellow
+    bgTop: '#1c1808',
+    bgBottom: '#100d05',
+    glow: 'rgba(234, 179, 8, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Dartboard -->
+      <g transform="translate(${cx - 36}, ${cy - 36})" stroke="#f8fafc" stroke-width="2.5" fill="none">
+        <circle cx="36" cy="36" r="32" stroke="rgba(248,250,252,0.85)"/>
+        <circle cx="36" cy="36" r="20" stroke="#eab308"/>
+        <circle cx="36" cy="36" r="9" fill="rgba(234, 179, 8, 0.30)" stroke="#eab308"/>
+        <line x1="36" y1="4" x2="36" y2="14" stroke="#eab308"/>
+        <line x1="36" y1="58" x2="36" y2="68" stroke="#eab308"/>
+      </g>
+    `
+  },
+  networks: {
+    title: 'LIVE TV',
+    badge: '24/7 NETWORK',
+    accent: '#94a3b8', // slate
+    bgTop: '#141821',
+    bgBottom: '#0a0d13',
+    glow: 'rgba(148, 163, 184, 0.16)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Broadcast TV Set -->
+      <g transform="translate(${cx - 36}, ${cy - 30})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round">
+        <rect x="6" y="10" width="60" height="42" rx="6" fill="rgba(148, 163, 184, 0.12)" stroke="rgba(248,250,252,0.9)"/>
+        <line x1="26" y1="4" x2="36" y2="12" stroke="#94a3b8"/>
+        <line x1="46" y1="4" x2="36" y2="12" stroke="#94a3b8"/>
+        <circle cx="36" cy="31" r="7" fill="rgba(148, 163, 184, 0.30)" stroke="#94a3b8"/>
+      </g>
+    `
+  },
+  college: {
+    title: 'COLLEGE SPORTS',
+    badge: 'CAMPUS ARCHIVE',
+    accent: '#d946ef', // fuchsia
+    bgTop: '#1a1020',
+    bgBottom: '#0e0812',
+    glow: 'rgba(217, 70, 239, 0.18)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Trophy -->
+      <g transform="translate(${cx - 34}, ${cy - 34})" stroke="#f8fafc" stroke-width="2.5" fill="none" stroke-linejoin="round" stroke-linecap="round">
+        <path d="M24 8 H44 V26 C44 36 38 42 34 42 C30 42 24 36 24 26 Z" fill="rgba(217, 70, 239, 0.20)" stroke="#d946ef"/>
+        <path d="M24 12 H14 C14 24 20 30 26 30"/>
+        <path d="M44 12 H54 C54 24 48 30 42 30"/>
+        <line x1="34" y1="42" x2="34" y2="54"/>
+        <rect x="22" y="54" width="24" height="8" rx="2" stroke="#d946ef"/>
+      </g>
+    `
+  },
+  other: {
+    title: 'LIVE SPORTS',
+    badge: 'LIVE',
+    accent: '#64748b', // slate
+    bgTop: '#12161f',
+    bgBottom: '#090c12',
+    glow: 'rgba(100, 116, 139, 0.16)',
+    icon: (w, h, cx, cy) => `
+      <!-- Minimalist Generic Ball -->
+      <g transform="translate(${cx - 36}, ${cy - 36})" stroke="#f8fafc" stroke-width="2.5" fill="none">
+        <circle cx="36" cy="36" r="32" stroke="rgba(248,250,252,0.85)" fill="rgba(100, 116, 139, 0.12)"/>
+        <path d="M14 20 Q36 36 14 52" stroke="#94a3b8"/>
+        <path d="M58 20 Q36 36 58 52" stroke="#94a3b8"/>
+      </g>
+    `
+  },
   all: {
     title: 'ALL SPORTS',
     badge: 'REPLAY HUB',
@@ -163,6 +297,16 @@ const SPORT_CONFIGS = {
     `
   }
 };
+
+/**
+ * Minimalist line-art glyph for a sport, in the shared 0..72 drawing box.
+ * Returned untranslated so callers can place it with their own transform.
+ */
+function sportGlyphMarkup(category) {
+  const key = String(category || 'other').toLowerCase().trim();
+  const cfg = SPORT_CONFIGS[key] || SPORT_CONFIGS.other;
+  return cfg.icon(0, 0, 0, 0);
+}
 
 /**
  * Generate a minimalist sport poster or landscape banner.
@@ -363,6 +507,263 @@ function generateDateSvg(displayDate, count = 0, sportKey = null, shape = 'poste
 </svg>`;
 }
 
+// ─── Composed Match Card ─────────────────────────────────────────────────────
+// A designed "broadcast" card for fixtures that have no official provider
+// artwork. Pure string composition: every badge arrives already embedded as a
+// data URI (done by ImageService), so this function performs no I/O and is
+// directly unit-testable. It degrades gracefully from two badges, to one, to a
+// purely typographic card, and always returns a complete SVG.
+
+// Cinematic Broadcast tokens: film-grade warm/cool volumetrics on a near-black
+// base. Condensed type for names, a neutral grotesque for chrome.
+const CARD_COND = "'Arial Narrow','Roboto Condensed','Helvetica Neue',Arial,sans-serif";
+const CARD_SANS = "'Helvetica Neue',Helvetica,Arial,sans-serif";
+const CARD_FALLBACK_ACCENT = '#ff7a1a';
+const CARD_HOT = '#ff7a1a';
+const CARD_HOT_SOFT = '#ff9a45';
+const CARD_SAFE_MARGIN = 44;
+
+function truncateLabel(value, maxChars) {
+  const str = String(value === undefined || value === null ? '' : value).trim();
+  if (!str) return '';
+  if (str.length <= maxChars) return str;
+  return str.slice(0, Math.max(1, maxChars - 1)).trimEnd() + '\u2026';
+}
+
+function badgeImage(dataUri, x, y, size) {
+  return '<image href="' + dataUri + '" xlink:href="' + dataUri + '" x="' + x + '" y="' + y + '" width="' + size + '" height="' + size + '" preserveAspectRatio="xMidYMid meet"/>';
+}
+
+function buildHeroLines(spec, team1, team2, maxChars) {
+  if (team1 && team2) return [team1, 'VS', team2];
+  const raw = String(spec.title || spec.league || 'Live Sports').trim();
+  const split = raw.split(/\s+(?:vs\.?|@|[-\u2013\u2014])\s+/i).map(s => s.trim()).filter(Boolean);
+  const lines = split.length >= 2 ? [split[0], 'VS', split.slice(1).join(' - ')] : [raw];
+  return lines.slice(0, 3).map(l => (l.toUpperCase() === 'VS' ? 'VS' : truncateLabel(l, maxChars))).filter(Boolean);
+}
+
+/**
+ * Compose a premium match card.
+ *
+ * @param {object} spec
+ * @param {string}  [spec.category]      sport/category key (accent + watermark + shape)
+ * @param {string}  [spec.title]         event title, used when no team names exist
+ * @param {string}  [spec.team1]         home team name
+ * @param {string}  [spec.team2]         away team name
+ * @param {string}  [spec.badge1]        home badge as an embedded data URI
+ * @param {string}  [spec.badge2]        away badge as an embedded data URI
+ * @param {string}  [spec.league]        competition name (header chip)
+ * @param {string}  [spec.leagueBadge]   competition badge as an embedded data URI
+ * @param {string}  [spec.channel]       channel/broadcaster name (footer chip)
+ * @param {string}  [spec.channelBadge]  channel badge as an embedded data URI
+ * @param {string}  [spec.status]        live | upcoming | replay | 247
+ * @param {string}  [spec.time]          already-formatted display time
+ * @param {string}  [spec.shape]         landscape (800x450, default) | poster (600x900)
+ */
+function generateMatchCardSvg(spec = {}) {
+  const isPoster = spec.shape === 'poster';
+  const w = isPoster ? 600 : 800;
+  const h = isPoster ? 900 : 450;
+
+  const catKey = String(spec.category || 'other').toLowerCase().trim();
+  const cfg = SPORT_CONFIGS[catKey] || SPORT_CONFIGS.other;
+  const accent = cfg.accent || CARD_FALLBACK_ACCENT;
+
+  const margin = CARD_SAFE_MARGIN;
+  const headerY = isPoster ? 54 : 54;
+
+  const nameMax = isPoster ? 13 : 21;
+  const team1 = truncateLabel(spec.team1, nameMax);
+  const team2 = truncateLabel(spec.team2, nameMax);
+  const leagueName = truncateLabel(spec.league, isPoster ? 20 : 26);
+  const channelName = truncateLabel(spec.channel, 18);
+  const timeText = truncateLabel(spec.time, 32);
+
+  const badge1 = spec.badge1 || null;
+  const badge2 = spec.badge2 || null;
+  const leagueBadge = spec.leagueBadge || null;
+  const channelBadge = spec.channelBadge || null;
+  const available = (badge1 ? 1 : 0) + (badge2 ? 1 : 0);
+
+  const stRaw = String(spec.status || '').toLowerCase();
+  const status = (stRaw === 'live' || stRaw === 'upcoming' || stRaw === 'replay' || stRaw === '247') ? stRaw : '';
+
+  const parts = [];
+
+  // ── Background layers ──
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#cardBg)"/>');
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#warmGlow)"/>');
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#coolGlow)"/>');
+  parts.push('<g transform="rotate(-13 ' + (w / 2) + ' ' + (h / 2) + ')"><rect x="' + (-w * 0.18) + '" y="' + (h * 0.33) + '" width="' + (w * 1.36) + '" height="' + (h * 0.20) + '" fill="url(#streak)"/></g>');
+
+  // ── Sport watermark (behind all content) ──
+  const glyphOpacity = available === 0 ? 0.12 : 0.05;
+  const glyphSize = isPoster ? 280 : 320;
+  const gx = isPoster ? w - 70 : w - 140;
+  const gy = isPoster ? h - 190 : h - 120;
+  parts.push('<g transform="translate(' + gx.toFixed(1) + ', ' + gy.toFixed(1) + ') scale(' + (glyphSize / 72).toFixed(2) + ')" opacity="' + glyphOpacity + '">' + sportGlyphMarkup(catKey) + '</g>');
+
+  // ── Frame ──
+  parts.push('<rect x="1.5" y="1.5" width="' + (w - 3) + '" height="' + (h - 3) + '" rx="10" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1.5"/>');
+  parts.push('<rect x="0" y="0" width="' + w + '" height="3" fill="' + CARD_HOT + '" opacity="0.9"/>');
+
+  // ── Header: league chip (left) ──
+  if (leagueName || leagueBadge) {
+    const label = (leagueName || 'LIVE SPORTS').toUpperCase();
+    let lx = margin;
+    if (leagueBadge) {
+      parts.push('<circle cx="' + (margin + 8) + '" cy="' + (headerY - 4) + '" r="9" fill="rgba(255,255,255,0.10)"/>');
+      parts.push(badgeImage(leagueBadge, margin, headerY - 12, 16));
+      lx = margin + 24;
+    }
+    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="12" font-weight="700" letter-spacing="2.2" fill="' + CARD_HOT_SOFT + '">' + escapeXml(label) + '</text>');
+  }
+
+  // ── Header: status pill (right) ──
+  if (status) {
+    const conf = {
+      live: { t: 'LIVE', dot: true, color: '#ff8a8a', dotColor: '#ff3b3b' },
+      upcoming: { t: 'UPCOMING', dot: true, color: CARD_HOT_SOFT, dotColor: CARD_HOT },
+      replay: { t: 'REPLAY', dot: false, color: CARD_HOT_SOFT },
+      '247': { t: '24/7', dot: false, color: CARD_HOT_SOFT }
+    }[status];
+    const dotR = 4;
+    const pillW = 26 + (conf.dot ? dotR * 2 + 8 : 0) + conf.t.length * 7.4;
+    const pillH = 23;
+    const pillY = headerY - pillH / 2;
+    const pillX = w - margin - pillW;
+    const pillStroke = status === 'live' ? 'rgba(255,90,90,0.5)' : 'rgba(255,154,69,0.45)';
+    const pillFill = status === 'live' ? 'rgba(255,60,60,0.14)' : 'rgba(255,122,26,0.12)';
+    parts.push('<rect x="' + pillX.toFixed(1) + '" y="' + pillY.toFixed(1) + '" width="' + pillW.toFixed(1) + '" height="' + pillH + '" rx="' + (pillH / 2) + '" fill="' + pillFill + '" stroke="' + pillStroke + '" stroke-width="1"/>');
+    let px = pillX + 13;
+    if (conf.dot) {
+      parts.push('<circle cx="' + (px + dotR).toFixed(1) + '" cy="' + headerY + '" r="' + dotR + '" fill="' + conf.dotColor + '"/>');
+      px += dotR * 2 + 8;
+    }
+    parts.push('<text x="' + px.toFixed(1) + '" y="' + (headerY + 3.5).toFixed(1) + '" font-family="' + CARD_SANS + '" font-size="10" font-weight="800" letter-spacing="1.4" fill="' + conf.color + '">' + escapeXml(conf.t) + '</text>');
+  }
+
+  // Circular crest plates: soft glass disc, thin rim, light streaking behind.
+  const crest = (cx, cy, r, img) =>
+    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>' +
+    (img ? badgeImage(img, cx - r * 0.66, cy - r * 0.66, r * 1.32) : '');
+
+  const vsBadge = (mx, my, r) =>
+    '<circle cx="' + mx + '" cy="' + my + '" r="' + r + '" fill="rgba(255,255,255,0.06)" stroke="' + CARD_HOT + '" stroke-width="1.5"/>' +
+    '<text x="' + mx + '" y="' + (my + 5) + '" font-family="' + CARD_SANS + '" font-size="' + Math.round(r * 0.6) + '" font-weight="800" letter-spacing="1.5" fill="' + CARD_HOT_SOFT + '" text-anchor="middle">VS</text>';
+
+  const teamName = (x, y, name, size) => name
+    ? '<text x="' + x + '" y="' + y + '" font-family="' + CARD_COND + '" font-size="' + size + '" font-weight="700" letter-spacing="1.1" fill="url(#nameFill)" text-anchor="middle">' + escapeXml(name.toUpperCase()) + '</text>'
+    : '';
+
+  if (!isPoster) {
+    // ── Landscape: cinematic fixture row ──
+    if (available === 2) {
+      parts.push(crest(200, 186, 84, badge1));
+      parts.push(crest(600, 186, 84, badge2));
+      parts.push(vsBadge(400, 186, 26));
+      parts.push(teamName(200, 332, team1, 21));
+      parts.push(teamName(600, 332, team2, 21));
+      parts.push('<line x1="' + margin + '" y1="382" x2="' + (w - margin) + '" y2="382" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else if (available === 1) {
+      const shownBadge = badge1 || badge2;
+      const shownName = badge1 ? team1 : team2;
+      const otherName = badge1 ? team2 : team1;
+      parts.push(crest(400, 172, 78, shownBadge));
+      parts.push(teamName(400, 300, shownName, 21));
+      if (otherName) {
+        parts.push('<text x="400" y="334" font-family="' + CARD_SANS + '" font-size="13" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+      }
+      parts.push('<line x1="' + margin + '" y1="382" x2="' + (w - margin) + '" y2="382" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else {
+      const heroLines = buildHeroLines(spec, team1, team2, 24);
+      const fs = heroLines.length >= 3 ? 30 : heroLines.length === 2 ? 40 : 46;
+      const lh = fs + 16;
+      const startY = 200 - ((heroLines.length - 1) * lh) / 2;
+      heroLines.forEach((line, i) => {
+        const isVs = line.toUpperCase() === 'VS';
+        parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+      });
+      parts.push('<line x1="' + margin + '" y1="352" x2="' + (w - margin) + '" y2="352" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    }
+  } else {
+    // ── Poster (2:3): cinematic vertical stack ──
+    if (available === 2) {
+      parts.push(crest(190, 300, 62, badge1));
+      parts.push(crest(410, 300, 62, badge2));
+      parts.push(vsBadge(300, 300, 24));
+      parts.push(teamName(190, 420, team1, 20));
+      parts.push(teamName(410, 420, team2, 20));
+      parts.push('<line x1="' + margin + '" y1="500" x2="' + (w - margin) + '" y2="500" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else if (available === 1) {
+      const shownBadge = badge1 || badge2;
+      const shownName = badge1 ? team1 : team2;
+      const otherName = badge1 ? team2 : team1;
+      parts.push(crest(300, 290, 66, shownBadge));
+      parts.push(teamName(300, 416, shownName, 20));
+      if (otherName) {
+        parts.push('<text x="300" y="450" font-family="' + CARD_SANS + '" font-size="13" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+      }
+      parts.push('<line x1="' + margin + '" y1="520" x2="' + (w - margin) + '" y2="520" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else {
+      const heroLines = buildHeroLines(spec, team1, team2, 17);
+      const fs = heroLines.length >= 3 ? 34 : heroLines.length === 2 ? 44 : 52;
+      const lh = fs + 18;
+      const startY = 400 - ((heroLines.length - 1) * lh) / 2;
+      heroLines.forEach((line, i) => {
+        const isVs = line.toUpperCase() === 'VS';
+        parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+      });
+      parts.push('<line x1="' + margin + '" y1="560" x2="' + (w - margin) + '" y2="560" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    }
+  }
+
+  // ── Footer: centred time + channel mark ──
+  const footerY = isPoster ? h - 58 : 404;
+  if (timeText) {
+    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="12" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.52)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
+  }
+  if (channelName || channelBadge) {
+    const label = channelName.toUpperCase();
+    const chipW = (channelBadge ? 18 + 8 : 0) + label.length * 7.0;
+    let px = w - margin - chipW;
+    if (channelBadge) {
+      parts.push(badgeImage(channelBadge, px, footerY - 13, 18));
+      px += 26;
+    }
+    if (label) {
+      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="11" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.38)">' + escapeXml(label) + '</text>');
+    }
+  }
+
+  const defs = '<defs>' +
+    '<linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" stop-color="#170e08"/>' +
+      '<stop offset="100%" stop-color="#0a0605"/>' +
+    '</linearGradient>' +
+    '<radialGradient id="warmGlow" cx="22%" cy="58%" r="58%">' +
+      '<stop offset="0%" stop-color="' + CARD_HOT + '" stop-opacity="0.30"/>' +
+      '<stop offset="100%" stop-color="' + CARD_HOT + '" stop-opacity="0"/>' +
+    '</radialGradient>' +
+    '<radialGradient id="coolGlow" cx="84%" cy="40%" r="52%">' +
+      '<stop offset="0%" stop-color="#17c9b8" stop-opacity="0.22"/>' +
+      '<stop offset="100%" stop-color="#17c9b8" stop-opacity="0"/>' +
+    '</radialGradient>' +
+    '<linearGradient id="streak" x1="0%" y1="0%" x2="100%" y2="0%">' +
+      '<stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>' +
+      '<stop offset="45%" stop-color="#ffffff" stop-opacity="0.10"/>' +
+      '<stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>' +
+    '</linearGradient>' +
+    '<linearGradient id="nameFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" stop-color="#ffffff"/>' +
+      '<stop offset="100%" stop-color="#c6c1bb"/>' +
+    '</linearGradient>' +
+  '</defs>';
+
+  return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">\n  ' +
+    defs + '\n  ' + parts.join('\n  ') + '\n</svg>';
+}
+
 function escapeXml(s) {
   return String(s || '')
     .replace(/&/g, '&amp;')
@@ -375,5 +776,7 @@ function escapeXml(s) {
 module.exports = {
   SPORT_CONFIGS,
   generateSportSvg,
-  generateDateSvg
+  generateDateSvg,
+  generateMatchCardSvg,
+  sportGlyphMarkup
 };

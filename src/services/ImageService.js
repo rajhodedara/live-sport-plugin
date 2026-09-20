@@ -48,7 +48,7 @@ function escapeXml(s) {
     .replace(/'/g, '&apos;');
 }
 
-const { generateSportSvg, generateDateSvg } = require('./MinimalistPosterService');
+const { generateSportSvg, generateDateSvg, generateMatchCardSvg } = require('./MinimalistPosterService');
 
 /**
  * Generated minimalist poster card: balanced, modern dark slate background,
@@ -208,6 +208,37 @@ function datePosterUrl(baseUrl, displayDate, count = 0, sportKey = null, shape =
   return url;
 }
 
+/**
+ * Build the composed match-card URL (/img/match). Used when a fixture has no
+ * official provider artwork, so the server composes a designed card from the
+ * available badges/league/channel instead of falling back to a bare text card.
+ */
+function matchCardUrl(baseUrl, spec = {}) {
+  const params = new URLSearchParams();
+  const put = (key, value) => {
+    if (value === undefined || value === null) return;
+    const str = String(value).trim();
+    if (!str) return;
+    params.set(key, str);
+  };
+
+  put('cat', spec.category);
+  put('t1', spec.team1);
+  put('t2', spec.team2);
+  put('b1', spec.badge1);
+  put('b2', spec.badge2);
+  put('lg', spec.league);
+  put('lb', spec.leagueBadge);
+  put('ch', spec.channel);
+  put('cb', spec.channelBadge);
+  put('st', spec.status);
+  put('tm', spec.time);
+  put('shape', spec.shape);
+
+  const qs = params.toString();
+  return qs ? `${baseUrl}/img/match?${qs}` : `${baseUrl}/img/match`;
+}
+
 module.exports = {
   svgPlaceholder,
   getImage,
@@ -215,7 +246,9 @@ module.exports = {
   placeholderUrl,
   sportPosterUrl,
   datePosterUrl,
+  matchCardUrl,
   generateSportSvg,
   generateDateSvg,
+  generateMatchCardSvg,
   normalizeUrl
 };

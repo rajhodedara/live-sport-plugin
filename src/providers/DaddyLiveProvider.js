@@ -36,6 +36,25 @@ function extractTokenExpiry(url) {
   return 0;
 }
 
+/**
+ * Normalize a manifest URL that was lifted out of an inline JSON string.
+ *
+ * Some players (play.matchli.st -> hls.hockey.do) embed the URL inside a JSON
+ * blob, so the query separator arrives JS-escaped as "\\u0026". A naive
+ * character-class regex stops at the backslash, producing a URL that keeps only
+ * the first query parameter and silently loses "e" and "sig" - the upstream CDN
+ * then answers 403 Forbidden. Unescaping restores a URL that returns a live
+ * playlist. Applied to every extracted candidate so no path regresses.
+ */
+function _cleanManifestUrl(url) {
+  if (!url || typeof url !== 'string') return url;
+  return url
+    .replace(/\\u0026/gi, '&')   // JSON-escaped ampersand
+    .replace(/\\\//g, '/')       // JSON-escaped forward slash
+    .replace(/&amp;/gi, '&')      // HTML entity
+    .replace(/[\\"']+$/, '');     // trailing JSON/quote leftovers
+}
+
 class DaddyLiveProvider extends BaseProvider {
   static isEventStream(name) {
     if (!name || typeof name !== 'string') return false;
@@ -51,6 +70,20 @@ class DaddyLiveProvider extends BaseProvider {
     this.baseDomains = ['https://dlstreams.st', 'https://dlive.sx'];
     this.folders = ['stream', 'cast', 'watch', 'player', 'plus', 'casting'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
+
+    // Self-healing domain knowledge. The container injects `iframeDomainRegistry`
+    // by proxy name; loading lazily otherwise keeps unit tests that construct the
+    // provider with only a circuit breaker working. Always optional - a miss must
+    // never block resolution.
+    this.domainRegistry = opts.iframeDomainRegistry || null;
+    if (!this.domainRegistry) {
+      try {
+        const IframeDomainRegistry = require('../services/IframeDomainRegistry');
+        this.domainRegistry = new IframeDomainRegistry();
+      } catch (_) {
+        this.domainRegistry = null;
+      }
+    }
 
     this.fetchSchedule = this.circuitBreaker.wrap(`${this.name}_fetchSchedule`, async () => {
       let lastErr = null;
@@ -199,6 +232,194 @@ class DaddyLiveProvider extends BaseProvider {
     } catch (_) {
       return null;
     }
+  }
+
+  /**
+   * Maximum number of embed->embed hops to follow before giving up.
+   *
+   * The audit of live DaddyLive traffic found the chain is no longer always one
+   * hop deep: streame.center serves a wrapper whose only content is another
+   * iframe that finally holds the manifest, so a single-level fallback stopped
+   * one hop too early. Two hops covers every chain observed.
+   */
+  static MAX_EMBED_DEPTH = 2;
+
+  /**
+   * Resolve a manifest from an already-fetched embed page.
+   *
+   * Domains observed in the live audit do NOT all share one structure, so
+   * several strategies are tried in cost order:
+   *   1. _econfig            - assetrage.net, *.dynproclaim.net (existing decoder)
+   *   2. extractor chain     - packed / obfuscated embeds
+   *   3. direct .m3u8 regex  - plain players
+   *   4. JSON player hop     - vertex.st: the page calls api/player.php?id=N,
+   *                            which answers {"url":"https://play.matchli.st/..."}
+   *   5. nested iframe       - streame.center / w1.sportsonlinee.click, recursive
+   *
+   * @returns {{url: string, referer: string}|null} referer is the page the
+   *          manifest was served from, so the caller can set Referer correctly.
+   */
+  async _resolveFromHtml(html, pageUrl, depth = 0) {
+    if (!html || typeof html !== 'string') return null;
+
+    // 1. DaddyLive _econfig
+    const econfigMatch = html.match(/_econfig\s*=\s*['"]([^'"]+)['"]/);
+    if (econfigMatch && econfigMatch[1]) {
+      const conf = this.decodeEconfig(econfigMatch[1]);
+      if (conf) {
+        const u = conf.stream_url || conf.stream_url_nop2p || null;
+        if (u) return { url: _cleanManifestUrl(u), referer: pageUrl, strategy: 'econfig' };
+      }
+    }
+
+    // 2. Extractor chain
+    const chainResult = extractChain(html, 'daddylive');
+    if (chainResult && chainResult.url) return { url: _cleanManifestUrl(chainResult.url), referer: pageUrl, strategy: 'chain' };
+
+    // 3. Plain regex for a direct HLS playlist.
+    //    The char class deliberately ALLOWS backslashes: when the URL sits inside
+    //    an inline JSON blob the separators arrive as "\\u0026", and excluding
+    //    backslash would truncate the URL at the first one - keeping only the
+    //    first query param and dropping "e"/"sig", which the CDN rejects with
+    //    403. _cleanManifestUrl unescapes afterwards.
+    const directMatch = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+    if (directMatch && directMatch[1]) return { url: _cleanManifestUrl(directMatch[1]), referer: pageUrl, strategy: 'direct' };
+
+    if (depth >= DaddyLiveProvider.MAX_EMBED_DEPTH) return null;
+
+    // 4. JSON player hop (vertex.st style). The page requests a php/api endpoint
+    //    that answers with {"url": "<real embed>"} instead of an iframe.
+    //
+    //    NOTE: the page embeds a TEMPLATE ("api/player.php?id=" + safeId) as well
+    //    as the resolved call loadPlayerChannel(91). Matching the template yields
+    //    an EMPTY id, so the numeric id is recovered first and preferred.
+    const idFromCall = html.match(/loadPlayerChannel\(\s*(\d+)\s*\)/);
+    const idFromAttr = html.match(/data-channel-id=["']?(\d+)/i);
+    let idFromQuery = null;
+    try { idFromQuery = new URL(pageUrl).searchParams.get('id'); } catch (_) {}
+    const channelId = (idFromCall && idFromCall[1]) || (idFromAttr && idFromAttr[1]) || idFromQuery || null;
+
+    const endpointRef = html.match(/([^"']*player\.php)/i);
+    let phpUrl = null;
+    const concrete = html.match(/([^"'\s]*player\.php\?[^"'\s]*[?&]id=\d+[^"'\s]*)/i);
+    if (concrete && concrete[1]) {
+      try { phpUrl = new URL(concrete[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+    } else if (channelId && endpointRef && endpointRef[1]) {
+      try { phpUrl = new URL(endpointRef[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+    }
+
+    if (phpUrl) {
+      const sep = phpUrl.includes('?') ? '&' : '?';
+      const callUrl = /[?&]id=/.test(phpUrl) ? phpUrl : phpUrl + sep + 'id=' + channelId;
+      try {
+        const pr = await this.proxyFetch(callUrl, {
+          headers: { 'User-Agent': UA, 'Referer': pageUrl, 'Accept': 'application/json,text/plain,*/*' },
+          signal: AbortSignal.timeout(6000)
+        });
+        if (pr.ok) {
+          const body = await pr.text();
+          let target = null;
+          try {
+            const j = JSON.parse(body);
+            if (j) target = j.url || j.stream_url || j.stream_url_nop2p || j.embed || j.link || null;
+          } catch (_) {
+            const m = body.match(/(https?:\/\/[^\s"'<>\\]+)/i);
+            if (m) target = m[1];
+          }
+          if (target) {
+            const nested = await this._resolveFromUrl(target, pageUrl, depth + 1);
+            if (nested) {
+              // This page needed the JSON hop; remember that about THIS host so a
+              // newly-rotated wrapper is recognised next time.
+              this._learnHostStrategy(pageUrl, 'json-hop', 'wrapper');
+              return nested;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 5. Nested iframe (recursive, bounded).
+    //    Rank ALL iframe candidates through the domain registry rather than
+    //    blindly taking the first: on pages that offer several frames this tries
+    //    the known embed host before unknown/platform noise.
+    const allIframes = [...html.matchAll(/<iframe[^>]+src=["']?([^"'\s>]+)["']?/gi)].map((m) => m[1]);
+    if (allIframes.length) {
+      const abs = allIframes.map((raw) => {
+        if (raw.startsWith('//')) return 'https:' + raw;
+        if (raw.startsWith('/')) { try { return new URL(raw, pageUrl).toString(); } catch (_) { return raw; } }
+        return raw;
+      });
+
+      let ordered = abs;
+      if (this.domainRegistry) {
+        try {
+          const hosts = abs.map((u) => { try { return new URL(u).hostname; } catch (_) { return ''; } });
+          const ranked = this.domainRegistry.rankCandidates(hosts);
+          if (ranked.length) {
+            ordered = ranked
+              .map((h) => abs.find((u) => { try { return new URL(u).hostname === h; } catch (_) { return false; } }))
+              .filter(Boolean)
+              .concat(abs.filter((u) => { try { return !ranked.includes(new URL(u).hostname); } catch (_) { return true; } }));
+          }
+        } catch (_) { ordered = abs; }
+      }
+
+      for (const nestedUrl of ordered.slice(0, 3)) {
+        const nested = await this._resolveFromUrl(nestedUrl, pageUrl, depth + 1);
+        if (nested) {
+          this._learnHostStrategy(pageUrl, 'nested', 'wrapper');
+          return nested;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Fetch an embed URL and resolve a manifest from it. Kept separate from
+   * _resolveFromHtml so the JSON hop and the nested-iframe hop recurse through a
+   * single code path with one shared depth counter.
+   */
+  async _resolveFromUrl(embedUrl, referer, depth = 0) {
+    if (!embedUrl || !/^https?:/i.test(embedUrl)) return null;
+    try {
+      const res = await this.proxyFetch(embedUrl, {
+        headers: {
+          'User-Agent': UA,
+          'Referer': referer,
+          'Accept': 'text/html,application/xhtml+xml,application/json,*/*;q=0.8'
+        },
+        signal: AbortSignal.timeout(6000)
+      });
+      if (!res.ok) return null;
+      const html = await res.text();
+      const result = await this._resolveFromHtml(html, embedUrl, depth);
+
+      // Self-healing: when THIS page supplied the manifest directly, the strategy
+      // that worked is a fact about THIS host - remember it. Recursive strategies
+      // (json-hop / nested) are learned on the deeper host by the recursive call.
+      if (result && this.domainRegistry && ['econfig', 'chain', 'direct'].includes(result.strategy)) {
+        this._learnHostStrategy(embedUrl, result.strategy, 'embed');
+      }
+
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Record a host->strategy observation in the domain registry. Wrapped so a
+   * registry problem (or a missing one) can never affect resolution.
+   */
+  _learnHostStrategy(urlOrHost, strategy, role) {
+    if (!this.domainRegistry || !strategy) return;
+    try {
+      const host = /^https?:\/\//i.test(urlOrHost) ? new URL(urlOrHost).hostname : urlOrHost;
+      this.domainRegistry.learn(host, strategy, { role });
+    } catch (_) {}
   }
 
   /**
@@ -554,7 +775,7 @@ class DaddyLiveProvider extends BaseProvider {
           } catch (_) {
             embedOrigin = base;
           }
-          const embedReferer = `${embedOrigin}/`;
+          let embedReferer = `${embedOrigin}/`;
 
           // Fetch the embed page
           const embedRes = await this.proxyFetch(iframeUrl, {
@@ -572,58 +793,19 @@ class DaddyLiveProvider extends BaseProvider {
           const embedHtml = await embedRes.text();
           let m3u8Url = null;
 
-          // 1. Check for DaddyLive _econfig
-          const econfigMatch = embedHtml.match(/_econfig\s*=\s*['"]([^'"]+)['"]/);
-          if (econfigMatch && econfigMatch[1]) {
-            const conf = this.decodeEconfig(econfigMatch[1]);
-            if (conf) {
-              m3u8Url = conf.stream_url || conf.stream_url_nop2p || null;
+          // Resolve via the shared helper: _econfig -> chain -> direct m3u8
+          // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
+          const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
+          if (resolved && resolved.url) {
+            m3u8Url = resolved.url;
+            // The manifest may be served from a deeper page than the first
+            // iframe, so the Referer must match THAT page, not the wrapper.
+            try {
+              embedOrigin = new URL(resolved.referer || iframeUrl).origin;
+            } catch (_) {
+              embedOrigin = base;
             }
-          }
-
-          // 2. Check EmbedExtractorChain
-          if (!m3u8Url) {
-            const chainResult = extractChain(embedHtml, 'daddylive');
-            if (chainResult && chainResult.url) {
-              m3u8Url = chainResult.url;
-            }
-          }
-
-          // 3. Plain regex for direct HLS playlist
-          if (!m3u8Url) {
-            const directMatch = embedHtml.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
-            if (directMatch && directMatch[1]) {
-              m3u8Url = directMatch[1];
-            }
-          }
-
-          // 4. Nested iframe fallback (1 level)
-          if (!m3u8Url) {
-            const nestedIframeMatch = embedHtml.match(/<iframe[^>]+src=["']?([^"'\s>]+)["']?/i);
-            if (nestedIframeMatch && nestedIframeMatch[1]) {
-              let nestedUrl = nestedIframeMatch[1];
-              if (nestedUrl.startsWith('//')) nestedUrl = 'https:' + nestedUrl;
-              else if (nestedUrl.startsWith('/')) nestedUrl = new URL(nestedUrl, iframeUrl).toString();
-
-              try {
-                const nestedRes = await this.proxyFetch(nestedUrl, {
-                  headers: { 'User-Agent': UA, 'Referer': iframeUrl },
-                  signal: AbortSignal.timeout(5000)
-                });
-                if (nestedRes.ok) {
-                  const nestedHtml = await nestedRes.text();
-                  const nestedEconfig = nestedHtml.match(/_econfig\s*=\s*['"]([^'"]+)['"]/);
-                  if (nestedEconfig && nestedEconfig[1]) {
-                    const conf = this.decodeEconfig(nestedEconfig[1]);
-                    if (conf) m3u8Url = conf.stream_url || conf.stream_url_nop2p || null;
-                  }
-                  if (!m3u8Url) {
-                    const chainRes = extractChain(nestedHtml, 'daddylive');
-                    if (chainRes && chainRes.url) m3u8Url = chainRes.url;
-                  }
-                }
-              } catch (_) {}
-            }
+            embedReferer = `${embedOrigin}/`;
           }
 
           if (m3u8Url) {

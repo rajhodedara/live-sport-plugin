@@ -20,6 +20,7 @@ const DaddyLiveProvider = require('./providers/DaddyLiveProvider');
 const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
+const IframeDomainRegistry = require('./services/IframeDomainRegistry');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -35,7 +36,10 @@ container.register({
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),
   streamResolveCache: asValue(new StreamResolveCache()),
-  teamLogoService: asClass(TeamLogoService).singleton()
+  teamLogoService: asClass(TeamLogoService).singleton(),
+  // Self-healing iframe-domain knowledge base (DaddyLive family). Singleton so
+  // runtime discoveries accumulate for the process lifetime.
+  iframeDomainRegistry: asValue(new IframeDomainRegistry())
 });
 
 // Build dynamic YAML Providers
