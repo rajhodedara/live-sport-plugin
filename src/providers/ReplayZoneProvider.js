@@ -15,6 +15,7 @@ class ReplayZoneProvider {
         this.sourceName = 'replayzone';
         this.replaysUrl = 'https://replay.adityapangshe.workers.dev/replays.txt';
         this._byseCache = new Map();
+        this._dmCache = new Map();
     }
 
     async getMatches() {
@@ -113,11 +114,119 @@ class ReplayZoneProvider {
             if (streams && streams.length > 0) return streams;
         }
 
-        // 5. For dailymotion or others, push as external browser stream
+        // 5. Dailymotion embed
+        if (this._isDailymotionUrl(url)) {
+            return await this._resolveDailymotion(url, partName);
+        }
+
+        // 6. For other embeds, push as external browser stream
         return [{
             name: 'RZ (External)',
             title: partName ? `${partName} (Browser)` : 'Watch in Browser',
-            externalUrl: url
+            externalUrl: url,
+            _rzWeb: true
+        }];
+    }
+
+    /** True when the URL belongs to Dailymotion */
+    _isDailymotionUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        return /(?:dailymotion\.com|dai\.ly)/i.test(url);
+    }
+
+    /** Extracts video ID from various Dailymotion URL formats */
+    _extractDailymotionVideoId(url) {
+        if (!url || typeof url !== 'string') return null;
+        const match = url.match(/[?&]video=([a-zA-Z0-9]+)/i) ||
+                      url.match(/(?:dailymotion\.com\/(?:video|embed\/video)|dai\.ly)\/([a-zA-Z0-9]+)/i);
+        return match ? match[1] : null;
+    }
+
+    _getCachedDm(videoId) {
+        const cached = this._dmCache.get(videoId);
+        if (!cached) return null;
+        if (cached.expiresAt < Date.now()) {
+            this._dmCache.delete(videoId);
+            return null;
+        }
+        return cached.isAlive;
+    }
+
+    _setCachedDm(videoId, isAlive) {
+        if (this._dmCache.size >= 1000) {
+            this._dmCache.delete(this._dmCache.keys().next().value);
+        }
+        // Cache dead status for 1 hour, alive status for 15 minutes
+        const ttl = isAlive ? 15 * 60 * 1000 : 60 * 60 * 1000;
+        this._dmCache.set(videoId, { isAlive, expiresAt: Date.now() + ttl });
+    }
+
+    /**
+     * Checks Dailymotion metadata to drop dead streams (e.g. content/user profile no longer available, Terms of Use, deleted).
+     */
+    async _checkDailymotionAlive(videoId) {
+        if (!videoId) return false;
+        const cached = this._getCachedDm(videoId);
+        if (cached !== null) return cached;
+
+        try {
+            const apiUrl = `https://www.dailymotion.com/player/metadata/video/${videoId}`;
+            const res = await undici.request(apiUrl, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Referer': 'https://www.dailymotion.com/'
+                },
+                headersTimeout: 4000,
+                bodyTimeout: 4000
+            });
+
+            if (res.statusCode !== 200) {
+                console.warn(`[ReplayZone] Dailymotion metadata returned HTTP ${res.statusCode} for ${videoId}`);
+                this._setCachedDm(videoId, false);
+                return false;
+            }
+
+            const json = await res.body.json();
+            if (json && json.error) {
+                const errMsg = json.error.message || json.error.title || json.error.raw_message || '';
+                console.log(`[ReplayZone] Dropping dead Dailymotion video ${videoId}: ${errMsg}`);
+                this._setCachedDm(videoId, false);
+                return false;
+            }
+
+            if (!json || !json.qualities || Object.keys(json.qualities).length === 0) {
+                console.log(`[ReplayZone] Dropping Dailymotion video ${videoId}: no qualities available`);
+                this._setCachedDm(videoId, false);
+                return false;
+            }
+
+            this._setCachedDm(videoId, true);
+            return true;
+        } catch (err) {
+            console.warn(`[ReplayZone] Error checking Dailymotion ${videoId}:`, err.message);
+            return false;
+        }
+    }
+
+    /**
+     * Resolves Dailymotion stream, returning empty array if video is dead / no longer available.
+     */
+    async _resolveDailymotion(url, partName = '') {
+        const videoId = this._extractDailymotionVideoId(url);
+        if (!videoId) {
+            return [];
+        }
+
+        const isAlive = await this._checkDailymotionAlive(videoId);
+        if (!isAlive) {
+            return [];
+        }
+
+        return [{
+            name: 'RZ (External)',
+            title: partName ? `${partName} (Browser)` : 'Watch in Browser',
+            externalUrl: url,
+            _rzWeb: true
         }];
     }
 
@@ -264,88 +373,30 @@ class ReplayZoneProvider {
     }
 
     /**
-     * Resolves ok.ru videos with parallel-range fastmp4 proxy.
+     * Resolves ok.ru videos.
+     *
+     * ok.ru's own JavaScript player opens 4–8 parallel byte-range connections to okcdn.ru
+     * internally, which is why 1080p plays smooth on ok.ru's website. When we extract the
+     * raw okcdn.ru URL and hand it directly to a player (ExoPlayer, VLC) that uses a single
+     * connection, okcdn throttles to ~238 KB/s / 1.95 Mbps — not enough for 1080p.
+     *
+     * Solution: serve the ok.ru embed URL as a web stream (_rzWeb). ok.ru's iframe player
+     * handles the parallel fetching on its own, delivering full speed at zero server bandwidth.
      */
     async _resolveOkRu(url, partName = '') {
-        const streams = [];
-        try {
-            const { body } = await undici.request(url, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-                    'Referer': 'https://ok.ru/',
-                    'Origin': 'https://ok.ru',
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.9'
-                }
-            });
-            
-            const html = await body.text();
-            
-            let videos = [];
-            const optionsMatch = html.match(/data-options="([^"]+)"/);
-            if (optionsMatch) {
-                try {
-                    const optionsStr = optionsMatch[1].replace(/&quot;/g, '"');
-                    const options = JSON.parse(optionsStr);
-                    if (options.flashvars && options.flashvars.metadata) {
-                        const meta = typeof options.flashvars.metadata === 'string' ? JSON.parse(options.flashvars.metadata) : options.flashvars.metadata;
-                        if (meta.videos) {
-                            videos = meta.videos;
-                        }
-                    }
-                } catch(err) {
-                    console.error('[ReplayZone] Failed parsing data-options:', err.message);
-                }
-            }
-
-            if (videos.length > 0) {
-                const qMap = {
-                    mobile: '144p',
-                    lowest: '240p',
-                    low: '360p',
-                    sd: '480p',
-                    hd: '720p',
-                    full: '1080p',
-                    quad: '1440p',
-                    ultra: '4k'
-                };
-                
-                const allowedQualities = ['hd', 'full', 'quad', 'ultra'];
-                let filteredVideos = videos.filter(v => allowedQualities.includes(v.name));
-                
-                // Fallback: if match only has SD, serve best available to avoid 0 streams
-                if (filteredVideos.length === 0) {
-                    filteredVideos = [videos[videos.length - 1]];
-                }
-
-                for (const v of filteredVideos) {
-                    if (!v.url) continue;
-                    const qName = qMap[v.name] || v.name;
-                    // ok.ru CDN: srcIp in token is routing metadata only, NOT enforced.
-                    // Confirmed by live cross-IP test (mobile data, different IP → 206 OK).
-                    // Players fetch directly from okcdn.ru using proxyHeaders. Server bandwidth: 0.
-                    streams.push({
-                        name: 'ReplayZone',
-                        title: partName.trim() ? `${partName.trim()} (${qName})` : `Stream (${qName})`,
-                        resolution: qName,
-                        url: v.url,
-                        behaviorHints: {
-                            notWebReady: true,
-                            proxyHeaders: {
-                                request: {
-                                    'Referer': 'https://ok.ru/',
-                                    'Origin': 'https://ok.ru',
-                                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
-                                }
-                            }
-                        }
-                    });
-                }
-            }
-        } catch (error) {
-            console.error('[ReplayZone] Error fetching ok.ru:', error.message);
+        // Normalise embed URL: ok.ru/video/ID → ok.ru/videoembed/ID so it loads the embeddable player
+        let embedUrl = url;
+        if (/ok\.ru\/video\/\d+/.test(url)) {
+            embedUrl = url.replace('/video/', '/videoembed/');
         }
-        return streams;
+
+        const label = partName.trim() ? `${partName.trim()} (ok.ru)` : 'ok.ru Player';
+        return [{
+            name: 'RZ (External)',
+            title: label,
+            externalUrl: embedUrl,
+            _rzWeb: true
+        }];
     }
 
     /**
@@ -429,6 +480,11 @@ class ReplayZoneProvider {
                     const okStreams = await this._resolveOkRu(fullIframeUrl, partName);
                     if (okStreams && okStreams.length > 0) {
                         streams.push(...okStreams);
+                    }
+                } else if (this._isDailymotionUrl(fullIframeUrl)) {
+                    const dmStreams = await this._resolveDailymotion(fullIframeUrl, partName);
+                    if (dmStreams && dmStreams.length > 0) {
+                        streams.push(...dmStreams);
                     }
                 } else if (this._isDirectMediaUrl(fullIframeUrl)) {
                     streams.push(this._buildDirectStream(fullIframeUrl, partName));

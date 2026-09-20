@@ -19,11 +19,11 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'streamic': 5, 'timstreams': 9, 'streamsports': 13, 'embedindia': 15 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
-    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'replayzone'].includes(src) ? 99 : 1.5);
+    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
     const pa = getPriority(a.source);
     const pb = getPriority(b.source);
     if (pa !== pb) return pa - pb;
@@ -32,18 +32,21 @@ function selectSources(matchSources, config) {
 
   if (config && typeof config.sources === 'string' && config.sources !== 'none') {
     const enabled = config.sources.split(',');
-    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
+    // embedindia / embedst / streamedpk are the same embed chain — all three are
+    // controlled by the single 'streamedpk' toggle on the configure page.
+    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
-      if (isFallback) {
-        return enabled.includes(src.source);
-      }
-      return false;
+      if (!isFallback) return false;
+      // embedindia and embedst are gated by the 'streamedpk' checkbox
+      if (src.source === 'embedindia' || src.source === 'embedst') return enabled.includes('streamedpk');
+      return enabled.includes(src.source);
     });
   }
 
-  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'streamic', 'timstreams', 'streamsports', 'embedst', 'streamedpk', 'replayzone'];
+  // Default path (no config in URL) — allow all known active providers
+  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -72,9 +75,6 @@ async function resolveSource(src, match, config) {
     } else if (sourceName === 'streamsports99') {
       const provider = container.resolve('streamSports99Provider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title);
-    } else if (sourceName === 'streamic') {
-      const provider = container.resolve('streamicProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
     } else if (sourceName === 'embedindia') {
       const provider = container.resolve('embedIndiaProvider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
@@ -139,7 +139,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('/watch?') || s.url.includes('pixeldrain.com') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    if (!s.url || s.url.includes('/watch?') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -430,8 +430,7 @@ async function handleStream(type, id, config) {
     timstreams: 'TimStreams',
     streamsports: 'StreamSports',
     streamsports99: 'StreamSports99',
-    'streamic': 'Streamic',
-    'embedindia': 'EmbedIndia', 'embedst': 'Embed.st', 'streamedpk': 'Streamed.pk',
+    'embedindia': 'Streamed.pk', 'embedst': 'Streamed.pk', 'streamedpk': 'Streamed.pk',
     'replayzone': 'ReplayZone'
   };
 
@@ -446,9 +445,6 @@ async function handleStream(type, id, config) {
     }
     
     const isWeb = !!s.externalUrl || s.name === 'Nuvio Web Player';
-    // The scorer attached the sourceName as _source in calculateScore? No, we didn't attach it.
-    // Wait, streamScorer doesn't attach sourceName to s.
-    // I can determine providerName from the string it already had.
     let providerName = niceNames[s._source] || niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] || 'Streamed.pk';
     
     if (s.title && s.title.toLowerCase().includes('daddylive')) providerName = 'DaddyLive';
@@ -456,7 +452,6 @@ async function handleStream(type, id, config) {
     else if (s.title && s.title.toLowerCase().includes('watchfooty')) providerName = 'WatchFooty';
     else if (s.title && s.title.toLowerCase().includes('cdnlive')) providerName = 'CDNLiveTV';
     else if (s.title && s.title.toLowerCase().includes('streamsports99')) providerName = 'StreamSports99';
-    else if (s.title && s.title.toLowerCase().includes('streamic')) providerName = 'Streamic';
 
     let originalTitle = s.title || '';
     let channelName = '';
@@ -503,7 +498,6 @@ async function handleStream(type, id, config) {
       else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
       else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
       else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
-      else if (providerName === 'Streamic') referer = 'https://streamic.st/';
       else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
       
       if (referer) {
@@ -520,19 +514,19 @@ async function handleStream(type, id, config) {
   });
 
   // ─── Prefer direct streams over web fallbacks ─────────────────────────
-  // A web embed is a last resort. When a working direct stream exists it is the
-  // better option on every client, and on TV clients the iframe embed is the one
-  // that fails outright, so web fallbacks are hidden whenever a direct stream is
-  // available. If NO direct stream survives, the web fallbacks are kept — that is
-  // the only remaining way to watch, so they must not be dropped wholesale.
-  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream');
+  // A web embed is a last resort for most providers. When a working direct
+  // stream exists those provider web embeds are hidden (TV clients can't open
+  // iframes). ReplayZone web streams (_rzWeb) are an exception — they are VOD
+  // embeds (Dailymotion, ok.ru page, etc.) that carry content the direct
+  // streams may not, so they are always kept alongside direct streams.
+  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream' || s._rzWeb);
   if (directOnly.length > 0 && directOnly.length < streams.length) {
     const hidden = streams.length - directOnly.length;
     // filter() returns a NEW array, so it is safe to clear and refill in place
     // (keeps the caller's reference valid).
     streams.length = 0;
     streams.push(...directOnly);
-    console.log(`[streams.js] Hid ${hidden} web fallback(s) — ${directOnly.length} direct stream(s) available`);
+    console.log(`[streams.js] Hid ${hidden} non-RZ web fallback(s) — ${directOnly.length} stream(s) kept`);
   }
 
   // Sort streams: Direct streams first, then by score descending
