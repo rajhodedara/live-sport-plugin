@@ -16,6 +16,7 @@ class ReplayZoneProvider {
         this.replaysUrl = 'https://replay.adityapangshe.workers.dev/replays.txt';
         this._byseCache = new Map();
         this._dmCache = new Map();
+        this._webCache = new Map();
     }
 
     async getMatches() {
@@ -119,13 +120,60 @@ class ReplayZoneProvider {
             return await this._resolveDailymotion(url, partName);
         }
 
-        // 6. For other embeds, push as external browser stream
-        return [{
-            name: 'RZ (External)',
-            title: partName ? `${partName} (Browser)` : 'Watch in Browser',
-            externalUrl: url,
-            _rzWeb: true
-        }];
+        // 6. For other embeds, push as external browser stream — but only when the
+        // page is actually reachable. Upstream replay pages get removed over time,
+        // and handing the user a dead fallback link is worse than handing them
+        // nothing: they copy it and get a 404. Probed conservatively (see
+        // _checkWebAlive): only a definitive 404/410 counts as dead.
+        if (await this._checkWebAlive(url)) {
+            return [{
+                name: 'RZ (External)',
+                title: partName ? `${partName} (Browser)` : 'Watch in Browser',
+                externalUrl: url,
+                _rzWeb: true
+            }];
+        }
+        return [];
+    }
+
+    /**
+     * Liveness probe for an external browser-fallback page, cached per URL.
+     *
+     * Deliberately conservative: ONLY a definitive 404/410 is treated as dead.
+     * A 403, a 405, a redirect or a network timeout means "we could not prove it
+     * is gone", so the link is kept — some hosts reject probe requests while a
+     * real browser would still open the page. Dropping a working link is worse
+     * than keeping a dead one.
+     */
+    async _checkWebAlive(url) {
+        if (!url || typeof url !== 'string') return false;
+        const cached = this._webCache.get(url);
+        if (cached !== undefined) return cached;
+
+        let alive = true;
+        try {
+            const res = await undici.request(url, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+                    'Accept': 'text/html,application/xhtml+xml,*/*'
+                },
+                headersTimeout: 5000,
+                bodyTimeout: 5000
+            });
+            if (res.statusCode === 404 || res.statusCode === 410) {
+                alive = false;
+                console.log(`[ReplayZone] Dropping dead fallback link (HTTP ${res.statusCode}): ${url}`);
+            }
+            // Always drain the body so the socket is released back to the pool.
+            try { await res.body.dump(); } catch (_) {}
+        } catch (_) {
+            // Could not reach it — not proof it is gone. Keep the link.
+            alive = true;
+        }
+
+        this._webCache.set(url, alive);
+        return alive;
     }
 
     /** True when the URL belongs to Dailymotion */

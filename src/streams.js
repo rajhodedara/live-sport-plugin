@@ -1,5 +1,6 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
+const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -53,6 +54,61 @@ function selectSources(matchSources, config) {
   });
 }
 
+// Ask one provider for its streams. Extracted from resolveSource so the whole
+// dispatch can be retried as a unit without duplicating the chain.
+async function dispatchToProvider(sourceName, src, match) {
+  let resStreams = [];
+
+  if (sourceName === 'timstreams') {
+    const provider = container.resolve('timStreamsProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title);
+  } else if (sourceName === 'watchfooty') {
+    const provider = container.resolve('watchFootyProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title);
+  } else if (sourceName === 'cdnlive') {
+    const provider = container.resolve('cdnLiveProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title);
+  } else if (sourceName === 'streamsports99') {
+    const provider = container.resolve('streamSports99Provider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title);
+  } else if (sourceName === 'embedindia') {
+    const provider = container.resolve('embedIndiaProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'embedst') {
+    const provider = container.resolve('embedStProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'streamedpk') {
+    const provider = container.resolve('streamedPkProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'replayzone') {
+    const provider = container.resolve('replayzoneProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'daddylive') {
+    const provider = container.resolve('daddyLiveProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName.startsWith('yaml_')) {
+    const yamlProviders = container.resolve('yamlProviders');
+    const pName = sourceName.replace('yaml_', '');
+    const provider = yamlProviders.find(p => p.name === pName);
+    if (provider) {
+      resStreams = await provider.resolveStream(src.id, match.category, match.title);
+    }
+  } else {
+    // Unknown or unsupported source, ignore
+    resStreams = [];
+  }
+
+  return resStreams;
+}
+
+// How hard to try a provider before giving up on this source for the mint.
+// Providers do multi-hop network work (embed page -> extractor -> CDN), so a
+// single reset or edge timeout is common and is not evidence the source is
+// dead; but the budget stays small because handleStream is racing a deadline
+// and a slow source simply lands in the resolve cache for the next request.
+const RESOLVE_ATTEMPTS = Number(process.env.RESOLVE_ATTEMPTS || 2);
+const RESOLVE_TOTAL_BUDGET_MS = Number(process.env.RESOLVE_TOTAL_BUDGET_MS || 12000);
+
 // Resolve a single source (extracted from handleStream, logic unchanged)
 async function resolveSource(src, match, config) {
   if (isEventStreamSource(src)) {
@@ -63,51 +119,31 @@ async function resolveSource(src, match, config) {
   let resStreams = [];
 
   try {
-    if (sourceName === 'timstreams') {
-      const provider = container.resolve('timStreamsProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
-    } else if (sourceName === 'watchfooty') {
-      const provider = container.resolve('watchFootyProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
-    } else if (sourceName === 'cdnlive') {
-      const provider = container.resolve('cdnLiveProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
-    } else if (sourceName === 'streamsports99') {
-      const provider = container.resolve('streamSports99Provider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title);
-    } else if (sourceName === 'embedindia') {
-      const provider = container.resolve('embedIndiaProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-    } else if (sourceName === 'embedst') {
-      const provider = container.resolve('embedStProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-    } else if (sourceName === 'streamedpk') {
-      const provider = container.resolve('streamedPkProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-    } else if (sourceName === 'replayzone') {
-      const provider = container.resolve('replayzoneProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-    } else if (sourceName === 'daddylive') {
-      const provider = container.resolve('daddyLiveProvider');
-      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-    } else if (sourceName.startsWith('yaml_')) {
-      const yamlProviders = container.resolve('yamlProviders');
-      const pName = sourceName.replace('yaml_', '');
-      const provider = yamlProviders.find(p => p.name === pName);
-      if (provider) {
-        resStreams = await provider.resolveStream(src.id, match.category, match.title);
-      }
-    } else {
-      // Unknown or unsupported source, ignore
-      resStreams = [];
-    }
+    const deadlineAt = Date.now() + RESOLVE_TOTAL_BUDGET_MS;
+    resStreams = await withRetry(() => dispatchToProvider(sourceName, src, match), {
+      attempts: RESOLVE_ATTEMPTS,
+      baseDelayMs: 300,
+      maxDelayMs: 1200,
+      deadlineAt,
+      label: `resolve:${sourceName}`,
+      // An empty result is a real answer ("nothing on offer"), not a failure —
+      // retrying it would spend the budget to be told the same thing twice.
+      onRetry: ({ attempt, delay, error }) =>
+        console.warn(`[streams.js] ${sourceName}/${src.id} transient on attempt ${attempt} (${error.message}); retrying in ${delay}ms`),
+    }) || [];
 
     for (const s of resStreams) {
       s.score = streamScorer.calculateScore(s, sourceName);
       s._source = sourceName;
     }
   } catch (e) {
-    console.warn(`[streams.js] Error resolving ${sourceName} for ${src.id}:`, e.message);
+    // Distinguish "the network flaked and kept flaking" from "this provider is
+    // broken": the first is expected noise, the second wants a stack trace.
+    if (isTransientError(e)) {
+      console.warn(`[streams.js] ${sourceName}/${src.id} unreachable after ${RESOLVE_ATTEMPTS} attempt(s): ${e.message}`);
+    } else {
+      console.error(`[streams.js] ${sourceName}/${src.id} failed to resolve:`, e && e.stack ? e.stack : e);
+    }
   }
 
   return resStreams;
@@ -116,6 +152,13 @@ async function resolveSource(src, match, config) {
 // Safe impit+undici helper — works on all platforms (Windows, Linux x64/ARM64, musl).
 // impit is tried first for browser TLS fingerprinting; undici is the automatic fallback.
 const { safeFetch: _safeFetch } = require('./impitClient');
+
+// How long one verification ping may take, and how long all its retries may
+// take together. The total stays under handleStream's soft deadline so a
+// retrying verification can still make it into the first response.
+const VERIFY_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 5000);
+const VERIFY_TOTAL_BUDGET_MS = Number(process.env.VERIFY_TOTAL_BUDGET_MS || 9000);
+const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
 
 // Proxied /api/manifest URLs wrap an upstream token that expires on its own
 // schedule. Tag the URL with the resolve-cache key that produced it so the
@@ -161,9 +204,6 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
     }
 
     try {
-      const abortController = new AbortController();
-      const timeout = setTimeout(() => abortController.abort(), 5000); // 5 second timeout to allow slow edge CDNs (wfty/strmd) to respond
-
       if (!referer && s.behaviorHints && s.behaviorHints.proxyHeaders && s.behaviorHints.proxyHeaders.request) {
         referer = s.behaviorHints.proxyHeaders.request.Referer || '';
       }
@@ -180,24 +220,54 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
       };
       if (origin) reqHeaders['Origin'] = origin;
 
+      // A verification ping is one sample of a flaky path: a CDN edge mid-
+      // rotation, a reset socket, a 503 under load. Believing that single
+      // sample used to drop a stream that plays perfectly well, and then
+      // negative-cache it. Retry the transient answers, within a budget that
+      // keeps the whole verification inside handleStream's soft deadline.
+      const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
       try {
-        // _safeFetch handles impit -> undici fallback automatically on all platforms
-        const result = await _safeFetch(targetUrl, {
-          method: 'GET',
-          headers: reqHeaders,
-          signal: abortController.signal,
-          timeoutMs: 5000,
-        });
+        const result = await withRetry(
+          async () => {
+            // A fresh controller per attempt: a controller that already fired
+            // aborts the retry the moment it starts.
+            const attemptController = new AbortController();
+            const attemptTimer = setTimeout(() => attemptController.abort(), VERIFY_TIMEOUT_MS);
+            try {
+              // _safeFetch handles impit -> undici fallback automatically on all platforms.
+              // attempts:1 — retrying is this layer's job, so the two do not compound
+              // into a multi-minute stall.
+              const r = await _safeFetch(targetUrl, {
+                method: 'GET',
+                headers: reqHeaders,
+                signal: attemptController.signal,
+                timeoutMs: VERIFY_TIMEOUT_MS,
+                attempts: 1,
+              });
+              return { status: r.status, body: await r.text() };
+            } finally {
+              clearTimeout(attemptTimer);
+            }
+          },
+          {
+            attempts: VERIFY_ATTEMPTS,
+            deadlineAt: verifyDeadlineAt,
+            label: 'verify',
+            shouldRetryResult: (r) => isTransientStatus(r.status),
+            onRetry: ({ attempt, delay, result, error }) => {
+              const why = error ? error.message : `HTTP ${result.status}`;
+              console.log(`[Filter] transient ${why} on attempt ${attempt}, retrying in ${delay}ms: ${targetUrl}`);
+            },
+          }
+        );
         res = { status: result.status };
-        bodySample = await result.text();
+        bodySample = result.body;
       } catch (fetchErr) {
-        clearTimeout(timeout);
-        console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${fetchErr.message}`);
+        const kind = isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
+        console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
-
-      clearTimeout(timeout);
 
       // ── Retry-once safety net ───────────────────────────────────────────
       // Some CDNs (notably WatchFooty's wfty.st edge) answer 403 Forbidden
@@ -223,8 +293,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
               'Referer': guess,
               'Origin': guess.replace(/\/$/, ''),
             },
-            signal: abortController.signal,
-            timeoutMs: 5000,
+            timeoutMs: VERIFY_TIMEOUT_MS,
+            attempts: 1,
           });
           res = { status: r2.status };
           bodySample = await r2.text();
@@ -597,5 +667,8 @@ module.exports = {
   selectSources,
   // Exported so the manifest proxy can transparently re-mint a single expired
   // source without going through the full stream-list path (see src/index.js).
-  resolveSource
+  resolveSource,
+  // Exported for tests: the retry/keep/drop policy is the part worth pinning
+  // down, and driving it through handleStream would need the whole match cache.
+  verifyStreams
 };

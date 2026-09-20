@@ -46,17 +46,24 @@ const _undiciAgent = new Agent({
  * safeFetch - fetches a URL using impit when available, falls back to undici.
  *
  * @param {string} url
- * @param {object} opts   - { method, headers, body, signal, timeoutMs }
+ * @param {object} opts   - { method, headers, body, signal, timeoutMs, attempts }
+ *   attempts: how many times to try the impit path before falling back to
+ *   undici (default 3). Callers that run their own retry policy should pass 1,
+ *   so the two layers do not multiply: three impit tries at a 5s timeout plus
+ *   backoff is ~17s inside a call the caller believes is bounded by timeoutMs.
  * @returns {{ ok, status, text: () => string, json: () => object }}
  */
 async function safeFetch(url, opts = {}) {
-  const { method = 'GET', headers = {}, body, signal, timeoutMs = 15000 } = opts;
+  const { method = 'GET', headers = {}, body, signal, timeoutMs = 15000, attempts = 3 } = opts;
   const impit = getImpit();
+  const maxAttempts = Math.max(1, attempts);
 
   // -- Path A: impit ---------------------------------------------------------
   if (impit) {
     let lastErr = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      // The caller gave up (deadline hit upstream); stop burning its budget.
+      if (signal && signal.aborted) throw Object.assign(new Error('aborted before impit attempt'), { name: 'AbortError' });
       let timer = null;
       try {
         const res = await Promise.race([
@@ -77,7 +84,7 @@ async function safeFetch(url, opts = {}) {
         };
       } catch (impitErr) {
         lastErr = impitErr;
-        if (attempt < 3) {
+        if (attempt < maxAttempts) {
            await new Promise(r => setTimeout(r, 800 * attempt));
         }
       } finally {
@@ -86,7 +93,7 @@ async function safeFetch(url, opts = {}) {
         if (timer) clearTimeout(timer);
       }
     }
-    console.warn(`[impitClient] impit fetch failed after 3 retries (${lastErr.message}), falling back to undici for: ${url}`);
+    console.warn(`[impitClient] impit fetch failed after ${maxAttempts} attempt(s) (${lastErr.message}), falling back to undici for: ${url}`);
   }
 
   // -- Path B: undici --------------------------------------------------------
