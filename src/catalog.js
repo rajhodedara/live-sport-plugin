@@ -335,16 +335,27 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   } else if (providerLogo) {
     poster = buildImg(providerLogo, posterText, color, true) || fallbackPoster;
   } else {
+    // No provider artwork at all (typical for 24/7 networks from CdnLive and
+    // niche DaddyLive fixtures). Compose the cinematic card, and make sure the
+    // resolved channel logo lands on the HERO slot for channel-style entries —
+    // otherwise a 24/7 station renders as a big text card with its logo reduced
+    // to a 20px footer chip, which reads as "no logo".
+    const isChannelLike = !match.team1 && !match.team2;
+    const channelMark = broadcasterLogo || channelLogo;
+
     poster = imageService.matchCardUrl(BASE_URL, {
       category: match.category,
+      title: match.title,
       team1: match.team1 && match.team1.name,
       team2: match.team2 && match.team2.name,
-      badge1: providerTeamLogo || fallbackTeamLogo,
-      badge2: providerTeamLogo2 || fallbackTeamLogo2,
+      // For channel entries the logo becomes the hero mark.
+      badge1: isChannelLike ? null : (providerTeamLogo || fallbackTeamLogo),
+      badge2: isChannelLike ? null : (providerTeamLogo2 || fallbackTeamLogo2),
+      channelMark: isChannelLike ? channelMark : null,
       league: match.league,
       leagueBadge: leagueEmblem,
-      channel: broadcasterName,
-      channelBadge: broadcasterLogo || channelLogo,
+      channel: broadcasterName || (isChannelLike ? match.title : null),
+      channelBadge: channelMark,
       status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
       time: formatKickoffForCard(match.date, config),
       shape: reqType === 'series' ? 'poster' : 'landscape'

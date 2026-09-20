@@ -542,6 +542,15 @@ function buildHeroLines(spec, team1, team2, maxChars) {
   return lines.slice(0, 3).map(l => (l.toUpperCase() === 'VS' ? 'VS' : truncateLabel(l, maxChars))).filter(Boolean);
 }
 
+/** Truncate a single label so it fits the given pixel width at a given font size. */
+function truncateToWidth(value, maxPx, fontSize) {
+  const str = String(value === undefined || value === null ? '' : value).trim();
+  if (!str) return '';
+  // Condensed uppercase glyphs average ~0.5em; stay conservative at 0.56em.
+  const maxChars = Math.max(6, Math.floor(maxPx / (fontSize * 0.56)));
+  return truncateLabel(str, maxChars);
+}
+
 /**
  * Compose a premium match card.
  *
@@ -556,14 +565,18 @@ function buildHeroLines(spec, team1, team2, maxChars) {
  * @param {string}  [spec.leagueBadge]   competition badge as an embedded data URI
  * @param {string}  [spec.channel]       channel/broadcaster name (footer chip)
  * @param {string}  [spec.channelBadge]  channel badge as an embedded data URI
+ * @param {string}  [spec.channelMark]   channel logo to draw on the HERO slot
+ *                                       (24/7 stations, where the logo IS the art)
  * @param {string}  [spec.status]        live | upcoming | replay | 247
  * @param {string}  [spec.time]          already-formatted display time
  * @param {string}  [spec.shape]         landscape (800x450, default) | poster (600x900)
  */
 function generateMatchCardSvg(spec = {}) {
   const isPoster = spec.shape === 'poster';
+  // Canvas ratios follow the Stremio meta spec: posterShape "landscape" = 1:1.77
+  // (16:9) and "poster" = 1:0.675. Resolution is free, so we keep it modest.
   const w = isPoster ? 600 : 800;
-  const h = isPoster ? 900 : 450;
+  const h = isPoster ? 889 : 450;
 
   const catKey = String(spec.category || 'other').toLowerCase().trim();
   const cfg = SPORT_CONFIGS[catKey] || SPORT_CONFIGS.other;
@@ -583,6 +596,7 @@ function generateMatchCardSvg(spec = {}) {
   const badge2 = spec.badge2 || null;
   const leagueBadge = spec.leagueBadge || null;
   const channelBadge = spec.channelBadge || null;
+  const channelMark = spec.channelMark || null;
   const available = (badge1 ? 1 : 0) + (badge2 ? 1 : 0);
 
   const stRaw = String(spec.status || '').toLowerCase();
@@ -616,7 +630,7 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(badgeImage(leagueBadge, margin, headerY - 12, 16));
       lx = margin + 24;
     }
-    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="12" font-weight="700" letter-spacing="2.2" fill="' + CARD_HOT_SOFT + '">' + escapeXml(label) + '</text>');
+    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="14" font-weight="700" letter-spacing="2.2" fill="' + CARD_HOT_SOFT + '">' + escapeXml(label) + '</text>');
   }
 
   // ── Header: status pill (right) ──
@@ -627,20 +641,20 @@ function generateMatchCardSvg(spec = {}) {
       replay: { t: 'REPLAY', dot: false, color: CARD_HOT_SOFT },
       '247': { t: '24/7', dot: false, color: CARD_HOT_SOFT }
     }[status];
-    const dotR = 4;
-    const pillW = 26 + (conf.dot ? dotR * 2 + 8 : 0) + conf.t.length * 7.4;
-    const pillH = 23;
+    const dotR = 4.5;
+    const pillW = 30 + (conf.dot ? dotR * 2 + 8 : 0) + conf.t.length * 8.8;
+    const pillH = 26;
     const pillY = headerY - pillH / 2;
     const pillX = w - margin - pillW;
     const pillStroke = status === 'live' ? 'rgba(255,90,90,0.5)' : 'rgba(255,154,69,0.45)';
     const pillFill = status === 'live' ? 'rgba(255,60,60,0.14)' : 'rgba(255,122,26,0.12)';
     parts.push('<rect x="' + pillX.toFixed(1) + '" y="' + pillY.toFixed(1) + '" width="' + pillW.toFixed(1) + '" height="' + pillH + '" rx="' + (pillH / 2) + '" fill="' + pillFill + '" stroke="' + pillStroke + '" stroke-width="1"/>');
-    let px = pillX + 13;
+    let px = pillX + 15;
     if (conf.dot) {
       parts.push('<circle cx="' + (px + dotR).toFixed(1) + '" cy="' + headerY + '" r="' + dotR + '" fill="' + conf.dotColor + '"/>');
       px += dotR * 2 + 8;
     }
-    parts.push('<text x="' + px.toFixed(1) + '" y="' + (headerY + 3.5).toFixed(1) + '" font-family="' + CARD_SANS + '" font-size="10" font-weight="800" letter-spacing="1.4" fill="' + conf.color + '">' + escapeXml(conf.t) + '</text>');
+    parts.push('<text x="' + px.toFixed(1) + '" y="' + (headerY + 4).toFixed(1) + '" font-family="' + CARD_SANS + '" font-size="12" font-weight="800" letter-spacing="1.4" fill="' + conf.color + '">' + escapeXml(conf.t) + '</text>');
   }
 
   // Circular crest plates: soft glass disc, thin rim, light streaking behind.
@@ -659,80 +673,100 @@ function generateMatchCardSvg(spec = {}) {
   if (!isPoster) {
     // ── Landscape: cinematic fixture row ──
     if (available === 2) {
-      parts.push(crest(200, 186, 84, badge1));
-      parts.push(crest(600, 186, 84, badge2));
-      parts.push(vsBadge(400, 186, 26));
-      parts.push(teamName(200, 332, team1, 21));
-      parts.push(teamName(600, 332, team2, 21));
-      parts.push('<line x1="' + margin + '" y1="382" x2="' + (w - margin) + '" y2="382" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push(crest(200, 188, 104, badge1));
+      parts.push(crest(600, 188, 104, badge2));
+      parts.push(vsBadge(400, 188, 30));
+      parts.push(teamName(200, 346, team1, 25));
+      parts.push(teamName(600, 346, team2, 25));
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     } else if (available === 1) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
       const otherName = badge1 ? team2 : team1;
-      parts.push(crest(400, 172, 78, shownBadge));
-      parts.push(teamName(400, 300, shownName, 21));
+      parts.push(crest(400, 170, 96, shownBadge));
+      parts.push(teamName(400, 312, shownName, 25));
       if (otherName) {
-        parts.push('<text x="400" y="334" font-family="' + CARD_SANS + '" font-size="13" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+        parts.push('<text x="400" y="350" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
       }
-      parts.push('<line x1="' + margin + '" y1="382" x2="' + (w - margin) + '" y2="382" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     } else {
-      const heroLines = buildHeroLines(spec, team1, team2, 24);
-      const fs = heroLines.length >= 3 ? 30 : heroLines.length === 2 ? 40 : 46;
-      const lh = fs + 16;
-      const startY = 200 - ((heroLines.length - 1) * lh) / 2;
-      heroLines.forEach((line, i) => {
-        const isVs = line.toUpperCase() === 'VS';
-        parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
-      });
-      parts.push('<line x1="' + margin + '" y1="352" x2="' + (w - margin) + '" y2="352" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      // No fixture crests. If a channel logo exists it becomes the hero mark
+      // (24/7 stations, where the logo IS the artwork); otherwise typographic.
+      if (channelMark) {
+        const heroName = truncateToWidth(spec.title || leagueName || channelName, 620, 34);
+        parts.push('<circle cx="400" cy="180" r="98" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>');
+        parts.push(badgeImage(channelMark, 400 - 98 * 0.68, 180 - 98 * 0.68, 98 * 1.36));
+        if (heroName) {
+          parts.push('<text x="400" y="324" font-family="' + CARD_COND + '" font-size="34" font-weight="700" letter-spacing="1.1" fill="url(#nameFill)" text-anchor="middle">' + escapeXml(heroName.toUpperCase()) + '</text>');
+        }
+      } else {
+        const heroLines = buildHeroLines(spec, team1, team2, 22);
+        const fs = heroLines.length >= 3 ? 36 : heroLines.length === 2 ? 46 : 54;
+        const lh = fs + 16;
+        const startY = 200 - ((heroLines.length - 1) * lh) / 2;
+        heroLines.forEach((line, i) => {
+          const isVs = line.toUpperCase() === 'VS';
+          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+        });
+      }
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     }
   } else {
     // ── Poster (2:3): cinematic vertical stack ──
     if (available === 2) {
-      parts.push(crest(190, 300, 62, badge1));
-      parts.push(crest(410, 300, 62, badge2));
-      parts.push(vsBadge(300, 300, 24));
-      parts.push(teamName(190, 420, team1, 20));
-      parts.push(teamName(410, 420, team2, 20));
-      parts.push('<line x1="' + margin + '" y1="500" x2="' + (w - margin) + '" y2="500" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push(crest(186, 296, 78, badge1));
+      parts.push(crest(414, 296, 78, badge2));
+      parts.push(vsBadge(300, 296, 26));
+      parts.push(teamName(186, 432, team1, 24));
+      parts.push(teamName(414, 432, team2, 24));
+      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     } else if (available === 1) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
       const otherName = badge1 ? team2 : team1;
-      parts.push(crest(300, 290, 66, shownBadge));
-      parts.push(teamName(300, 416, shownName, 20));
+      parts.push(crest(300, 286, 80, shownBadge));
+      parts.push(teamName(300, 424, shownName, 24));
       if (otherName) {
-        parts.push('<text x="300" y="450" font-family="' + CARD_SANS + '" font-size="13" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+        parts.push('<text x="300" y="462" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
       }
-      parts.push('<line x1="' + margin + '" y1="520" x2="' + (w - margin) + '" y2="520" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="532" x2="' + (w - margin) + '" y2="532" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     } else {
-      const heroLines = buildHeroLines(spec, team1, team2, 17);
-      const fs = heroLines.length >= 3 ? 34 : heroLines.length === 2 ? 44 : 52;
-      const lh = fs + 18;
-      const startY = 400 - ((heroLines.length - 1) * lh) / 2;
-      heroLines.forEach((line, i) => {
-        const isVs = line.toUpperCase() === 'VS';
-        parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
-      });
+      if (channelMark) {
+        const heroName = truncateToWidth(spec.title || leagueName || channelName, 460, 34);
+        parts.push('<circle cx="300" cy="240" r="98" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>');
+        parts.push(badgeImage(channelMark, 300 - 98 * 0.68, 240 - 98 * 0.68, 98 * 1.36));
+        if (heroName) {
+          parts.push('<text x="300" y="384" font-family="' + CARD_COND + '" font-size="34" font-weight="700" letter-spacing="1.1" fill="url(#nameFill)" text-anchor="middle">' + escapeXml(heroName.toUpperCase()) + '</text>');
+        }
+      } else {
+        const heroLines = buildHeroLines(spec, team1, team2, 16);
+        const fs = heroLines.length >= 3 ? 38 : heroLines.length === 2 ? 48 : 56;
+        const lh = fs + 18;
+        const startY = 400 - ((heroLines.length - 1) * lh) / 2;
+        heroLines.forEach((line, i) => {
+          const isVs = line.toUpperCase() === 'VS';
+          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+        });
+      }
       parts.push('<line x1="' + margin + '" y1="560" x2="' + (w - margin) + '" y2="560" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
     }
   }
 
   // ── Footer: centred time + channel mark ──
-  const footerY = isPoster ? h - 58 : 404;
+  const footerY = isPoster ? h - 58 : 412;
   if (timeText) {
-    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="12" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.52)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
+    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="14" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.52)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
   }
   if (channelName || channelBadge) {
     const label = channelName.toUpperCase();
-    const chipW = (channelBadge ? 18 + 8 : 0) + label.length * 7.0;
+    const chipW = (channelBadge ? 20 + 8 : 0) + label.length * 7.8;
     let px = w - margin - chipW;
     if (channelBadge) {
-      parts.push(badgeImage(channelBadge, px, footerY - 13, 18));
-      px += 26;
+      parts.push(badgeImage(channelBadge, px, footerY - 14, 20));
+      px += 28;
     }
     if (label) {
-      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="11" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.38)">' + escapeXml(label) + '</text>');
+      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="12.5" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.38)">' + escapeXml(label) + '</text>');
     }
   }
 

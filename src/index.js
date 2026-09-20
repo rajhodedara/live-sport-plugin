@@ -171,8 +171,8 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
 
   const memoKey = [
-    qs(query.cat), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
-    qs(query.lg), qs(query.lb), qs(query.ch), qs(query.cb),
+    qs(query.cat), qs(query.title), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
+    qs(query.lg), qs(query.lb), qs(query.ch), qs(query.cb), qs(query.cm),
     qs(query.st), qs(query.tm), shape
   ].join('|');
 
@@ -182,30 +182,38 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     return res.send(cached);
   }
 
-  // Embed each badge as a data URI so the card never references a remote host
-  // (dead upstream image → cleanly omitted element, never a broken image).
-  const embed = async (raw) => {
-    if (!raw) return null;
-    const entry = await imageService.getImage(raw);
+  // Resolve each badge reference. We still fetch through the shared cache so a
+  // dead crest is omitted (rather than drawn as an empty plate), but the card
+  // only ever references it as a URL — never a base64 data URI — to stay inside
+  // the Stremio poster size budget.
+  const asUrl = async (raw) => {
+    const v = qs(raw);
+    if (!v) return null;
+    const entry = await imageService.getImage(v);
     if (!entry) return null;
-    return `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
+    return `${BASE_URL}/img/badge?url=${encodeURIComponent(v)}`;
   };
 
   const [badge1, badge2, leagueBadge, channelBadge] = await Promise.all([
-    embed(qs(query.b1)),
-    embed(qs(query.b2)),
-    embed(qs(query.lb)),
-    embed(qs(query.cb))
+    asUrl(query.b1),
+    asUrl(query.b2),
+    asUrl(query.lb),
+    asUrl(query.cb)
   ]);
+
+  // A channel logo promoted to the hero slot (24/7 stations).
+  const channelMark = await asUrl(query.cm);
 
   const svg = imageService.generateMatchCardSvg({
     category: qs(query.cat),
+    title: qs(query.title),
     team1: qs(query.t1),
     team2: qs(query.t2),
     badge1,
     badge2,
     leagueBadge,
     channelBadge,
+    channelMark,
     league: qs(query.lg),
     channel: qs(query.ch),
     status: qs(query.st),
@@ -218,6 +226,32 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
 
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.send(svg);
+});
+
+// /img/badge?url=...     → a single cached crest as real binary, so composed
+//                          cards stay under the Stremio poster size budget.
+app.get(['/img/badge', '/:config/img/badge'], async (req, res) => {
+  const raw = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+
+  if (!raw) {
+    res.status(400).end();
+    return;
+  }
+
+  const entry = await imageService.getImage(raw);
+  if (!entry) {
+    // Transparent 1x1 PNG so a dead crest never shows a broken-image glyph.
+    const px = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'public, max-age=60');
+    return res.send(px);
+  }
+
+  res.setHeader('Content-Type', entry.contentType);
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.send(entry.buffer);
 });
 
 app.get('/img', async (req, res) => {

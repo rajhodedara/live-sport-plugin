@@ -121,7 +121,8 @@ describe('generateMatchCardSvg', () => {
 
     expect(landscape).toContain('width="800" height="450"');
     expect(defaulted).toContain('width="800" height="450"');
-    expect(poster).toContain('width="600" height="900"');
+    // Stremio posterShape "poster" spec ratio is 1:0.675 -> 600x889.
+    expect(poster).toContain('width="600" height="889"');
     expect(xmlParseError(poster)).toBeNull();
   });
 

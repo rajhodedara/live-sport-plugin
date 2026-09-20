@@ -223,6 +223,7 @@ function matchCardUrl(baseUrl, spec = {}) {
   };
 
   put('cat', spec.category);
+  put('title', spec.title);
   put('t1', spec.team1);
   put('t2', spec.team2);
   put('b1', spec.badge1);
@@ -231,6 +232,7 @@ function matchCardUrl(baseUrl, spec = {}) {
   put('lb', spec.leagueBadge);
   put('ch', spec.channel);
   put('cb', spec.channelBadge);
+  put('cm', spec.channelMark);
   put('st', spec.status);
   put('tm', spec.time);
   put('shape', spec.shape);
