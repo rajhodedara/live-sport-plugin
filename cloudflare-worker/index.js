@@ -8,7 +8,18 @@
  * 4. Click "Edit Code", paste this entire script, and click "Deploy".
  * 5. Copy your worker's URL (e.g., https://nuvio-proxy.yourname.workers.dev)
  * 6. Set this URL as the CF_PROXY_URL environment variable in your Nuvio deployment!
+ *
+ * FIX: cloaked .image segments translate Range requests correctly. The 42-byte
+ * fake WebP/RIFF prefix is stripped from the body and Content-Range /
+ * Content-Length are corrected for it, so a ranged response is no longer
+ * shifted by 42 bytes. Non-2xx upstream responses are returned as-is instead
+ * of being rewritten as a playlist, and the upstream x-length debug header is
+ * no longer leaked. The body is no longer piped unawaited.
  */
+
+// Bytes of fake WebP/RIFF header the Streamed.pk / TikTok CDN prepends to
+// .image segments. Everything after it is the real MPEG-TS payload.
+const CLOAK_PREFIX_BYTES = 42;
 
 export default {
   async fetch(request, env, ctx) {
@@ -250,6 +261,23 @@ export default {
         headers: { "Access-Control-Allow-Origin": "*" }
       });
     }
+
+    // Cloaked .image segments: the CDN prepends CLOAK_PREFIX_BYTES of fake
+    // WebP/RIFF header, so a client asking for file bytes 0-1023 must ask
+    // upstream for 42-1065. When we do that the returned body already starts
+    // at payload byte 0 and must NOT be stripped again.
+    const isCloakedImage = targetUrl.includes('.image');
+    const clientRange = request.headers.get('Range') || request.headers.get('range');
+    let shiftedRange = false;
+    if (isCloakedImage && clientRange) {
+      const m = /^bytes=(\d+)-(\d*)$/.exec(String(clientRange).trim());
+      if (m) {
+        const start = Number(m[1]);
+        const endPart = m[2] ? String(Number(m[2]) + CLOAK_PREFIX_BYTES) : '';
+        newHeaders.set('Range', `bytes=${start + CLOAK_PREFIX_BYTES}-${endPart}`);
+        shiftedRange = true;
+      }
+    }
     
     try {
       const response = await fetch(targetUrl, {
@@ -265,9 +293,24 @@ export default {
       responseHeaders.set('Access-Control-Allow-Origin', '*');
       responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
       responseHeaders.set('Access-Control-Allow-Headers', '*');
+
+      // Do not leak upstream headers that no longer describe the body we
+      // return (x-length is the un-stripped upstream length).
+      responseHeaders.delete('x-length');
       
       const contentType = responseHeaders.get('content-type') || '';
       const isM3u8 = contentType.includes('mpegurl') || contentType.includes('x-mpegURL') || targetUrl.includes('.m3u8');
+
+      // A failed upstream must reach the caller with its real status.
+      // Rewriting an error body as if it were a playlist produced 403 HTML
+      // that callers could not tell apart from a manifest.
+      if (!response.ok) {
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders
+        });
+      }
       
       if (isM3u8 && request.method === 'GET') {
         const text = await response.text();
@@ -309,29 +352,53 @@ export default {
         responseHeaders.set('Content-Type', 'video/mp2t');
       }
       
-      // For Streamed.pk / TikTok CDN .image chunks, strip the 42-byte fake WebP header in flight
-      if (targetUrl.includes('.image')) {
-        let skipped = 0;
-        const transformStream = new TransformStream({
+      // For Streamed.pk / TikTok CDN .image chunks, strip the fake WebP header
+      // in flight AND correct the response metadata for the stripped prefix.
+      if (isCloakedImage) {
+        responseHeaders.set('Accept-Ranges', 'bytes');
+
+        // Upstream answered in file coordinates (which include the +42 shift
+        // we applied above); map them back to payload coordinates.
+        const contentRange = responseHeaders.get('Content-Range');
+        if (contentRange) {
+          const cr = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(contentRange.trim());
+          if (cr) {
+            const start = Math.max(0, Number(cr[1]) - CLOAK_PREFIX_BYTES);
+            const end = Math.max(0, Number(cr[2]) - CLOAK_PREFIX_BYTES);
+            const total = Math.max(0, Number(cr[3]) - CLOAK_PREFIX_BYTES);
+            responseHeaders.set('Content-Range', `bytes ${start}-${end}/${total}`);
+          }
+        }
+
+        // Only a response that starts at file byte 0 carries the prefix, so
+        // only that one is 42 bytes longer than the payload we hand over.
+        if (!shiftedRange) {
+          const contentLength = responseHeaders.get('Content-Length');
+          if (contentLength) {
+            responseHeaders.set('Content-Length', String(Math.max(0, Number(contentLength) - CLOAK_PREFIX_BYTES)));
+          }
+        }
+
+        const body = shiftedRange ? response.body : response.body.pipeThrough(new TransformStream({
           transform(chunk, controller) {
-            if (skipped < 42) {
-              const needed = 42 - skipped;
+            if (this.skipped === undefined) this.skipped = 0;
+            if (this.skipped < CLOAK_PREFIX_BYTES) {
+              const needed = CLOAK_PREFIX_BYTES - this.skipped;
               if (chunk.length <= needed) {
-                skipped += chunk.length;
+                this.skipped += chunk.length;
               } else {
                 controller.enqueue(chunk.subarray(needed));
-                skipped = 42;
+                this.skipped = CLOAK_PREFIX_BYTES;
               }
             } else {
               controller.enqueue(chunk);
             }
           }
-        });
+        }));
 
-        response.body.pipeTo(transformStream.writable).catch(() => {});
-
-        return new Response(transformStream.readable, {
+        return new Response(body, {
           status: response.status,
+          statusText: response.statusText,
           headers: responseHeaders
         });
       }
