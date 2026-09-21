@@ -41,6 +41,10 @@ const _undiciAgent = new Agent({
   keepAliveMaxTimeout: 30000,
 });
 
+// Enough for the mirror 301s observed in production, small enough that a rogue
+// redirect loop costs about what a single timed-out request costs.
+const MAX_REDIRECT_HOPS = 5;
+
 // -- Core helper --------------------------------------------------------------
 /**
  * safeFetch - fetches a URL using impit when available, falls back to undici.
@@ -54,7 +58,10 @@ const _undiciAgent = new Agent({
  * @returns {{ ok, status, text: () => string, json: () => object }}
  */
 async function safeFetch(url, opts = {}) {
-  const { method = 'GET', headers = {}, body, signal, timeoutMs = 15000, attempts = 3 } = opts;
+  const { signal, timeoutMs = 15000, attempts = 3 } = opts;
+  // Method, headers and body are reassigned per redirect hop on the undici path
+  // (see the redirect loop below), so they cannot be destructured as const.
+  let { method = 'GET', headers = {}, body } = opts;
   const impit = getImpit();
   const maxAttempts = Math.max(1, attempts);
 
@@ -97,15 +104,65 @@ async function safeFetch(url, opts = {}) {
   }
 
   // -- Path B: undici --------------------------------------------------------
-  const res = await undiciRequest(url, {
-    method,
-    headers,
-    body,
-    signal,
-    headersTimeout: timeoutMs,
-    bodyTimeout: timeoutMs,
-    dispatcher: _undiciAgent,
-  });
+  // undici.request() does NOT follow redirects the way fetch/impit do. Several
+  // upstreams bounce their primary host to a mirror with a 301 (dlstreams.st ->
+  // dlive.sx is the observed case), so without following them the caller saw
+  // `ok:false, status:301` and silently recorded a healthy primary domain as a
+  // failure. Follow the chain here:
+  //   - 301/302/303 "moved": the request becomes a bodyless GET, as a browser
+  //     would send it (HEAD stays HEAD, since it has no body to drop);
+  //   - 307/308 "relocated": method and body are preserved, the resource is
+  //     still the same one;
+  //   - missing/empty Location is not followable, so the redirect response is
+  //     returned as-is rather than retried forever;
+  //   - the hop count is bounded, and the timeoutMs budget covers the WHOLE
+  //     chain (each hop only gets the time left), so a redirect loop cannot
+  //     multiply the caller's deadline.
+  const deadlineAt = Date.now() + timeoutMs;
+  let currentUrl = url;
+  let res;
+  for (let hop = 0; ; hop++) {
+    const remainingMs = deadlineAt - Date.now();
+    if (remainingMs <= 0) throw new Error(`undici timeout ${timeoutMs}ms (redirect chain)`);
+    res = await undiciRequest(currentUrl, {
+      method,
+      headers,
+      body,
+      signal,
+      headersTimeout: remainingMs,
+      bodyTimeout: remainingMs,
+      dispatcher: _undiciAgent,
+    });
+
+    const isRedirect = res.statusCode === 301 || res.statusCode === 302
+      || res.statusCode === 303 || res.statusCode === 307 || res.statusCode === 308;
+    if (!isRedirect || hop >= MAX_REDIRECT_HOPS) break;
+
+    const rawLocation = Array.isArray(res.headers.location) ? res.headers.location[0] : res.headers.location;
+    // Drain the redirect body: an unconsumed one holds the keep-alive socket.
+    try { await res.body.dump(); } catch (_) { /* nothing to release */ }
+    if (!rawLocation) break;
+
+    let nextUrl;
+    try {
+      // A Location may be relative, so resolve it against the current hop.
+      nextUrl = new URL(rawLocation, currentUrl);
+    } catch (_) { break; }
+    if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') break;
+
+    if (method !== 'HEAD' && res.statusCode !== 307 && res.statusCode !== 308) {
+      method = 'GET';
+      body = undefined;
+      // A framing header describing a body that no longer exists corrupts the
+      // request, so drop it when the body is dropped. (Plain-object headers are
+      // what every caller in this codebase passes.)
+      if (headers && headers.constructor === Object && 'content-length' in headers) {
+        headers = Object.assign({}, headers);
+        delete headers['content-length'];
+      }
+    }
+    currentUrl = nextUrl.toString();
+  }
   const textData = await res.body.text();
   return {
     ok: res.statusCode >= 200 && res.statusCode < 300,

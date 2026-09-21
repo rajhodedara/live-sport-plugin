@@ -141,13 +141,37 @@ class IframeDomainRegistry {
 
   /** Referer to use for a terminal stream host (falls back to its own origin). */
   refererFor(host) {
+    const rec = this._terminalRecord(host);
+    if (rec) return rec.referer;
+    return `https://${normalizeHost(host)}/`;
+  }
+
+  /**
+   * Referer held for a terminal stream host, or null when the registry has no
+   * entry for it. Callers that must distinguish knowledge from a guess use this
+   * rather than refererFor(), which answers `https://<host>/` for anything it
+   * has never seen — indistinguishable from an entry and therefore useless as
+   * evidence that the host is a known-good terminal.
+   */
+  terminalRefererFor(host) {
+    const rec = this._terminalRecord(host);
+    return rec ? rec.referer : null;
+  }
+
+  /** True when the registry has a terminal-host entry for this host family. */
+  knowsTerminalHost(host) {
+    return this._terminalRecord(host) !== null;
+  }
+
+  /** Terminal-host entry, matched by literal host then by family slug. */
+  _terminalRecord(host) {
     const h = normalizeHost(host);
-    const slug = toSlug(h);
-    for (const key of [h, slug]) {
+    if (!h) return null;
+    for (const key of [h, toSlug(h)]) {
       const rec = this.terminalHosts.get(key);
-      if (rec && rec.referer) return rec.referer;
+      if (rec && rec.referer) return rec;
     }
-    return `https://${h}/`;
+    return null;
   }
 
   /** The strategy known to work for this host, if any. */

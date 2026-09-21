@@ -320,6 +320,65 @@ function getSpeedLabel(speedScore) {
 // that are not M3U8). Web player links (no url or '/watch?') pass through
 // untouched. Runs once per mint (see mintVerifiedSources), not per request, so
 // cached results are served without re-verification.
+
+// Registry of iframe/terminal hosts -> the Referer that makes them serve. It is
+// advisory: verification must keep working with the hard-coded chain below, so
+// every failure mode of this lookup resolves to null.
+let _iframeDomainRegistry;
+function getIframeDomainRegistry() {
+  if (_iframeDomainRegistry !== undefined) return _iframeDomainRegistry;
+  try {
+    _iframeDomainRegistry = container.resolve('iframeDomainRegistry') || null;
+  } catch (_) {
+    _iframeDomainRegistry = null;
+  }
+  return _iframeDomainRegistry;
+}
+
+/**
+ * Referer to retry a refused request with, derived from the host of the
+ * upstream (terminal) URL. Two sources, in order of authority:
+ *   1. the iframe-domain registry — it records which page actually serves a
+ *      given terminal host, learned from live traffic and the committed data
+ *      file, so it also covers hosts added after this code was written;
+ *   2. the host-regex chain — hard-coded knowledge for hosts the registry has
+ *      never seen.
+ */
+function repairRefererFor(targetUrl) {
+  let host;
+  try {
+    host = new URL(targetUrl).hostname;
+  } catch (_) {
+    return 'https://sportsembed.su/';
+  }
+  if (!host) return 'https://sportsembed.su/';
+
+  try {
+    const registry = getIframeDomainRegistry();
+    // knowsTerminalHost() first: refererFor() answers a generic self-origin for
+    // anything it has never seen, which is indistinguishable from knowledge.
+    if (registry && registry.knowsTerminalHost(host)) {
+      const known = registry.terminalRefererFor(host);
+      if (known) return known;
+    }
+  } catch (_) { /* fall through to the hard-coded chain */ }
+
+  if (/\.wfty\.st$/.test(host) || /watchfooty/i.test(host)) return 'https://sportsembed.su/';
+  if (/\.strmd\.st$/.test(host) || /streamed/i.test(host)) return 'https://embed.st/';
+  if (/tiestep|dlive|dlstreams|daddylive|assetrage|romponalis/i.test(host) || /\.7odxv0l067ka\.net$/.test(host)) return 'https://assetrage.net/';
+  // Terminal hosts discovered by the DaddyLive iframe-domain audit. These
+  // are the endpoints the embed decoders actually point at, so the
+  // referer must be the page that served the manifest, not a generic
+  // origin. Verified live: each returns #EXTM3U with the matching referer.
+  if (/dynproclaim\.net$/.test(host)) return `https://${host}/`;
+  if (/hockey\.do$/.test(host)) return 'https://play.matchli.st/';
+  // streame.center rotates its edge nodes (edgestream2/5/7.pro all
+  // observed live), so match the family, not one numbered host.
+  if (/edgestream[0-9]*\.pro$/.test(host)) return 'https://streame.center/';
+  if (/\.a737cozfwjmm\.net$/.test(host)) return 'https://assetrage.net/';
+  return `https://${host}/`;
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
@@ -406,51 +465,46 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
       }
 
       // ── Retry-once safety net ───────────────────────────────────────────
-      // Some CDNs (notably WatchFooty's wfty.st edge) answer 403 Forbidden
-      // purely because the Referer header is missing. Before declaring a stream
-      // dead, retry once with a plausible Referer derived from the upstream
-      // host. A stream that plays with a referer must never be dropped merely
-      // because verification lacked one.
-      if ((res.status === 403 || res.status === 401) && !referer) {
+      // Two upstream behaviours answer 403/401 to an otherwise healthy stream,
+      // and both are repaired by a Referer:
+      //   - some CDNs (notably WatchFooty's wfty.st edge) refuse when the
+      //     Referer is MISSING;
+      //   - DaddyLive's segment CDN refuses when the Referer is PRESENT but
+      //     from the wrong family: the iframe that happened to serve the
+      //     manifest is not on its allow-list. DaddyLive always populates a
+      //     Referer, so gating the repair on `!referer` never repaired that
+      //     case and dropped a working stream as dead.
+      // The candidate therefore comes from the TERMINAL host of the upstream
+      // URL (registry first, host-regex chain second) and is tried at most
+      // ONCE — no loop, so a stream that is truly dead costs one extra ping.
+      if (res.status === 403 || res.status === 401) {
         try {
-          let guess;
-          try {
-            const h = new URL(targetUrl).hostname;
-            if (/\.wfty\.st$/.test(h) || /watchfooty/i.test(h)) guess = 'https://sportsembed.su/';
-            else if (/\.strmd\.st$/.test(h) || /streamed/i.test(h)) guess = 'https://embed.st/';
-            else if (/tiestep|dlive|dlstreams|daddylive|assetrage|romponalis/i.test(h) || /\.7odxv0l067ka\.net$/.test(h)) guess = 'https://assetrage.net/';
-            // Terminal hosts discovered by the DaddyLive iframe-domain audit. These
-            // are the endpoints the embed decoders actually point at, so the
-            // referer must be the page that served the manifest, not a generic
-            // origin. Verified live: each returns #EXTM3U with the matching referer.
-            else if (/dynproclaim\.net$/.test(h)) guess = `https://${h}/`;
-            else if (/hockey\.do$/.test(h)) guess = 'https://play.matchli.st/';
-            // streame.center rotates its edge nodes (edgestream2/5/7.pro all
-            // observed live), so match the family, not one numbered host.
-            else if (/edgestream[0-9]*\.pro$/.test(h)) guess = 'https://streame.center/';
-            else if (/\.a737cozfwjmm\.net$/.test(h)) guess = 'https://assetrage.net/';
-            else guess = `https://${h}/`;
-          } catch (_) { guess = 'https://sportsembed.su/'; }
-          console.log(`[Filter] ${res.status} with no referer; retrying once with ${guess}`);
-          const r2 = await _safeFetch(targetUrl, {
-            method: 'GET',
-            headers: {
-              'User-Agent': reqHeaders['User-Agent'],
-              'Referer': guess,
-              'Origin': guess.replace(/\/$/, ''),
-            },
-            timeoutMs: VERIFY_TIMEOUT_MS,
-            attempts: 1,
-          });
-          res = { status: r2.status };
-          bodySample = await r2.text();
-          if (res.status === 200) referer = guess; // so a later noteFailure/keep decision is accurate
+          const guess = repairRefererFor(targetUrl);
+          // Re-sending the very Referer upstream just refused would only double
+          // the latency of a stream that genuinely refuses this client.
+          if (guess && guess !== referer) {
+            console.log(`[Filter] ${res.status} with ${referer ? `refused referer ${referer}` : 'no referer'}; retrying once with ${guess}`);
+            const r2 = await _safeFetch(targetUrl, {
+              method: 'GET',
+              headers: {
+                'User-Agent': reqHeaders['User-Agent'],
+                'Referer': guess,
+                'Origin': guess.replace(/\/$/, ''),
+              },
+              timeoutMs: VERIFY_TIMEOUT_MS,
+              attempts: 1,
+            });
+            res = { status: r2.status };
+            bodySample = await r2.text();
+            if (res.status === 200) referer = guess; // so a later noteFailure/keep decision is accurate
+          }
         } catch (_) { /* fall through to the dead-stream handling below */ }
       }
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
       if (res.status === 404 || res.status === 403 || res.status >= 500) {
-        // A 403 that persisted even WITH a referer is a genuine refusal.
+        // A 403 that persisted through the repair attempt, with a referer still
+        // attached, is a genuine refusal.
         // A 403 with no referer available at all is not proof of a dead stream,
         // so keep it and let the client try (failing over costs less than
         // silently discarding a working source).

@@ -411,6 +411,57 @@ class DaddyLiveProvider extends BaseProvider {
   }
 
   /**
+   * Referer the registry holds for the host of a resolved manifest URL, or null
+   * when the registry knows nothing about that host.
+   *
+   * Resolution must not depend on this: it exists to correct the Referer when
+   * the iframe that happened to serve the manifest is not from a family the
+   * segment CDN allows, so every failure mode returns null and the caller keeps
+   * the iframe-derived Referer.
+   */
+  _terminalRefererFor(urlOrHost) {
+    if (!this.domainRegistry || !urlOrHost) return null;
+    try {
+      const host = /^https?:\/\//i.test(urlOrHost) ? new URL(urlOrHost).hostname : urlOrHost;
+      return this.domainRegistry.terminalRefererFor(host) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /**
+   * Stream entity for a decoded manifest. The proxy URL and the behaviour hints
+   * must carry the SAME Referer/Origin pair, because the segment CDN sees the
+   * one from the proxy URL on the manifest request and the one from the hints on
+   * every segment request — they have to agree to stay on its allow-list.
+   */
+  _buildManifestStream(m3u8Url, referer, sourceId, channelName) {
+    let origin = '';
+    try {
+      origin = new URL(referer).origin;
+    } catch (_) {
+      origin = String(referer || '').replace(/\/$/, '');
+    }
+
+    return new StreamEntity({
+      name: 'DaddyLive',
+      title: channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`,
+      url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`,
+      behaviorHints: {
+        notWebReady: true,
+        proxyHeaders: {
+          request: {
+            'Referer': referer,
+            'Origin': origin,
+            'User-Agent': UA
+          }
+        }
+      },
+      resolution: 'HD'
+    });
+  }
+
+  /**
    * Record a host->strategy observation in the domain registry. Wrapped so a
    * registry problem (or a missing one) can never affect resolution.
    */
@@ -736,13 +787,29 @@ class DaddyLiveProvider extends BaseProvider {
     const streams = [];
     const channelName = decodeHtmlEntities(src.channelName || '');
     let foundDirect = false;
+    // The folder probes are NOT interchangeable: for one channel they reach six
+    // different iframe hosts, and only some of those families are on the segment
+    // CDN's Referer allow-list. A manifest whose terminal host the registry knows
+    // is therefore accepted immediately, while the first manifest that merely
+    // decodes is held as a fallback.
+    //
+    // The scan is deliberately BOUNDED to that first decodable manifest: the
+    // folders are alternatives for the same channel, not a matrix to exhaust.
+    // Walking all of them costs 2 domains x 6 folders x (player + embed) fetches
+    // at a 6s timeout each, which stalls resolution for a minute on any channel
+    // whose terminal host the registry does not know. Later folders stay
+    // reachable for when a path stops serving — a rotated or 404ing folder
+    // yields no manifest, so the scan simply continues past it.
+    let fallbackStream = null;
 
     // Probe folders across mirror domains
     for (const base of this.baseDomains) {
-      if (foundDirect) break;
+      if (foundDirect || fallbackStream) break;
 
       for (const folder of this.folders) {
-        if (foundDirect) break;
+        // Stop at the first manifest rather than hunting the rest of the matrix
+        // for a registry-known terminal host (see the bound explained above).
+        if (foundDirect || fallbackStream) break;
 
         const playerUrl = `${base}/${folder}/stream-${sourceId}.php`;
         try {
@@ -809,34 +876,35 @@ class DaddyLiveProvider extends BaseProvider {
           }
 
           if (m3u8Url) {
-            const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(embedReferer)}&origin=${encodeURIComponent(embedOrigin)}`;
-            const label = channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`;
+            // The Referer the CDN will accept belongs to the MANIFEST's terminal
+            // host, not to whichever iframe happened to embed the decoder: on the
+            // "watch" fallback the iframe origin is an unauthorised family, so
+            // deriving the Referer from it makes every segment request 403. The
+            // registry holds the terminal host -> referer mapping, and is only
+            // consulted when it has an entry (a generic self-origin fallback is
+            // not knowledge).
+            const registryReferer = this._terminalRefererFor(m3u8Url);
+            const candidate = this._buildManifestStream(
+              m3u8Url,
+              registryReferer || embedReferer,
+              sourceId,
+              channelName
+            );
 
-            streams.push(new StreamEntity({
-              name: 'DaddyLive',
-              title: label,
-              url: proxyUrl,
-              behaviorHints: {
-                notWebReady: true,
-                proxyHeaders: {
-                  request: {
-                    'Referer': embedReferer,
-                    'Origin': embedOrigin,
-                    'User-Agent': UA
-                  }
-                }
-              },
-              resolution: 'HD'
-            }));
-
-            foundDirect = true;
-            break;
+            if (registryReferer) {
+              streams.push(candidate);
+              foundDirect = true;
+              break;
+            }
+            if (!fallbackStream) fallbackStream = candidate;
           }
         } catch (_) {
           // Continue trying next folder/domain
         }
       }
     }
+
+    if (!foundDirect && fallbackStream) streams.push(fallbackStream);
 
     // Web player fallback if no direct stream was decrypted
     if (streams.length === 0) {
