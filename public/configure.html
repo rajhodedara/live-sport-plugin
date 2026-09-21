@@ -486,15 +486,16 @@
 
     .crypto-details > summary {
       cursor: pointer;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--muted);
+      font-size: 15px;
+      font-weight: 600;
+      color: #ffffff;
       list-style: none;
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
       padding: 8px 0;
+      transition: opacity 160ms ease;
     }
 
     .crypto-details > summary::-webkit-details-marker { display: none; }
@@ -503,8 +504,8 @@
       content: "";
       width: 8px;
       height: 8px;
-      border-right: 1.6px solid currentColor;
-      border-bottom: 1.6px solid currentColor;
+      border-right: 1.8px solid currentColor;
+      border-bottom: 1.8px solid currentColor;
       transform: rotate(45deg);
       transition: transform 160ms ease;
       flex: none;
@@ -513,7 +514,10 @@
 
     .crypto-details[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
 
-    .crypto-details > summary:hover { color: var(--text); }
+    .crypto-details > summary:hover {
+      color: #ffffff;
+      opacity: 0.85;
+    }
 
     .crypto-grid {
       display: grid;
