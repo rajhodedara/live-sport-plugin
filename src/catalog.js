@@ -401,7 +401,20 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // artwork) cannot serve as a poster; it only suits the embedded single-crest
   // card. When that is the case — or when there is no provider artwork at all —
   // we compose a designed match card, so the lookups below are worth running.
-  const isThumbLogo = providerThumb && (match.category === 'networks' || providerThumb.toLowerCase().includes('logo') || providerThumb.toLowerCase().includes('icon'));
+  // A thumbnail can only serve as a poster when it is genuinely landscape
+  // artwork. When the image is already in the shared cache its real measured
+  // dimensions are authoritative; the old URL-substring test survives only as
+  // the fallback for a cache miss, because this cascade is synchronous and
+  // cannot await a fetch. Tall/square images are crests and get composed into a
+  // card instead of being stretched across a 16:9 slot.
+  const thumbMeta = providerThumb ? imageService.getCachedMeta(providerThumb) : null;
+  const thumbIsLandscape = thumbMeta ? (thumbMeta.width / thumbMeta.height) >= 1.2 : null;
+  const isThumbLogo = !!providerThumb && (
+    match.category === 'networks' ||
+    (thumbIsLandscape === null
+      ? (providerThumb.toLowerCase().includes('logo') || providerThumb.toLowerCase().includes('icon'))
+      : !thumbIsLandscape)
+  );
 
   if (needsLogo || needsPoster) {
     let teamLogoService = null;
@@ -482,6 +495,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
       channel: broadcasterName || (isChannelLike ? match.title : null),
       channelBadge: channelMark,
       status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
+      score: match.score,
       time: formatKickoffForCard(match.date, config),
       shape: reqType === 'series' ? 'poster' : 'landscape'
     }) || fallbackPoster;
@@ -547,6 +561,8 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   }
 
   const is247 = !isReplay && (match.category === 'networks' || !match.date || match.date === '0');
+  // Providers only supply a score for a fixture that is under way or finished.
+  const scoreSuffix = match.score ? ` (${match.score})` : '';
   const prefix = isReplay ? '⏪ ' : (isLive ? (is247 ? '📺 ' : '🔴 LIVE: ') : '⏱️ ');
   const cast = [];
   if (match.team1 && match.team1.name) cast.push(match.team1.name);
@@ -558,7 +574,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const statusStr = is247
     ? '24/7 Live Network'
     : (isLive
-        ? '🔴 LIVE NOW'
+        ? `🔴 LIVE NOW${scoreSuffix}`
         : (isReplay ? `⏪ Replay (${replayReleaseInfo})` : `⏱️ Kickoff at ${timeString}${relativeTimeStr}`));
   const desc = `${leagueStr}📅 Category: ${match.category.toUpperCase()}\n⏰ Status: ${statusStr}`;
 
@@ -659,7 +675,7 @@ async function buildReplayHubMeta(id, config = {}) {
     const targetDate = parts[1];
 
     let dayMatches = replayMatches.filter(m => m.date && m.date.startsWith(targetDate));
-    const sportDef = sportKey ? (REPLAY_SPORTS.find(s => s.id === sportKey) || { id: sportKey, name: `${sportKey.toUpperCase()} Replays`, poster: '/posters/replays/football.jpg' }) : null;
+    const sportDef = sportKey ? (REPLAY_SPORTS.find(s => s.id === sportKey) || { id: sportKey, name: `${sportKey.toUpperCase()} Replays`, poster: '/posters/replays/luffy_football.jpg' }) : null;
 
     if (sportKey && sportKey !== 'all') {
       dayMatches = dayMatches.filter(m => m.category === sportKey);
@@ -671,7 +687,11 @@ async function buildReplayHubMeta(id, config = {}) {
       : targetDate;
 
     const titleName = sportDef ? `${sportDef.name} — 📅 ${displayDate}` : `📅 ${displayDate} Replays`;
-    const poster = sportDef ? `${BASE_URL}${sportDef.poster}` : imageService.placeholderUrl(BASE_URL, `${displayDate}\nReplays`, '0284c7');
+    // One generated date card per day, so consecutive date hubs stop repeating
+    // an identical sport JPEG.
+    const poster = imageService.datePosterUrl(
+      BASE_URL, displayDate, dayMatches.length, sportKey && sportKey !== 'all' ? sportKey : null, 'poster'
+    );
 
     const videos = dayMatches.map((m, epIdx) => ({
       id: `nuvio_sport_${m.id}:hub_1:${epIdx + 1}`,
@@ -742,7 +762,7 @@ async function buildReplayHubMeta(id, config = {}) {
 
   // Case B: Sport Hub (e.g. nuvio_sport_replay_football or nuvio_sport_replay_all)
   const sportKey = id.replace('nuvio_sport_replay_', '');
-  const sportDef = REPLAY_SPORTS.find(s => s.id === sportKey) || { id: sportKey, name: '⏪ Sports Replays', poster: '/posters/replays/football.jpg' };
+  const sportDef = REPLAY_SPORTS.find(s => s.id === sportKey) || { id: sportKey, name: '⏪ Sports Replays', poster: '/posters/replays/luffy_football.jpg' };
   
   let targetMatches = replayMatches;
   if (sportKey !== 'all') {
@@ -1119,9 +1139,11 @@ async function handleCatalog(type, id, extra, config) {
       const isSportSpecific = selectedSport && selectedSport !== 'all';
       const sportDef = isSportSpecific ? REPLAY_SPORTS.find(s => s.id === selectedSport) : null;
       const sportIdPrefix = isSportSpecific ? `${selectedSport}_` : '';
-      const posterUrl = sportDef
-        ? `${BASE_URL}${sportDef.poster}`
-        : imageService.placeholderUrl(BASE_URL, `${displayDate}\n${count} Matches`, '0284c7');
+      // Each date row gets its own generated date card. Previously every row in a
+      // sport hub reused the same sport JPEG (up to 14 identical images).
+      const posterUrl = imageService.datePosterUrl(
+        BASE_URL, displayDate, count, sportDef ? sportDef.id : null, 'poster'
+      );
       const posterName = sportDef
         ? `${sportDef.name} — 📅 ${displayDate}`
         : `📅 ${displayDate} Replays`;

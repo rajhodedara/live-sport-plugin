@@ -96,6 +96,93 @@ function svgPlaceholder(text, color, w = 800, h = 450, shape = 'landscape') {
 </svg>`;
 }
 
+/**
+ * Read intrinsic pixel dimensions straight from the encoded bytes.
+ *
+ * Deliberately dependency-free and total: any malformed, truncated or
+ * unsupported input returns { width: null, height: null } instead of throwing,
+ * so a single bad upstream image can never break the caller.
+ *
+ * Supported containers: PNG, JPEG, GIF, WebP (VP8 / VP8L / VP8X).
+ *
+ * @param {Buffer} buffer
+ * @returns {{ width: number|null, height: number|null }}
+ */
+function parseImageDimensions(buffer) {
+  const none = { width: null, height: null };
+  try {
+    if (!buffer || !Buffer.isBuffer(buffer) || buffer.length < 16) return none;
+
+    // ── PNG: signature + IHDR ──
+    if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+      if (buffer.length < 24) return none;
+      return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+    }
+
+    // ── GIF: logical screen descriptor, little-endian ──
+    if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+      return { width: buffer.readUInt16LE(6), height: buffer.readUInt16LE(8) };
+    }
+
+    // ── WebP: RIFF container ──
+    if (buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46 &&
+        buffer[8] === 0x57 && buffer[9] === 0x45 && buffer[10] === 0x42 && buffer[11] === 0x50) {
+      if (buffer.length < 30) return none;
+      const fourcc = buffer.toString('ascii', 12, 16);
+      if (fourcc === 'VP8X') {
+        // 24-bit little-endian, stored as (value - 1).
+        const w = 1 + (buffer[24] | (buffer[25] << 8) | (buffer[26] << 16));
+        const h = 1 + (buffer[27] | (buffer[28] << 8) | (buffer[29] << 16));
+        return { width: w, height: h };
+      }
+      if (fourcc === 'VP8L') {
+        const b0 = buffer[21], b1 = buffer[22], b2 = buffer[23], b3 = buffer[24];
+        const w = 1 + (((b1 & 0x3f) << 8) | b0);
+        const h = 1 + (((b3 & 0x0f) << 10) | (b2 << 2) | ((b1 & 0xc0) >> 6));
+        return { width: w, height: h };
+      }
+      if (fourcc === 'VP8 ') {
+        // Lossy: 14-bit dimensions after the 3-byte start code 0x9d 0x01 0x2a.
+        if (buffer[23] !== 0x9d || buffer[24] !== 0x01 || buffer[25] !== 0x2a) return none;
+        return {
+          width: buffer.readUInt16LE(26) & 0x3fff,
+          height: buffer.readUInt16LE(28) & 0x3fff
+        };
+      }
+      return none;
+    }
+
+    // ── JPEG: walk markers to the first SOFn frame header ──
+    if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+      let i = 2;
+      while (i + 9 < buffer.length) {
+        if (buffer[i] !== 0xff) { i++; continue; }
+        let marker = buffer[i + 1];
+        // Skip fill bytes.
+        while (marker === 0xff && i + 2 < buffer.length) { i++; marker = buffer[i + 1]; }
+        // Standalone markers carry no length payload.
+        if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; }
+        if (marker === 0xd9 || marker === 0xda) return none; // EOI / start of scan
+        const len = buffer.readUInt16BE(i + 2);
+        if (len < 2) return none;
+        // SOF0..SOF15 except DHT (0xc4), JPG (0xc8) and DAC (0xcc).
+        const isSOF = marker >= 0xc0 && marker <= 0xcf &&
+                      marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+        if (isSOF) {
+          if (i + 9 > buffer.length) return none;
+          return { height: buffer.readUInt16BE(i + 5), width: buffer.readUInt16BE(i + 7) };
+        }
+        i += 2 + len;
+      }
+      return none;
+    }
+
+    return none;
+  } catch (_) {
+    return none;
+  }
+}
+
 function evictIfNeeded() {
   if (cache.size <= CACHE_MAX_ENTRIES) return;
   const byAccess = [...cache.entries()].sort((a, b) => a[1].lastAccess - b[1].lastAccess);
@@ -154,9 +241,15 @@ async function getImage(rawUrl) {
           chunks.push(chunk);
         }
         if (!tooBig && total >= 32) {
+          const buf = Buffer.concat(chunks);
+          const dims = parseImageDimensions(buf);
           result = {
-            buffer: Buffer.concat(chunks),
+            buffer: buf,
             contentType,
+            // Intrinsic dimensions let the catalog tell real landscape artwork
+            // apart from a square/portrait crest without guessing from the URL.
+            width: dims.width,
+            height: dims.height,
             expiresAt: Date.now() + IMAGE_TTL_MS,
             lastAccess: Date.now()
           };
@@ -179,6 +272,27 @@ async function getImage(rawUrl) {
 
   inFlight.set(url, p);
   return p;
+}
+
+/**
+ * Synchronous, non-blocking lookup of already-cached image dimensions.
+ *
+ * The poster cascade in catalog.js runs synchronously, so it cannot await
+ * getImage(). This exposes whatever the cache already knows and returns null
+ * when the entry is absent or its dimensions could not be parsed, letting the
+ * caller fall back to a heuristic instead of blocking.
+ *
+ * @param {string} rawUrl
+ * @returns {{ width: number, height: number }|null}
+ */
+function getCachedMeta(rawUrl) {
+  const url = normalizeUrl(rawUrl);
+  if (!url) return null;
+  const hit = cache.get(url);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now()) return null;
+  if (!hit.width || !hit.height) return null;
+  return { width: hit.width, height: hit.height };
 }
 
 /**
@@ -235,6 +349,7 @@ function matchCardUrl(baseUrl, spec = {}) {
   put('cm', spec.channelMark);
   put('st', spec.status);
   put('tm', spec.time);
+  put('sc', spec.score);
   put('shape', spec.shape);
 
   const qs = params.toString();
@@ -244,6 +359,8 @@ function matchCardUrl(baseUrl, spec = {}) {
 module.exports = {
   svgPlaceholder,
   getImage,
+  getCachedMeta,
+  parseImageDimensions,
   proxyUrl,
   placeholderUrl,
   sportPosterUrl,

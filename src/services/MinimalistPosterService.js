@@ -568,6 +568,7 @@ function truncateToWidth(value, maxPx, fontSize) {
  * @param {string}  [spec.channelMark]   channel logo to draw on the HERO slot
  *                                       (24/7 stations, where the logo IS the art)
  * @param {string}  [spec.status]        live | upcoming | replay | 247
+ * @param {string}  [spec.score]         live/final score, e.g. "2:1"; ignored when implausible
  * @param {string}  [spec.time]          already-formatted display time
  * @param {string}  [spec.shape]         landscape (800x450, default) | poster (600x900)
  */
@@ -599,8 +600,33 @@ function generateMatchCardSvg(spec = {}) {
   const channelMark = spec.channelMark || null;
   const available = (badge1 ? 1 : 0) + (badge2 ? 1 : 0);
 
+  // Only a plausible H:MM / H-MM score is ever displayed. Anything else
+  // (empty, "TBD", a stray title) is dropped rather than drawn as noise.
+  const scoreRaw = String(spec.score === undefined || spec.score === null ? '' : spec.score).trim();
+  const scoreText = /^\d{1,3}\s*[:\u2013\u2014-]\s*\d{1,3}$/.test(scoreRaw) ? scoreRaw : '';
+
   const stRaw = String(spec.status || '').toLowerCase();
   const status = (stRaw === 'live' || stRaw === 'upcoming' || stRaw === 'replay' || stRaw === '247') ? stRaw : '';
+
+  // "2:3" -> "2 – 3" so the score reads as a scoreboard rather than a timestamp.
+  const scoreBits = scoreText.split(/\s*[:\u2013\u2014-]\s*/);
+  const scoreDisplay = scoreBits.length === 2 ? scoreBits[0] + ' \u2013 ' + scoreBits[1] : scoreText;
+  // A live fixture's score IS the headline, so it takes the hero slot instead of
+  // being reduced to a footnote in the status pill.
+  const scoreHero = !!scoreText && (status === 'live' || status === 'replay');
+  // League chrome follows the sport identity, but stays bright enough to read
+  // on the dark base.
+  const leagueAccent = accent;
+
+  // The hero score is sized to the gap between the two crest plates rather than
+  // fixed, so a two-digit score such as "10 – 12" shrinks instead of colliding
+  // with the badges. Measured in condensed-bold glyph widths (~0.55em).
+  const scoreLetterspace = isPoster ? 2.6 : 3;
+  const heroGap = isPoster ? 250 : 300;
+  const heroScoreSize = Math.max(
+    30,
+    Math.min(96, Math.floor((heroGap - (scoreDisplay.length - 1) * scoreLetterspace) / (scoreDisplay.length * 0.55)))
+  );
 
   const parts = [];
 
@@ -609,6 +635,7 @@ function generateMatchCardSvg(spec = {}) {
   parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#warmGlow)"/>');
   parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#coolGlow)"/>');
   parts.push('<g transform="rotate(-13 ' + (w / 2) + ' ' + (h / 2) + ')"><rect x="' + (-w * 0.18) + '" y="' + (h * 0.33) + '" width="' + (w * 1.36) + '" height="' + (h * 0.20) + '" fill="url(#streak)"/></g>');
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#vignette)"/>');
 
   // ── Sport watermark (behind all content) ──
   const glyphOpacity = available === 0 ? 0.12 : 0.05;
@@ -617,9 +644,15 @@ function generateMatchCardSvg(spec = {}) {
   const gy = isPoster ? h - 190 : h - 120;
   parts.push('<g transform="translate(' + gx.toFixed(1) + ', ' + gy.toFixed(1) + ') scale(' + (glyphSize / 72).toFixed(2) + ')" opacity="' + glyphOpacity + '">' + sportGlyphMarkup(catKey) + '</g>');
 
+  // Per-sport identity: the sport accent now tints the card chrome, so a
+  // football card and a basketball card are distinguishable at a glance. The
+  // hot orange stays reserved for live/urgent signals.
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#sportTint)"/>');
+
   // ── Frame ──
   parts.push('<rect x="1.5" y="1.5" width="' + (w - 3) + '" height="' + (h - 3) + '" rx="10" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1.5"/>');
-  parts.push('<rect x="0" y="0" width="' + w + '" height="3" fill="' + CARD_HOT + '" opacity="0.9"/>');
+  parts.push('<rect x="0" y="0" width="' + w + '" height="3" fill="' + accent + '" opacity="0.95"/>');
+  parts.push('<rect x="0" y="0" width="' + (w * 0.42).toFixed(1) + '" height="3" fill="' + CARD_HOT + '" opacity="0.95"/>');
 
   // ── Header: league chip (left) ──
   if (leagueName || leagueBadge) {
@@ -630,10 +663,10 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(badgeImage(leagueBadge, margin, headerY - 12, 16));
       lx = margin + 24;
     }
-    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="14" font-weight="700" letter-spacing="2.2" fill="' + CARD_HOT_SOFT + '">' + escapeXml(label) + '</text>');
+    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="14" font-weight="700" letter-spacing="2.2" fill="' + leagueAccent + '">' + escapeXml(label) + '</text>');
   }
 
-  // ── Header: status pill (right) ──
+  // ── Header: status pill (right) - status word only; the score lives in the hero slot ──
   if (status) {
     const conf = {
       live: { t: 'LIVE', dot: true, color: '#ff8a8a', dotColor: '#ff3b3b' },
@@ -642,6 +675,9 @@ function generateMatchCardSvg(spec = {}) {
       '247': { t: '24/7', dot: false, color: CARD_HOT_SOFT }
     }[status];
     const dotR = 4.5;
+
+    // Status-only pill. A score is never squeezed in here: when a score exists
+    // it takes the hero slot, so the pill stays a compact status chip.
     const pillW = 30 + (conf.dot ? dotR * 2 + 8 : 0) + conf.t.length * 8.8;
     const pillH = 26;
     const pillY = headerY - pillH / 2;
@@ -655,12 +691,27 @@ function generateMatchCardSvg(spec = {}) {
       px += dotR * 2 + 8;
     }
     parts.push('<text x="' + px.toFixed(1) + '" y="' + (headerY + 4).toFixed(1) + '" font-family="' + CARD_SANS + '" font-size="12" font-weight="800" letter-spacing="1.4" fill="' + conf.color + '">' + escapeXml(conf.t) + '</text>');
+
   }
 
-  // Circular crest plates: soft glass disc, thin rim, light streaking behind.
-  const crest = (cx, cy, r, img) =>
-    '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>' +
-    (img ? badgeImage(img, cx - r * 0.66, cy - r * 0.66, r * 1.32) : '');
+  // Circular crest plates: soft glass disc, thin rim.
+  //
+  // Three cases, and the plate is never left as a bare ring in any of them:
+  //   1. a crest resolved  -> draw it inside the disc;
+  //   2. no crest, but the side is named -> draw the side's initial, so the slot
+  //      still carries meaning instead of reading as a broken image;
+  //   3. neither            -> omit the plate entirely.
+  const crest = (cx, cy, r, img, label) => {
+    if (!img) {
+      const m = String(label === undefined || label === null ? '' : label).match(/\p{L}|\p{N}/u);
+      if (!m) return '';
+      const plateOnly = '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.13)" stroke-width="1.2"/>';
+      return plateOnly +
+        '<text x="' + cx + '" y="' + (cy + r * 0.33).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + Math.round(r * 0.88) + '" font-weight="800" fill="url(#nameFill)" text-anchor="middle">' + escapeXml(m[0].toUpperCase()) + '</text>';
+    }
+    return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="rgba(255,255,255,0.045)" stroke="rgba(255,255,255,0.14)" stroke-width="1.2"/>' +
+      badgeImage(img, cx - r * 0.66, cy - r * 0.66, r * 1.32);
+  };
 
   const vsBadge = (mx, my, r) =>
     '<circle cx="' + mx + '" cy="' + my + '" r="' + r + '" fill="rgba(255,255,255,0.06)" stroke="' + CARD_HOT + '" stroke-width="1.5"/>' +
@@ -672,9 +723,20 @@ function generateMatchCardSvg(spec = {}) {
 
   if (!isPoster) {
     // ── Landscape: cinematic fixture row ──
-    if (available === 2) {
-      parts.push(crest(200, 188, 104, badge1));
-      parts.push(crest(600, 188, 104, badge2));
+    if (scoreHero) {
+      // Live scoreboard. The score is the hero: crests anchor the two sides,
+      // names sit beneath them, and the score owns the centre of the card.
+      parts.push(crest(168, 190, 76, badge1, team1));
+      parts.push(crest(632, 190, 76, badge2, team2));
+      parts.push('<text x="400" y="246" font-family="' + CARD_COND + '" font-size="' + heroScoreSize + '" font-weight="800" letter-spacing="' + scoreLetterspace + '" fill="url(#scoreFill)" text-anchor="middle">' + escapeXml(scoreDisplay) + '</text>');
+      const heroRule = Math.min(heroGap * 0.5, scoreDisplay.length * heroScoreSize * 0.29);
+      parts.push('<rect x="' + (400 - heroRule / 2).toFixed(1) + '" y="264" width="' + heroRule.toFixed(1) + '" height="3" rx="1.5" fill="' + CARD_HOT + '" opacity="0.85"/>');
+      parts.push(teamName(168, 312, team1, 21));
+      parts.push(teamName(632, 312, team2, 21));
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else if (available === 2) {
+      parts.push(crest(200, 188, 104, badge1, team1));
+      parts.push(crest(600, 188, 104, badge2, team2));
       parts.push(vsBadge(400, 188, 30));
       parts.push(teamName(200, 346, team1, 25));
       parts.push(teamName(600, 346, team2, 25));
@@ -683,7 +745,7 @@ function generateMatchCardSvg(spec = {}) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
       const otherName = badge1 ? team2 : team1;
-      parts.push(crest(400, 170, 96, shownBadge));
+      parts.push(crest(400, 170, 96, shownBadge, shownName));
       parts.push(teamName(400, 312, shownName, 25));
       if (otherName) {
         parts.push('<text x="400" y="350" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
@@ -713,9 +775,19 @@ function generateMatchCardSvg(spec = {}) {
     }
   } else {
     // ── Poster (2:3): cinematic vertical stack ──
-    if (available === 2) {
-      parts.push(crest(186, 296, 78, badge1));
-      parts.push(crest(414, 296, 78, badge2));
+    if (scoreHero) {
+      // Same live scoreboard language, stacked for the portrait canvas.
+      parts.push(crest(110, 296, 58, badge1, team1));
+      parts.push(crest(490, 296, 58, badge2, team2));
+      parts.push('<text x="300" y="322" font-family="' + CARD_COND + '" font-size="' + heroScoreSize + '" font-weight="800" letter-spacing="' + scoreLetterspace + '" fill="url(#scoreFill)" text-anchor="middle">' + escapeXml(scoreDisplay) + '</text>');
+      const heroRule = Math.min(heroGap * 0.5, scoreDisplay.length * heroScoreSize * 0.29);
+      parts.push('<rect x="' + (300 - heroRule / 2).toFixed(1) + '" y="338" width="' + heroRule.toFixed(1) + '" height="3" rx="1.5" fill="' + CARD_HOT + '" opacity="0.85"/>');
+      parts.push(teamName(110, 390, team1, 20));
+      parts.push(teamName(490, 390, team2, 20));
+      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+    } else if (available === 2) {
+      parts.push(crest(186, 296, 78, badge1, team1));
+      parts.push(crest(414, 296, 78, badge2, team2));
       parts.push(vsBadge(300, 296, 26));
       parts.push(teamName(186, 432, team1, 24));
       parts.push(teamName(414, 432, team2, 24));
@@ -724,7 +796,7 @@ function generateMatchCardSvg(spec = {}) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
       const otherName = badge1 ? team2 : team1;
-      parts.push(crest(300, 286, 80, shownBadge));
+      parts.push(crest(300, 286, 80, shownBadge, shownName));
       parts.push(teamName(300, 424, shownName, 24));
       if (otherName) {
         parts.push('<text x="300" y="462" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
@@ -792,6 +864,24 @@ function generateMatchCardSvg(spec = {}) {
       '<stop offset="0%" stop-color="#ffffff"/>' +
       '<stop offset="100%" stop-color="#c6c1bb"/>' +
     '</linearGradient>' +
+    // The hero score reads brightest at the top and falls off, so it holds up
+    // against the glow behind it without needing a plate.
+    '<linearGradient id="scoreFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" stop-color="#ffffff"/>' +
+      '<stop offset="72%" stop-color="#f4f6f8"/>' +
+      '<stop offset="100%" stop-color="#c9cdd4"/>' +
+    '</linearGradient>' +
+    // Per-sport identity tint: a low-opacity wash of the sport's accent colour.
+    '<radialGradient id="sportTint" cx="18%" cy="8%" r="85%">' +
+      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.16"/>' +
+      '<stop offset="55%" stop-color="' + accent + '" stop-opacity="0.04"/>' +
+      '<stop offset="100%" stop-color="' + accent + '" stop-opacity="0"/>' +
+    '</radialGradient>' +
+    // Gentle edge falloff so the card does not look flat at the corners.
+    '<radialGradient id="vignette" cx="50%" cy="46%" r="72%">' +
+      '<stop offset="0%" stop-color="#000000" stop-opacity="0"/>' +
+      '<stop offset="100%" stop-color="#000000" stop-opacity="0.34"/>' +
+    '</radialGradient>' +
   '</defs>';
 
   return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">\n  ' +

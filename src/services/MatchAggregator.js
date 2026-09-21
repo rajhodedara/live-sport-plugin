@@ -274,6 +274,9 @@ class MatchAggregator {
         if (!existing.poster && match.poster) existing.poster = match.poster;
         if (!existing.logo && match.logo) existing.logo = match.logo;
         if (!existing.thumbnail_url && match.thumbnail_url) existing.thumbnail_url = match.thumbnail_url;
+        // Carry a live score across the merge the same way artwork is carried.
+        // A later provider that reports a score wins over an earlier blank.
+        if (!existing.score && match.score) existing.score = match.score;
         if (!existing.background && match.background) existing.background = match.background;
         if (!existing.league && match.league) existing.league = match.league;
         if (!existing.team1 && match.team1) existing.team1 = match.team1;

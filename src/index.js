@@ -179,6 +179,10 @@ const imageService = require('./services/ImageService');
 const matchCardMemo = new Map();
 const MATCH_CARD_MEMO_MAX = 500;
 
+// Stremio's documented poster budget is 100 kb (50 kb recommended). Generated
+// SVG cards sit around 3-6 kb, so this is a guard rail, not a design target.
+const IMAGE_SVG_BUDGET_BYTES = 100 * 1024;
+
 app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res) => {
   const sport = (req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '');
   const candidatePaths = [
@@ -204,9 +208,44 @@ app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res)
   res.send(svg);
 });
 
-app.get('/img/placeholder', (req, res) => {
-  const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333');
+app.get(['/img/placeholder', '/:config/img/placeholder'], (req, res) => {
+  // placeholderUrl() has always emitted &shape=... but this route ignored it,
+  // so a 2:3 catalog row was served a 16:9 card. Honour it now.
+  const shape = req.query.shape === 'poster' ? 'poster' : 'landscape';
+  const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333', undefined, undefined, shape);
   res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.send(svg);
+});
+
+// /img/date?...          → generated date poster for one day of replays, so a
+//                          sport hub's date rows are visually distinct instead of
+//                          repeating the same sport JPEG for every date.
+app.get(['/img/date', '/:config/img/date'], (req, res) => {
+  const shape = req.query.shape === 'landscape' ? 'landscape' : 'poster';
+  const dateStr = typeof req.query.date === 'string' ? req.query.date.trim().slice(0, 60) : '';
+  const parsedCount = parseInt(req.query.count, 10);
+  const count = Number.isFinite(parsedCount) && parsedCount > 0 ? Math.min(parsedCount, 9999) : 0;
+  const sport = typeof req.query.sport === 'string' ? req.query.sport.trim().toLowerCase().slice(0, 32) : '';
+
+  const svg = imageService.generateDateSvg(dateStr || 'Replays', count, sport || null, shape);
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.send(svg);
+});
+
+// /img/sport/:sport      → generated per-sport archive card, used when no
+//                          curated sport poster exists on disk.
+app.get(['/img/sport/:sport', '/:config/img/sport/:sport'], (req, res) => {
+  const shape = req.query.shape === 'landscape' ? 'landscape' : 'poster';
+  const sport = String(req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '').slice(0, 32);
+
+  const svg = imageService.generateSportSvg(sport, shape, { badge: 'REPLAYS' });
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
@@ -229,7 +268,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   const memoKey = [
     qs(query.cat), qs(query.title), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
     qs(query.lg), qs(query.lb), qs(query.ch), qs(query.cb), qs(query.cm),
-    qs(query.st), qs(query.tm), shape
+    qs(query.st), qs(query.tm), qs(query.sc), shape
   ].join('|');
 
   const cached = matchCardMemo.get(memoKey);
@@ -274,6 +313,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     channel: qs(query.ch),
     status: qs(query.st),
     time: qs(query.tm),
+    score: qs(query.sc),
     shape
   });
 
@@ -322,7 +362,10 @@ app.get('/img', async (req, res) => {
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
     if (embed && !entry.contentType.includes('svg')) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
-      const b64 = entry.buffer.toString('base64');
+      // Reference the crest through the cached binary endpoint instead of
+      // base64-embedding it. Embedding a 326 kb asset inflates the SVG past
+      // 400 kb; Stremio's poster budget is 100 kb (50 kb recommended).
+      const imgUrl = `${BASE_URL}/img/badge?url=${encodeURIComponent(String(req.query.url || '').trim())}`;
       const cleanTitle = String(text || '').replace(/\b(24\/7|live|stream|raw|hd)\b/gi, '').trim();
       const showTitle = cleanTitle.length > 0 && cleanTitle.length <= 36;
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="450" viewBox="0 0 800 450">
@@ -346,9 +389,15 @@ app.get('/img', async (req, res) => {
   <rect x="0" y="0" width="800" height="4" fill="${bg}"/>
   <rect x="0" y="446" width="800" height="4" fill="${bg}"/>
   ${showTitle ? `<text x="50%" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="rgba(255,255,255,0.72)" text-anchor="middle">${cleanTitle.toUpperCase().replace(/[&<>'"]/g, '')}</text>` : ''}
-  <image href="data:${entry.contentType};base64,${b64}" xlink:href="data:${entry.contentType};base64,${b64}" x="120" y="55" width="560" height="320" preserveAspectRatio="xMidYMid meet" filter="url(#logoShadow)"/>
+  <image href="${imgUrl}" xlink:href="${imgUrl}" x="120" y="55" width="560" height="320" preserveAspectRatio="xMidYMid meet" filter="url(#logoShadow)"/>
 </svg>`;
       res.setHeader('Content-Type', 'image/svg+xml');
+      // Belt-and-braces budget guard: if anything ever pushes this card past the
+      // Stremio poster ceiling, degrade to the lightweight text card rather than
+      // shipping an oversized poster the client may reject.
+      if (Buffer.byteLength(svg, 'utf8') > IMAGE_SVG_BUDGET_BYTES) {
+        return res.send(imageService.svgPlaceholder(text, color));
+      }
       return res.send(svg);
     }
     res.setHeader('Content-Type', entry.contentType);
@@ -533,8 +582,8 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
     const enabledSports = parsedConfig.sports.split(',');
     
-    // General catalogs to always keep
-    const keepCatalogs = ['nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_teams', 'nuvio_sports_networks', 'nuvio_sports_replays'];
+    // General catalogs to always keep (Your Teams leads first)
+    const keepCatalogs = ['nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_networks', 'nuvio_sports_replays'];
     
     // Add specific catalogs based on selection
     const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
@@ -574,8 +623,8 @@ app.get('/:config?/manifest.json', (req, res, next) => {
 
       // Always-keep catalogs: not tied to a single sport.
       const ALWAYS_KEEP = new Set([
-        'nuvio_sports_live', 'nuvio_sports_upcoming',
-        'nuvio_sports_teams', 'nuvio_sports_other', 'nuvio_sports_networks'
+        'nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming',
+        'nuvio_sports_other', 'nuvio_sports_networks'
       ]);
       newManifest.catalogs = newManifest.catalogs.filter((c) => {
         if (ALWAYS_KEEP.has(c.id)) return true;
@@ -598,6 +647,13 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     }
   } catch (_) {
     // Never let catalog curation break the manifest.
+  }
+
+  // Ensure "⭐ Your Teams" catalog is strictly in first place (index 0) if present
+  const teamsCatalogIndex = newManifest.catalogs.findIndex(c => c.id === 'nuvio_sports_teams');
+  if (teamsCatalogIndex > 0) {
+    const [teamsCatalog] = newManifest.catalogs.splice(teamsCatalogIndex, 1);
+    newManifest.catalogs.unshift(teamsCatalog);
   }
 
   res.setHeader('Access-Control-Allow-Origin', '*');
