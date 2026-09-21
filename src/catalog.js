@@ -209,13 +209,25 @@ function isReplayMatch(match) {
  *   6. date (upcoming = nearest kickoff first; live/replay = newest first)
  */
 /**
+ * Lowercases and strips diacritics so "Nautico" matches "Náutico".
+ * NFKD + combining-mark strip covers the Latin ranges the providers emit
+ * (BR/PT/ES/FR/DE/TR). Applied to both the query and the title.
+ */
+function foldText(value) {
+  return String(value == null ? '' : value)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+/**
  * Normalizes the "Favorite teams" config field into lowercase tokens.
  * Shared by the teams catalog and the favourites-first ordering below.
  */
 function parseFavoriteTeams(conf) {
   const raw = conf && conf.teams;
   if (typeof raw !== 'string' || !raw.trim()) return [];
-  return raw.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
+  return raw.split(',').map(t => foldText(t.trim())).filter(Boolean);
 }
 
 /**
@@ -223,7 +235,7 @@ function parseFavoriteTeams(conf) {
  */
 function isFavoriteMatch(match, favorites) {
   if (!favorites || favorites.length === 0) return false;
-  const title = String((match && match.title) || '').toLowerCase();
+  const title = foldText(match && match.title);
   if (!title) return false;
   return favorites.some(team => title.includes(team));
 }
