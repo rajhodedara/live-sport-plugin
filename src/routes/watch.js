@@ -18,6 +18,18 @@ const router = express.Router();
 //   ?title=<encoded match title> shown in the page heading
 
 router.get('/watch', (req, res) => {
+  // If request contains a YouTube URL or video ID, directly redirect to YouTube (skip /watch iframe)
+  const candidateUrl = req.query.url || req.query.embed || req.query.v || req.query.ytId || '';
+  if (/youtube\.com|youtu\.be/i.test(candidateUrl) || req.query.ytId || req.query.v) {
+    let ytTarget = candidateUrl;
+    const match = candidateUrl.match(/(?:embed\/|watch\?v=|\/v\/|youtu\.be\/)([a-zA-Z0-9_-]{11})/);
+    const videoId = (match && match[1]) || req.query.ytId || req.query.v;
+    if (videoId) {
+      ytTarget = `https://www.youtube.com/watch?v=${videoId}`;
+    }
+    return res.redirect(ytTarget);
+  }
+
   const mode     = req.query.mode;
   const title    = req.query.title || 'Live Sports';
 
@@ -202,7 +214,18 @@ router.get('/watch', (req, res) => {
   // ─── Default mode — iframe embed proxy (original behaviour, unchanged) ────
   const embedUrl = req.query.url;
   if (!embedUrl) {
-    return res.status(400).send('Missing ?url parameter');
+    // If originalUrl contains youtube, redirect immediately
+    const origMatch = req.originalUrl && req.originalUrl.match(/(?:youtube\.com|youtu\.be)[^\s&"']+/i);
+    if (origMatch) {
+      return res.redirect('https://' + origMatch[0].replace(/^https?:\/\//, ''));
+    }
+    return res.status(400).send(`
+      <!DOCTYPE html><html><body style="background:#111;color:#eee;font-family:sans-serif;text-align:center;padding-top:60px;">
+        <h2>No Stream URL Provided</h2>
+        <p>This stream link was opened without a valid ?url parameter.</p>
+        <p><a href="/" style="color:#f44;text-decoration:none;">Return to Nuvio</a></p>
+      </body></html>
+    `);
   }
 
   // Validate — only allow http/https URLs
@@ -217,6 +240,11 @@ router.get('/watch', (req, res) => {
     safeUrl = parsed.toString();
   } catch {
     return res.status(400).send('Invalid URL');
+  }
+
+  // Never embed YouTube in an iframe — redirect directly to YouTube
+  if (/youtube\.com|youtu\.be/i.test(safeUrl)) {
+    return res.redirect(safeUrl);
   }
 
   const safeTitle = String(title)

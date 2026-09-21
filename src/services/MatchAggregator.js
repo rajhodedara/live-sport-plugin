@@ -151,8 +151,8 @@ function _tryExtractTeams(title) {
 // ────────────────────────────────────────────────────────────────────────────
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService }) {
-    this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider, ...(daddyLiveProvider ? [daddyLiveProvider] : [])];
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider }) {
+    this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : [])];
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
   }
@@ -390,7 +390,7 @@ class MatchAggregator {
       // retention window instead of an open-ended exemption.
       const expiryWindowMs = 24 * 3600 * 1000;
       const replayExpiryWindowMs = REPLAY_RETENTION_DAYS * 24 * 3600 * 1000;
-      const isReplayZone = match.sources && match.sources.some(s => s.source === 'replayzone');
+      const isReplayZone = match.sources && match.sources.some(s => s.source === 'replayzone' || s.source === 'livetv');
       const windowMs = isReplayZone ? replayExpiryWindowMs : expiryWindowMs;
       return now <= kickoff + windowMs;
     });

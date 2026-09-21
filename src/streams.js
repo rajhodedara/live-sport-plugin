@@ -23,11 +23,11 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
-    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
+    const getPriority = (src) => SOURCE_PRIORITY[src] ?? (['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'replayzone', 'livetv', 'embedindia', 'embedst', 'streamedpk'].includes(src) ? 99 : 1.5);
     const pa = getPriority(a.source);
     const pb = getPriority(b.source);
     if (pa !== pb) return pa - pb;
@@ -38,7 +38,7 @@ function selectSources(matchSources, config) {
     const enabled = config.sources.split(',');
     // embedindia / embedst / streamedpk are the same embed chain — all three are
     // controlled by the single 'streamedpk' toggle on the configure page.
-    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
+    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -50,7 +50,7 @@ function selectSources(matchSources, config) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone'];
+  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -85,6 +85,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'replayzone') {
     const provider = container.resolve('replayzoneProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'livetv') {
+    const provider = container.resolve('liveTvProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'daddylive') {
     const provider = container.resolve('daddyLiveProvider');
@@ -321,7 +324,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('/watch?') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -646,7 +649,8 @@ async function handleStream(type, id, config) {
     streamsports: 'StreamSports',
     streamsports99: 'StreamSports99',
     'embedindia': 'Streamed.pk', 'embedst': 'Streamed.pk', 'streamedpk': 'Streamed.pk',
-    'replayzone': 'ReplayZone'
+    'replayzone': 'ReplayZone',
+    'livetv': 'LiveTV'
   };
 
   streams.forEach(s => {
@@ -659,7 +663,27 @@ async function handleStream(type, id, config) {
        quality = h + 'p';
     }
     
-    const isWeb = !!s.externalUrl || s.name === 'Nuvio Web Player';
+    // If externalUrl is a wrapped /watch link containing a YouTube URL, unwrap it directly
+    if (s.externalUrl && s.externalUrl.includes('/watch?')) {
+      const match = s.externalUrl.match(/[?&](?:url|embed)=([^&]+)/);
+      if (match) {
+        try {
+          const decoded = decodeURIComponent(match[1]);
+          if (/youtube\.com|youtu\.be/i.test(decoded)) {
+            s.externalUrl = decoded;
+          }
+        } catch (_) {}
+      }
+    }
+
+    const isYouTube = !!s.ytId || (s.externalUrl && /youtube\.com|youtu\.be/i.test(s.externalUrl));
+    if (isYouTube) {
+      if (s.ytId && !s.externalUrl) {
+        s.externalUrl = `https://www.youtube.com/watch?v=${s.ytId}`;
+      }
+    }
+
+    const isWeb = !isYouTube && (!!s.externalUrl || s.name === 'Nuvio Web Player');
     let providerName = niceNames[s._source] || niceNames[Object.keys(niceNames).find(k => s.title && s.title.toLowerCase().includes(k))] || 'Streamed.pk';
     
     if (s.title && s.title.toLowerCase().includes('daddylive')) providerName = 'DaddyLive';
@@ -686,7 +710,11 @@ async function handleStream(type, id, config) {
       }
     }
     // Determine Group
-    s.name = isWeb ? '🌐 Web Stream' : '⚡ Direct Stream';
+    if (isYouTube) {
+      s.name = '▶️ YouTube';
+    } else {
+      s.name = isWeb ? '🌐 Web Stream' : '⚡ Direct Stream';
+    }
     
     let countryTag = '';
     if (channelName) {
@@ -737,8 +765,9 @@ async function handleStream(type, id, config) {
   // stream exists those provider web embeds are hidden (TV clients can't open
   // iframes). ReplayZone web streams (_rzWeb) are an exception — they are VOD
   // embeds (Dailymotion, ok.ru page, etc.) that carry content the direct
-  // streams may not, so they are always kept alongside direct streams.
-  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream' || s._rzWeb);
+  // streams may not, so they are always kept alongside direct streams. LiveTV
+  // replay clips (_livetvReplay, mostly YouTube ids) are kept for the same reason.
+  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream' || s.name === '▶️ YouTube' || s._rzWeb || s._livetvReplay);
   if (directOnly.length > 0 && directOnly.length < streams.length) {
     const hidden = streams.length - directOnly.length;
     // filter() returns a NEW array, so it is safe to clear and refill in place

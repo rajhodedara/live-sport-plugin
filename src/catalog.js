@@ -70,6 +70,9 @@ const REPLAY_SPORTS = [
   { id: 'all',               name: '⏪ All Sports Replays',        poster: '/posters/replays/football.jpg' }
 ];
 
+// Sources whose matches qualify for the replay retention window and replay hubs.
+const REPLAY_SOURCES = new Set(['replayzone', 'livetv']);
+
 const GENRE_TO_CATEGORY = {
   'football': 'football',
   'soccer': 'football',
@@ -166,16 +169,16 @@ function isMatchLive(match) {
  *
  * Shared by the catalog replay filter and the meta-preview mapper so the two can
  * never drift apart. 24/7 networks are never replays.
- * Replays must originate from replayzone provider.
+ * Replays must originate from a replay-capable provider (replayzone, livetv).
  */
 function isReplayMatch(match) {
   if (!match) return false;
   if (match.category === 'networks') return false;
   if (match.status === 'postponed' || match.status === 'cancelled') return false;
 
-  // Replays strictly require replayzone provider
+  // Replays require a replay-capable provider (replayzone, livetv)
   if (match.sources && match.sources.length > 0) {
-    if (!match.sources.some(s => s.source === 'replayzone')) return false;
+    if (!match.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
   }
 
   const kickoff = match.date ? getKickoff(match.date) : 0;
@@ -226,7 +229,13 @@ function foldText(value) {
 function parseFavoriteTeams(conf) {
   const raw = conf && conf.teams;
   if (typeof raw !== 'string' || !raw.trim()) return [];
-  return raw.split(',').map(t => foldText(t.trim())).filter(Boolean);
+  // Keep both the folded phrase (for debugging/telemetry) and its tokens.
+  // A multi-word favourite only matches when every token is found, so
+  // "man united" cannot be satisfied by "Manchester City".
+  return raw.split(',')
+    .map(t => foldText(t.trim()))
+    .filter(Boolean)
+    .map(phrase => ({ phrase, tokens: phrase.split(/\s+/).filter(Boolean) }));
 }
 
 /**
@@ -236,7 +245,21 @@ function isFavoriteMatch(match, favorites) {
   if (!favorites || favorites.length === 0) return false;
   const title = foldText(match && match.title);
   if (!title) return false;
-  return favorites.some(team => title.includes(team));
+
+  // Match on WORD BOUNDARIES with prefix semantics, not raw substrings.
+  // Raw substring matching had two failure modes:
+  //   - "Atletico" missed "Atlético Goianiense" (did not know the accent
+  //     fold target existed) and shorter forms missed longer official names;
+  //   - "Real" wrongly matched "Montreal Canadiens" (substring mid-word).
+  // Prefix-on-token fixes both: "atletico" matches the token "atletico",
+  // while "real" no longer matches "montreal".
+  const titleTokens = title.split(/[^a-z0-9]+/).filter(Boolean);
+  if (titleTokens.length === 0) return false;
+
+  return favorites.some(fav =>
+    fav.tokens.length > 0 &&
+    fav.tokens.every(ft => titleTokens.some(tt => tt.startsWith(ft)))
+  );
 }
 
 function compareCatalogMatches(a, b, isReplayMode = false) {
@@ -622,7 +645,7 @@ async function buildReplayHubMeta(id, config = {}) {
       if (synced && synced.length > 0) rawMatches = synced;
     } catch (_) {}
   }
-  const replayMatches = rawMatches.filter(m => isReplayMatch(m) && m.sources && m.sources.some(s => s.source === 'replayzone'));
+  const replayMatches = rawMatches.filter(m => isReplayMatch(m) && m.sources && m.sources.some(s => REPLAY_SOURCES.has(s.source)));
 
   // Case A: Date Hub (e.g. nuvio_sport_replay_date_2026-09-16 or nuvio_sport_replay_football_date_2026-09-16)
   if (id.includes('_date_')) {
@@ -850,7 +873,7 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     if (!m || !Array.isArray(m.sources) || m.sources.length === 0) return false;
     if (!isReplayMatch(m)) return false;
     if (m.sources.some(s => s.source === 'timstreams')) return false;
-    if (!m.sources.some(s => s.source === 'replayzone')) return false;
+    if (!m.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
 
     if (targetSport === 'other') {
       return !sports.includes(m.category);
@@ -962,7 +985,7 @@ async function handleCatalog(type, id, extra, config) {
     filteredMatches = matches.filter(m => {
       if (!isReplayMatch(m)) return false;
       if (m.sources && m.sources.some(s => s.source === 'timstreams')) return false;
-      if (!m.sources || !m.sources.some(s => s.source === 'replayzone')) return false;
+      if (!m.sources || !m.sources.some(s => REPLAY_SOURCES.has(s.source))) return false;
       return true;
     });
   } else if (categoryMatch === 'teams') {
@@ -1011,7 +1034,7 @@ async function handleCatalog(type, id, extra, config) {
 
     if (isReplayMode) {
       if (m.sources && m.sources.some(s => s.source === 'timstreams')) return false;
-      return isReplay && m.sources && m.sources.some(s => s.source === 'replayzone');
+      return isReplay && m.sources && m.sources.some(s => REPLAY_SOURCES.has(s.source));
     }
 
     if (isReplay) return false; // Live & Upcoming mode (default) hides replays

@@ -219,12 +219,18 @@ class WatchFootyProvider extends BaseProvider {
                     }
                 } catch (e) {
                     console.error(`[WatchFootyProvider] Native extract failed for ${s.url}`, e.message);
-                    entityParams.externalUrl = `/watch?url=${encodeURIComponent(s.url)}&title=${encodeURIComponent(matchTitle || 'WatchFooty')}`;
-                    streams.push(new StreamEntity(entityParams));
+                    if (s.url) {
+                      entityParams.externalUrl = /youtube\.com|youtu\.be/i.test(s.url) 
+                        ? s.url 
+                        : `/watch?url=${encodeURIComponent(s.url)}&title=${encodeURIComponent(matchTitle || 'WatchFooty')}`;
+                      streams.push(new StreamEntity(entityParams));
+                    }
                 }
               }
-            } else {
-              entityParams.externalUrl = `/watch?url=${encodeURIComponent(s.url)}&title=${encodeURIComponent(matchTitle || 'WatchFooty')}`;
+            } else if (s.url) {
+              entityParams.externalUrl = /youtube\.com|youtu\.be/i.test(s.url) 
+                ? s.url 
+                : `/watch?url=${encodeURIComponent(s.url)}&title=${encodeURIComponent(matchTitle || 'WatchFooty')}`;
               streams.push(new StreamEntity(entityParams));
             }
           }
