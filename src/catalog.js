@@ -1174,6 +1174,15 @@ async function handleCatalog(type, id, extra, config) {
     );
   }
 
+  // Support standard Stremio pagination via extra.skip
+  const skip = extra && extra.skip ? Math.max(0, parseInt(extra.skip, 10) || 0) : 0;
+  // Cap large catalogs (like 24/7 Live TV with 900+ channels) to 100 items per page
+  // This avoids massive 750KB payloads that trigger timeouts or crash low-memory TV clients
+  const PAGE_SIZE = 100;
+  if (skip > 0 || (metas.length > PAGE_SIZE && !extra?.search)) {
+    metas = metas.slice(skip, skip + PAGE_SIZE);
+  }
+
   return { metas };
 }
 

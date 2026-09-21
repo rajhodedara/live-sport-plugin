@@ -15,6 +15,7 @@ dist/
 # Runtime-generated team logo cache (TeamLogoService writes this in place).
 # The tracked seed lives in src/data/team_logos_cache.json.
 *team_logos_cache.json
+*matches_cache.json
 
 # Jest run output logs (debug/baseline snapshots, not source)
 after-jest.txt
