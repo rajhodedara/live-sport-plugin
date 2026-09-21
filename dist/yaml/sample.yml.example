@@ -1,8 +1,0 @@
-name: "SampleSports"
-baseUrl: "https://example.com/sports"
-defaultCategory: "football"
-selectors:
-  matches: ".match-list .item"
-  title: "h4.match-title"
-  time: "span.time"
-  link: "a.watch-btn -> href"
