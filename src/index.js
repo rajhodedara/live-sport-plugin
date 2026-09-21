@@ -54,11 +54,17 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
-// Serve the web debugger UI, posters, and Configuration Page
-app.use(express.static(path.join(__dirname, '..', 'public'), { index: false }));
-app.use(express.static(path.join(__dirname, 'public'), { index: false }));
-app.use('/posters', express.static(path.join(__dirname, '..', 'public', 'posters')));
-app.use('/posters', express.static(path.join(__dirname, 'public', 'posters')));
+const posterStaticOptions = {
+  maxAge: 0,
+  setHeaders: (res) => {
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+  }
+};
+app.use('/posters', express.static(path.join(__dirname, '..', 'public', 'posters'), posterStaticOptions));
+app.use('/posters', express.static(path.join(__dirname, 'public', 'posters'), posterStaticOptions));
+app.use('/posters', express.static(path.join(__dirname, 'posters'), posterStaticOptions));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
@@ -72,6 +78,36 @@ app.get(['/configure', '/:config/configure'], (req, res) => {
 // Serves Nuvio Collections JSON schema for Sports Replays & Live Sports.
 // Compatible with Nuvio's Collection import from URL or file.
 const { generateCollections } = require('./collections');
+
+// Rolling/competition replay rows for the sport collections. Kept OUT of the
+// static manifest (see the note in the /manifest.json handler) so the manifest
+// stays under the Stremio SDK's 8192-byte limit.
+const REPLAY_MANIFEST_ROWS = [
+  // Basketball
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_nba', name: '\uD83C\uDFC0 NBA', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] },
+  // Tennis
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_today', name: "\uD83D\uDCC5 Today's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_yesterday', name: "\uD83D\uDCC5 Yesterday's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_this_week', name: "\uD83D\uDCC5 This Week's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_atp', name: '\uD83C\uDFBE ATP Tour', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_older', name: '\uD83D\uDCC5 Older Matches', extra: [{ name: 'skip', isRequired: true }] },
+  // Hockey
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_nhl', name: '\uD83C\uDFD2 NHL', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] },
+  // American Football
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_nfl', name: '\uD83C\uDFC8 NFL', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] }
+];
 
 app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.json', '/:config/nuvio-collections.json'], (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
@@ -463,6 +499,16 @@ app.get('/:config?/manifest.json', (req, res, next) => {
 
   // Clone manifest catalogs
   const newManifest = JSON.parse(JSON.stringify(manifest));
+
+  // ── Replay collection rows, injected here to stay under the 8kb manifest cap ──
+  // The Stremio SDK rejects a manifest > 8192 bytes at build time, and the base
+  // manifest already sits close to that ceiling. The sport-head catalogs are
+  // declared in the manifest; their rolling date/competition rows below are
+  // appended at request time instead, which keeps every row queryable by the
+  // collection folders without paying the build-time size cost.
+  for (const extra of REPLAY_MANIFEST_ROWS) {
+    if (!newManifest.catalogs.some((c) => c.id === extra.id)) newManifest.catalogs.push(extra);
+  }
   
   if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
     const enabledSports = parsedConfig.sports.split(',');

@@ -133,8 +133,8 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     expect(fbFolder).toBeDefined();
     expect(fbFolder.title).toBe('Football');
     expect(fbFolder.tileShape).toBe('LANDSCAPE');
-    expect(fbFolder.coverImageUrl).toContain('/posters/replays/football.jpg');
-    expect(fbFolder.heroBackdropUrl).toContain('/posters/replays/football.jpg');
+    expect(fbFolder.coverImageUrl).toMatch(/\/posters\/replays\/(luffy_)?football\.jpg/);
+    expect(fbFolder.heroBackdropUrl).toMatch(/\/posters\/replays\/(luffy_)?football\.jpg/);
     expect(Array.isArray(fbFolder.catalogSources)).toBe(true);
     expect(fbFolder.catalogSources.length).toBeGreaterThanOrEqual(2);
     expect(fbFolder.catalogSources[0].addonId).toBe('community.nuvio.live-sports');

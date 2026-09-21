@@ -11,3 +11,14 @@ cloudflared.exe
 # Runtime-generated team logo cache (TeamLogoService writes this in place).
 # The tracked seed lives in src/data/team_logos_cache.json.
 dist/team_logos_cache.json
+
+# Jest run output logs (debug/baseline snapshots, not source)
+after-jest.txt
+baseline-jest.txt
+current-jest.txt
+final-jest.txt
+v2.txt
+v3.txt
+v4.txt
+verify.txt
+jest.log

@@ -84,6 +84,12 @@ function normalizeCategory(raw) {
   if (c.includes('golf') || c.includes('pga')) return 'golf';
   if (c.includes('formula') || c.includes('motogp') || c.includes('racing') || c.includes('nascar')) return 'motorsport';
   if (c.includes('volleyball') || c.includes('gymnastics') || c.includes('athletics')) return 'other';
+
+  // Ice-hockey families that did not match the explicit checks above. Word
+  // boundaries keep short codes (DEL, SHL, NBL) from matching inside longer
+  // football league names such as Estonia Meistriliiga.
+  if (/\b(?:khl|vhl|mhl|whl|ohl|qmjhl|ahl|nhl|del|shl|ebel)\b/i.test(c) || c.includes('ice hockey') || c.includes('hockey') || /\bliiga\b/i.test(c) || c.includes('extraleague')) return 'hockey';
+  if (/\b(?:wnbl|nbl|enbl|lnb|lkl|tbl|acb|kbl)\b/i.test(c) || c.includes('ldb')) return 'basketball';
   // Football/soccer is the dominant archive sport; match on competition naming
   // patterns before falling back, so leagues don't land in "Other Sports".
   const FOOTBALL_HINTS = [
@@ -153,6 +159,8 @@ function parseArchive(html, ymd) {
       score: score ? score[1] : '',
       time: time ? time[1] : '',
       thumbnail_url: '',
+      team1: home.trim() ? { name: home.trim() } : null,
+      team2: away.trim() ? { name: away.trim() } : null,
       sources,
     });
   }
@@ -376,6 +384,17 @@ class LiveTVProvider {
     } catch (e) {
       console.warn(`[LiveTV] resolveStream failed for ${path}: ${e.message}`);
     }
+
+    // Collapse duplicates: the root clip and its "Other Videos" siblings can
+    // resolve to the same underlying video, producing the same stream twice.
+    const seenKeys = new Set();
+    streams = streams.filter((s) => {
+      const key = s.ytId ? 'yt:' + s.ytId : (s.url ? 'url:' + s.url : (s.externalUrl ? 'ext:' + s.externalUrl : null));
+      if (!key) return true;
+      if (seenKeys.has(key)) return false;
+      seenKeys.add(key);
+      return true;
+    });
 
     this._streamCache.set(cacheKey, { at: Date.now(), value: streams });
     return streams;

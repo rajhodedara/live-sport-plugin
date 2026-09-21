@@ -63,15 +63,15 @@ const SPORT_MAX_DURATION_MS = {
 const DEFAULT_EVENT_DURATION_MS = 12 * 60 * 60 * 1000;
 
 const REPLAY_SPORTS = [
-  { id: 'football',          name: '⚽ Football Replays',          poster: '/posters/replays/football.jpg' },
-  { id: 'motorsport',        name: '🏎️ Motorsport Replays',        poster: '/posters/replays/motorsport.jpg' },
-  { id: 'baseball',          name: '⚾ Baseball Replays',          poster: '/posters/replays/baseball.jpg' },
-  { id: 'rugby',             name: '🏉 Rugby Replays',             poster: '/posters/replays/rugby.jpg' },
-  { id: 'basketball',        name: '🏀 Basketball Replays',        poster: '/posters/replays/basketball.jpg' },
-  { id: 'tennis',            name: '🎾 Tennis Replays',            poster: '/posters/replays/tennis.jpg' },
-  { id: 'hockey',            name: '🏒 Hockey Replays',            poster: '/posters/replays/hockey.jpg' },
-  { id: 'american_football', name: '🏈 American Football Replays', poster: '/posters/replays/american_football.jpg' },
-  { id: 'all',               name: '⏪ All Sports Replays',        poster: '/posters/replays/football.jpg' }
+  { id: 'football',          name: '⚽ Football Replays',          poster: '/posters/replays/luffy_football.jpg?v=luffy' },
+  { id: 'motorsport',        name: '🏎️ Motorsport Replays',        poster: '/posters/replays/luffy_motorsport.jpg?v=luffy' },
+  { id: 'baseball',          name: '⚾ Baseball Replays',          poster: '/posters/replays/luffy_baseball.jpg?v=luffy' },
+  { id: 'rugby',             name: '🏉 Rugby Replays',             poster: '/posters/replays/luffy_rugby.jpg?v=luffy' },
+  { id: 'basketball',        name: '🏀 Basketball Replays',        poster: '/posters/replays/luffy_basketball.jpg?v=luffy' },
+  { id: 'tennis',            name: '🎾 Tennis Replays',            poster: '/posters/replays/luffy_tennis.jpg?v=luffy' },
+  { id: 'hockey',            name: '🏒 Hockey Replays',            poster: '/posters/replays/luffy_hockey.jpg?v=luffy' },
+  { id: 'american_football', name: '🏈 American Football Replays', poster: '/posters/replays/luffy_american_football.jpg?v=luffy' },
+  { id: 'all',               name: '⏪ All Sports Replays',        poster: '/posters/replays/luffy_football.jpg?v=luffy' }
 ];
 
 // Sources whose matches qualify for the replay retention window and replay hubs.

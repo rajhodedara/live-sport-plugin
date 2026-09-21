@@ -70,7 +70,7 @@ const FOLDER_DEFINITIONS = [
     id: 'folder-basketball-replays',
     sport: 'basketball',
     title: 'Basketball',
-    poster: '/posters/replays/basketball.jpg',
+    poster: '/posters/replays/luffy_basketball.jpg',
     catalogs: [
       { id: 'nuvio_sports_replays_basketball_today', name: "📅 Today's Games" },
       { id: 'nuvio_sports_replays_basketball_yesterday', name: "📅 Yesterday's Games" },
@@ -84,7 +84,7 @@ const FOLDER_DEFINITIONS = [
     id: 'folder-tennis-replays',
     sport: 'tennis',
     title: 'Tennis',
-    poster: '/posters/replays/tennis.jpg',
+    poster: '/posters/replays/luffy_tennis.jpg',
     catalogs: [
       { id: 'nuvio_sports_replays_tennis_today', name: "📅 Today's Matches" },
       { id: 'nuvio_sports_replays_tennis_yesterday', name: "📅 Yesterday's Matches" },
@@ -98,7 +98,7 @@ const FOLDER_DEFINITIONS = [
     id: 'folder-hockey-replays',
     sport: 'hockey',
     title: 'Hockey',
-    poster: '/posters/replays/hockey.jpg',
+    poster: '/posters/replays/luffy_hockey.jpg',
     catalogs: [
       { id: 'nuvio_sports_replays_hockey_today', name: "📅 Today's Games" },
       { id: 'nuvio_sports_replays_hockey_yesterday', name: "📅 Yesterday's Games" },
@@ -112,7 +112,7 @@ const FOLDER_DEFINITIONS = [
     id: 'folder-american_football-replays',
     sport: 'american_football',
     title: 'American Football',
-    poster: '/posters/replays/american_football.jpg',
+    poster: '/posters/replays/luffy_american_football.jpg',
     catalogs: [
       { id: 'nuvio_sports_replays_american_football_today', name: "📅 Today's Games" },
       { id: 'nuvio_sports_replays_american_football_yesterday', name: "📅 Yesterday's Games" },
@@ -137,7 +137,7 @@ function generateCollections(baseUrl = BASE_URL, config = '') {
   const manifestUrl = `${cleanBaseUrl}${manifestPath}`;
 
   const folders = FOLDER_DEFINITIONS.map(def => {
-    const coverImageUrl = `${cleanBaseUrl}${def.poster}`;
+    const coverImageUrl = `${cleanBaseUrl}${def.poster}?v=luffy`;
     const dynamicCatalogs = getSportCatalogs(def);
     const catalogSources = dynamicCatalogs.map(cat => ({
       addonId: 'community.nuvio.live-sports',
