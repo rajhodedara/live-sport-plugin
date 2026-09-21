@@ -104,12 +104,22 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
     expect(streamRes.streams[0].title).toContain('ReplayZone');
   });
 
-  test('generateCollections returns valid Nuvio Collections schema with 4 Landscape folders', () => {
+  test('generateCollections returns valid Nuvio Collections schema with the replay sport folders', () => {
     const { generateCollections, FOLDER_DEFINITIONS } = require('../src/collections');
     const collections = generateCollections('http://localhost:7000', 'testConfig');
     expect(Array.isArray(collections)).toBe(true);
     expect(collections.length).toBe(1);
-    expect(FOLDER_DEFINITIONS.length).toBe(4);
+    // The four original sports must always be present; the collection grew to
+    // include more sports (basketball, tennis, hockey, american football), so
+    // assert the invariants rather than a fixed total.
+    expect(FOLDER_DEFINITIONS.length).toBeGreaterThanOrEqual(4);
+    for (const sport of ['football', 'motorsport', 'baseball', 'rugby']) {
+      expect(FOLDER_DEFINITIONS.some(f => f.id === `folder-${sport}-replays`)).toBe(true);
+    }
+    for (const f of FOLDER_DEFINITIONS) {
+      expect(Array.isArray(f.catalogs)).toBe(true);
+      expect(f.catalogs.length).toBeGreaterThanOrEqual(1);
+    }
 
     const c = collections[0];
     expect(c.id).toBe('collection-sports-replays');

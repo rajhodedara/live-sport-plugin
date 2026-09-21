@@ -65,6 +65,62 @@ const FOLDER_DEFINITIONS = [
       { id: 'nuvio_sports_replays_rugby_older', name: '📅 Older Matches' },
       { id: 'nuvio_sports_replays_rugby', name: '🏉 All Rugby Replays' }
     ]
+  },
+  {
+    id: 'folder-basketball-replays',
+    sport: 'basketball',
+    title: 'Basketball',
+    poster: '/posters/replays/basketball.jpg',
+    catalogs: [
+      { id: 'nuvio_sports_replays_basketball_today', name: "📅 Today's Games" },
+      { id: 'nuvio_sports_replays_basketball_yesterday', name: "📅 Yesterday's Games" },
+      { id: 'nuvio_sports_replays_basketball_this_week', name: "📅 This Week's Games" },
+      { id: 'nuvio_sports_replays_basketball_nba', name: "🏀 NBA Replays" },
+      { id: 'nuvio_sports_replays_basketball_older', name: "📅 Older Games" },
+      { id: 'nuvio_sports_replays_basketball', name: "All Basketball Replays" }
+    ]
+  },
+  {
+    id: 'folder-tennis-replays',
+    sport: 'tennis',
+    title: 'Tennis',
+    poster: '/posters/replays/tennis.jpg',
+    catalogs: [
+      { id: 'nuvio_sports_replays_tennis_today', name: "📅 Today's Matches" },
+      { id: 'nuvio_sports_replays_tennis_yesterday', name: "📅 Yesterday's Matches" },
+      { id: 'nuvio_sports_replays_tennis_this_week', name: "📅 This Week's Matches" },
+      { id: 'nuvio_sports_replays_tennis_atp', name: "🎾 ATP Tour Replays" },
+      { id: 'nuvio_sports_replays_tennis_older', name: "📅 Older Matches" },
+      { id: 'nuvio_sports_replays_tennis', name: "All Tennis Replays" }
+    ]
+  },
+  {
+    id: 'folder-hockey-replays',
+    sport: 'hockey',
+    title: 'Hockey',
+    poster: '/posters/replays/hockey.jpg',
+    catalogs: [
+      { id: 'nuvio_sports_replays_hockey_today', name: "📅 Today's Games" },
+      { id: 'nuvio_sports_replays_hockey_yesterday', name: "📅 Yesterday's Games" },
+      { id: 'nuvio_sports_replays_hockey_this_week', name: "📅 This Week's Games" },
+      { id: 'nuvio_sports_replays_hockey_nhl', name: "🏒 NHL Replays" },
+      { id: 'nuvio_sports_replays_hockey_older', name: "📅 Older Games" },
+      { id: 'nuvio_sports_replays_hockey', name: "All Hockey Replays" }
+    ]
+  },
+  {
+    id: 'folder-american_football-replays',
+    sport: 'american_football',
+    title: 'American Football',
+    poster: '/posters/replays/american_football.jpg',
+    catalogs: [
+      { id: 'nuvio_sports_replays_american_football_today', name: "📅 Today's Games" },
+      { id: 'nuvio_sports_replays_american_football_yesterday', name: "📅 Yesterday's Games" },
+      { id: 'nuvio_sports_replays_american_football_this_week', name: "📅 This Week's Games" },
+      { id: 'nuvio_sports_replays_american_football_nfl', name: "🏈 NFL Replays" },
+      { id: 'nuvio_sports_replays_american_football_older', name: "📅 Older Games" },
+      { id: 'nuvio_sports_replays_american_football', name: "All American Football Replays" }
+    ]
   }
 ];
 

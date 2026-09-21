@@ -634,6 +634,26 @@ async function handleStream(type, id, config) {
     streams.push(...playableStreams);
   }
 
+  // Collapse duplicate streams that arise when several sources of one match
+  // resolve to the same underlying clip (e.g. LiveTV's "Other Videos" siblings
+  // are re-listed by every clip page). Keyed on the playable identity so real
+  // multi-part streams are preserved.
+  if (streams.length > 1) {
+    const seenStreamKeys = new Set();
+    const dedupedStreams = streams.filter((s) => {
+      const key = s.ytId ? 'yt:' + s.ytId : (s.url ? 'url:' + s.url : (s.externalUrl ? 'ext:' + s.externalUrl : null));
+      if (!key) return true;
+      if (seenStreamKeys.has(key)) return false;
+      seenStreamKeys.add(key);
+      return true;
+    });
+    if (dedupedStreams.length !== streams.length) {
+      console.log(`[streams.js] Dropped ${streams.length - dedupedStreams.length} duplicate stream(s) for ${matchId}`);
+      streams.length = 0;
+      streams.push(...dedupedStreams);
+    }
+  }
+
   // --- Inject relevant 24/7 channels based on category ---
 
   // Standardize Stream Labels

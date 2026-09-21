@@ -67,6 +67,10 @@ const REPLAY_SPORTS = [
   { id: 'motorsport',        name: '🏎️ Motorsport Replays',        poster: '/posters/replays/motorsport.jpg' },
   { id: 'baseball',          name: '⚾ Baseball Replays',          poster: '/posters/replays/baseball.jpg' },
   { id: 'rugby',             name: '🏉 Rugby Replays',             poster: '/posters/replays/rugby.jpg' },
+  { id: 'basketball',        name: '🏀 Basketball Replays',        poster: '/posters/replays/basketball.jpg' },
+  { id: 'tennis',            name: '🎾 Tennis Replays',            poster: '/posters/replays/tennis.jpg' },
+  { id: 'hockey',            name: '🏒 Hockey Replays',            poster: '/posters/replays/hockey.jpg' },
+  { id: 'american_football', name: '🏈 American Football Replays', poster: '/posters/replays/american_football.jpg' },
   { id: 'all',               name: '⏪ All Sports Replays',        poster: '/posters/replays/football.jpg' }
 ];
 
@@ -855,7 +859,7 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   const sub = id.replace('nuvio_sports_replays_', '');
   
   // Known sports for replays
-  const sports = ['football', 'motorsport', 'baseball', 'rugby'];
+  const sports = ['football', 'motorsport', 'baseball', 'rugby', 'basketball', 'tennis', 'hockey', 'american_football'];
   let targetSport = sports.find(s => sub === s || sub.startsWith(s + '_')) || 'other';
   let filterType = sub.replace(targetSport, '').replace(/^_/, ''); // e.g. '', 'recent', 'premier_league', 'ucl', 'f1', 'nba', 'mlb'
 
@@ -925,6 +929,12 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     matches = matches.filter(m => (m.league && /nba/i.test(m.league)) || /\bnba\b/i.test(m.title));
   } else if (filterType === 'mlb') {
     matches = matches.filter(m => (m.league && /mlb/i.test(m.league)) || /\bmlb\b/i.test(m.title));
+  } else if (filterType === 'nfl') {
+    matches = matches.filter(m => (m.league && /nfl/i.test(m.league)) || /\bnfl\b/i.test(m.title));
+  } else if (filterType === 'nhl') {
+    matches = matches.filter(m => (m.league && /nhl/i.test(m.league)) || /\bnhl\b/i.test(m.title));
+  } else if (filterType === 'atp' || filterType === 'wta') {
+    matches = matches.filter(m => (m.league && new RegExp(filterType, 'i').test(m.league)) || new RegExp('\\b' + filterType + '\\b', 'i').test(m.title));
   }
 
   // Sort newest kickoff first
@@ -942,9 +952,17 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     );
   }
 
-  matches = matches.slice(0, 100);
+  // Pagination. The manifest declares `skip` as a required extra for every
+  // replay catalog, but it was never read here: a single page of 100 was all
+  // the client could ever see, silently dropping the rest of the day
+  // (e.g. 315 football replays on a busy day -> only 100 reachable).
+  // Honour `skip` and keep the page size at the Stremio-standard 100.
+  const pageSize = 100;
+  const skip = Math.max(0, parseInt((extra && extra.skip) || '0', 10) || 0);
+  const total = matches.length;
+  const page = (skip > 0 || total > pageSize) ? matches.slice(skip, skip + pageSize) : matches;
 
-  const metas = matches.map(m => mapMatchToMetaPreview(m, config, reqType));
+  const metas = page.map(m => mapMatchToMetaPreview(m, config, reqType));
   return { metas };
 }
 
