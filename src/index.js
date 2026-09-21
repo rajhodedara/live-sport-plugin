@@ -134,10 +134,26 @@ app.get(['/api/collections/download', '/:config/api/collections/download'], (req
   res.send(JSON.stringify(collections, null, 2));
 });
 
+// ─── Loopback-only gate for internal/debug endpoints ────────────────────
+// Uses the real TCP peer address (req.socket.remoteAddress), NOT req.ip: with
+// `trust proxy` enabled req.ip is derived from X-Forwarded-For and is therefore
+// caller-controlled. The configure page only calls these when it is itself open
+// on localhost, so a genuine loopback peer is exactly the intended caller.
+function isLoopbackRequest(req) {
+  let addr = (req.socket && req.socket.remoteAddress) || '';
+  if (addr.startsWith('::ffff:')) addr = addr.slice(7);
+  return addr === '::1' || addr === '127.0.0.1' || addr.startsWith('127.');
+}
+
 app.get('/api/server-info', (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
+  // Only disclose the origin LAN IP/port to a loopback caller (the localhost
+  // configure page, which is the sole consumer). Remote callers get baseUrl.
+  if (!isLoopbackRequest(req)) {
+    return res.json({ baseUrl: reqBaseUrl });
+  }
   res.json({
     baseUrl: reqBaseUrl,
     localIp: getLocalIp ? getLocalIp() : '127.0.0.1',
@@ -146,6 +162,11 @@ app.get('/api/server-info', (req, res) => {
 });
 
 app.get('/api/matches', (req, res) => {
+  // Internal/debug surface: the configure page does not use it, but local helper
+  // scripts do. Restrict to loopback instead of removing it.
+  if (!isLoopbackRequest(req)) {
+    return res.status(403).json({ error: 'Forbidden', reason: 'loopback_only' });
+  }
   const matches = container.resolve('cacheService').getMatches();
   res.json(matches);
 });
@@ -411,7 +432,7 @@ app.use((req, res, next) => {
             return `${currentBaseUrl}${url}`;
           }
           // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|logo|posters)(?:[?\/].*)?)$/);
+          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/mp4proxy|api\/fastmp4|api\/hlschunk|logo|posters)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
           if (match) {
             modified = true;
             return `${currentBaseUrl}${match[1]}`;

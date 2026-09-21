@@ -7,6 +7,7 @@
 const express = require('express');
 const http = require('http');
 const https = require('https');
+const { checkOutboundUrl, rejectBlockedUrl } = require('../services/OutboundUrlGuard');
 const router = express.Router();
 
 const hlsChunkHttpsAgent = new https.Agent({
@@ -88,6 +89,10 @@ router.get('/api/fastmp4', async (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer || 'https://ok.ru/';
   if (!targetUrl) return res.status(400).send('Missing url');
+
+  // SSRF gate — must run before the probe below, which is the first outbound request.
+  const verdict = await checkOutboundUrl(targetUrl);
+  if (!verdict.ok) return rejectBlockedUrl(res, verdict, 'FastMP4');
 
   const concurrency = Math.min(
     Math.max(parseInt(req.query.concurrency, 10) || FASTMP4_CONCURRENCY, 1), 12
@@ -212,6 +217,10 @@ router.get('/api/mp4proxy', async (req, res) => {
   const referer = req.query.referer || 'https://ok.ru/';
   if (!targetUrl) return res.status(400).send('Missing url');
 
+  // SSRF gate — must run before the upstream fetch below.
+  const verdict = await checkOutboundUrl(targetUrl);
+  if (!verdict.ok) return rejectBlockedUrl(res, verdict, 'MP4Proxy');
+
   try {
     const headers = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -321,11 +330,16 @@ function createSegmentUncloakStream() {
   });
 }
 
-router.get('/api/hlschunk', (req, res) => {
+router.get('/api/hlschunk', async (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer;
   const origin = req.query.origin;
   if (!targetUrl) return res.status(400).send('Missing url');
+
+  // SSRF gate — must run before client.get() below. Marked async only for this
+  // await; the streaming path itself is untouched.
+  const verdict = await checkOutboundUrl(targetUrl);
+  if (!verdict.ok) return rejectBlockedUrl(res, verdict, 'HLSChunk');
 
   try {
     const parsed = new URL(targetUrl);
