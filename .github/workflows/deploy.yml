@@ -20,12 +20,10 @@ jobs:
           script_stop: true
           script: |
             cd /root/nuvio-live-sports
-            echo "==> Stashing local changes (preserving runtime cache)..."
-            git stash
+            echo "==> Resetting any broken merge state..."
+            git reset --hard HEAD
             echo "==> Pulling latest changes from main..."
             git pull origin main
-            echo "==> Restoring stashed runtime cache..."
-            git stash pop || true
             echo "==> Building distribution bundle..."
             npm run build
             echo "==> Reloading PM2 cluster with zero downtime..."
