@@ -23,6 +23,7 @@ const { builder } = require('./manifest');
 const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
 const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
+const { isLocalDirectRequest } = require('./services/localRequest');
 const container = require('./container');
 const https = require('https');
 const http = require('http');
@@ -134,24 +135,17 @@ app.get(['/api/collections/download', '/:config/api/collections/download'], (req
   res.send(JSON.stringify(collections, null, 2));
 });
 
-// ─── Loopback-only gate for internal/debug endpoints ────────────────────
-// Uses the real TCP peer address (req.socket.remoteAddress), NOT req.ip: with
-// `trust proxy` enabled req.ip is derived from X-Forwarded-For and is therefore
-// caller-controlled. The configure page only calls these when it is itself open
-// on localhost, so a genuine loopback peer is exactly the intended caller.
-function isLoopbackRequest(req) {
-  let addr = (req.socket && req.socket.remoteAddress) || '';
-  if (addr.startsWith('::ffff:')) addr = addr.slice(7);
-  return addr === '::1' || addr === '127.0.0.1' || addr.startsWith('127.');
-}
+// ─── Local-direct gate for internal/debug endpoints ─────────────────────────
+// A socket-peer check is NOT sufficient here: the reverse proxy runs on the same
+// host, so every public request looks like 127.0.0.1. See services/localRequest.js.
 
 app.get('/api/server-info', (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  // Only disclose the origin LAN IP/port to a loopback caller (the localhost
+  // Only disclose the origin LAN IP/port to a direct local caller (the localhost
   // configure page, which is the sole consumer). Remote callers get baseUrl.
-  if (!isLoopbackRequest(req)) {
+  if (!isLocalDirectRequest(req)) {
     return res.json({ baseUrl: reqBaseUrl });
   }
   res.json({
@@ -163,8 +157,8 @@ app.get('/api/server-info', (req, res) => {
 
 app.get('/api/matches', (req, res) => {
   // Internal/debug surface: the configure page does not use it, but local helper
-  // scripts do. Restrict to loopback instead of removing it.
-  if (!isLoopbackRequest(req)) {
+  // scripts do. Restrict to a direct local caller instead of removing it.
+  if (!isLocalDirectRequest(req)) {
     return res.status(403).json({ error: 'Forbidden', reason: 'loopback_only' });
   }
   const matches = container.resolve('cacheService').getMatches();
