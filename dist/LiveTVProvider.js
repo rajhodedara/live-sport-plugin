@@ -167,6 +167,34 @@ function parseArchive(html, ymd) {
   return out;
 }
 
+async function unshorten(url) {
+  if (!url || typeof url !== 'string') return url;
+  let curr = url.trim();
+  for (let step = 0; step < 5; step++) {
+    if (/youtube(?:-nocookie)?\.com\/(?:embed\/|watch\?v=)([A-Za-z0-9_-]{6,})/i.test(curr) || /youtu\.be\/([A-Za-z0-9_-]{6,})/i.test(curr) || curr.includes('.mp4')) {
+      return curr;
+    }
+    try {
+      const res = await fetch(curr, {
+        method: 'GET',
+        headers: { 'User-Agent': UA },
+        redirect: 'manual',
+      });
+      if (res.status >= 300 && res.status < 400) {
+        const loc = res.headers.get('location');
+        if (loc) {
+          curr = new URL(loc, curr).href;
+          continue;
+        }
+      }
+      break;
+    } catch (_) {
+      break;
+    }
+  }
+  return curr;
+}
+
 class LiveTVProvider {
   constructor() {
     this.sourceName = 'livetv';
@@ -288,6 +316,13 @@ class LiveTVProvider {
           
           while (iters < 5) {
               iters++;
+
+              // 1. Unshorten redirectors / shortener links (tinyurl, bit.ly, etc.)
+              if (/(?:tinyurl\.com|bit\.ly|t\.co|goo\.gl|is\.gd|cutt\.ly|rb\.gy|shorturl\.at|ow\.ly)/i.test(currentUrl)) {
+                  currentUrl = await unshorten(currentUrl);
+              }
+
+              // 2. Direct YouTube check on URL
               const yt = currentUrl.match(/youtube(?:-nocookie)?\.com\/(?:embed\/|watch\?v=)([A-Za-z0-9_-]{6,})/) ||
                          currentUrl.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
               if (yt) {
@@ -296,6 +331,7 @@ class LiveTVProvider {
                   break;
               }
               
+              // 3. Direct MP4 check on URL
               if (currentUrl.includes('.mp4')) {
                   mp4Url = currentUrl;
                   break;
@@ -304,6 +340,18 @@ class LiveTVProvider {
               try {
                   const clipHtml = await httpGet(currentUrl);
                   
+                  // 4. Directly extract YouTube video identifiers from fetched HTML
+                  const htmlYt = clipHtml.match(/["']videoId["']\s*:\s*["']([A-Za-z0-9_-]{11})["']/) ||
+                                 clipHtml.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']https?:\/\/(?:www\.)?youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})["']/i) ||
+                                 clipHtml.match(/<meta[^>]+property=["']og:video(?::url)?["'][^>]+content=["']https?:\/\/(?:www\.)?youtube\.com\/embed\/([A-Za-z0-9_-]{11})["']/i) ||
+                                 clipHtml.match(/youtube(?:-nocookie)?\.com\/(?:embed\/|watch\?v=)([A-Za-z0-9_-]{6,})/) ||
+                                 clipHtml.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
+                  if (htmlYt) {
+                      ytId = htmlYt[1];
+                      finalUrl = `https://www.youtube.com/watch?v=${ytId}`;
+                      break;
+                  }
+
                   if (clipHtml.includes('Antiphishing.biz checks the short link') || clipHtml.includes('Long link:')) {
                       const match = clipHtml.match(/Long link:.*?(\bhttps?:\/\/[^<]+)/is) || clipHtml.match(/Long link:[^>]*>(?:[^<]*<[^>]*>)*\s*(https?:\/\/[^\s<]+)/i);
                       if (match && match[1]) {
@@ -315,16 +363,20 @@ class LiveTVProvider {
                   
                   const trimmed = clipHtml.trim();
                   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-                      currentUrl = trimmed;
+                      currentUrl = await unshorten(trimmed);
                       currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
                       continue;
                   }
                   
                   const iframeMatch = clipHtml.match(/<iframe[^>]+src=["']([^"']+)["']/i);
                   if (iframeMatch) {
-                      currentUrl = iframeMatch[1].startsWith('//') ? 'https:' + iframeMatch[1] : iframeMatch[1];
-                      currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
-                      continue;
+                      const iframeSrc = iframeMatch[1].startsWith('//') ? 'https:' + iframeMatch[1] : iframeMatch[1];
+                      // Filter out Google account / signin iframes
+                      if (!iframeSrc.includes('/v3/signin') && !iframeSrc.includes('accounts.google.com')) {
+                          currentUrl = await unshorten(iframeSrc);
+                          currentUrl = currentUrl.replace(/emb\.apl\d+\.online/ig, 'emb.apl613.online');
+                          continue;
+                      }
                   }
                   
                   const sourceMatch = clipHtml.match(/<source[^>]+src=["']([^"']+\.mp4[^"']*)["']/i) || clipHtml.match(/file:\s*['"]([^'"]+\.mp4[^'"]*)['"]/i);
@@ -336,12 +388,12 @@ class LiveTVProvider {
                   
                   const metaMatch = clipHtml.match(/<meta[^>]+http-equiv=["']?refresh["']?[^>]+content=["']?\d+;\s*url=['"]?([^"'>]+)["']?/i);
                   if (metaMatch) {
-                      currentUrl = metaMatch[1];
+                      currentUrl = await unshorten(metaMatch[1]);
                       continue;
                   }
                   const jsMatch = clipHtml.match(/window\.location(?:\.href)?\s*=\s*['"]([^'"]+)['"]/i);
                   if (jsMatch) {
-                      currentUrl = jsMatch[1];
+                      currentUrl = await unshorten(jsMatch[1]);
                       continue;
                   }
                   
