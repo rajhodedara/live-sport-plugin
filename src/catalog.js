@@ -201,12 +201,11 @@ function isReplayMatch(match) {
  * path (which needs the container, the match cache and the network).
  *
  * Key order, highest priority first:
- *   1. favourite-team fixtures before everything else (conf.teams)
- *   2. live before not-live
- *   3. real fixtures before 24/7 channels
- *   4. mainstream before local / lower-division (getMatchTier)
- *   5. popular before non-popular
- *   6. date (upcoming = nearest kickoff first; live/replay = newest first)
+ *   1. live before not-live
+ *   2. real fixtures before 24/7 channels
+ *   3. mainstream before local / lower-division (getMatchTier)
+ *   4. popular before non-popular
+ *   5. date (upcoming = nearest kickoff first; live/replay = newest first)
  */
 /**
  * Lowercases and strips diacritics so "Nautico" matches "Náutico".
@@ -240,11 +239,7 @@ function isFavoriteMatch(match, favorites) {
   return favorites.some(team => title.includes(team));
 }
 
-function compareCatalogMatches(a, b, isReplayMode = false, favorites = null) {
-  const aFav = isFavoriteMatch(a, favorites) ? 0 : 1;
-  const bFav = isFavoriteMatch(b, favorites) ? 0 : 1;
-  if (aFav !== bFav) return aFav - bFav; // Favourite-team fixtures first
-
+function compareCatalogMatches(a, b, isReplayMode = false) {
   const aIsLive = isMatchLive(a) ? 1 : 0;
   const bIsLive = isMatchLive(b) ? 1 : 0;
   if (aIsLive !== bIsLive) return bIsLive - aIsLive; // Live matches first
@@ -1028,7 +1023,7 @@ async function handleCatalog(type, id, extra, config) {
     return true;
   });
 
-  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode, favoriteTeams));
+  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode));
 
   if (categoryMatch === 'replays' && (!extra || !extra.search)) {
     let targetSports = REPLAY_SPORTS;
