@@ -4,6 +4,7 @@ const { prewarmMatch } = require('./streams');
 const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const { parseTimezone } = require('./timezone');
+const { getMatchTier } = require('./services/MainstreamRankingService');
 
 function getKickoff(d) {
   if (!d) return 0;
@@ -190,6 +191,71 @@ function isReplayMatch(match) {
   }
 
   return Date.now() > kickoff + getEventDurationMs(match.category);
+}
+
+/**
+ * Ordering for the Live Now / Upcoming / per-sport catalogs.
+ *
+ * Extracted to a named, exported function so the ordering contract can be
+ * unit-tested directly instead of being asserted through the full HTTP catalog
+ * path (which needs the container, the match cache and the network).
+ *
+ * Key order, highest priority first:
+ *   1. live before not-live
+ *   2. real fixtures before 24/7 channels
+ *   3. mainstream before local / lower-division (getMatchTier)
+ *   4. popular before non-popular
+ *   5. date (upcoming = nearest kickoff first; live/replay = newest first)
+ */
+function compareCatalogMatches(a, b, isReplayMode = false) {
+  const aIsLive = isMatchLive(a) ? 1 : 0;
+  const bIsLive = isMatchLive(b) ? 1 : 0;
+  if (aIsLive !== bIsLive) return bIsLive - aIsLive; // Live matches first
+
+  // In "Live Now", actual in-progress fixtures must outrank eternal 24/7
+  // channels. A 24/7 network is always "live", so it otherwise sorts as a
+  // live event and floods the top of the list. Two tests are needed:
+  //   1. category !== 'networks'
+  //   2. has a kickoff time - the injected 24/7 channels (Willow, Fox Cricket,
+  //      Fox League, Tennis) carry no date, whereas real fixtures do.
+  // Together these push real matches up while leaving genuine channel-only
+  // networks at the bottom.
+  const isRealFixture = (m) => (m.category !== 'networks' && (!!m.date || !!m.team1 || !!m.team2 || m.title.includes(' vs ') || m.title.includes(' @ '))) ? 1 : 0;
+  const aFix = isRealFixture(a);
+  const bFix = isRealFixture(b);
+  if (aFix !== bFix) return bFix - aFix; // Real fixtures before 24/7 channels
+
+  // Mainstream fixtures before local / lower-division ones. The `popular`
+  // flag cannot express this: Streamed.pk marks ~76 of its ~98 events popular
+  // and exposes no league field, so a top-flight "La Liga" tie and a
+  // "La Liga 2" fixture arrive looking identical. The classifier demotes
+  // explicit lower-division / reserve fixtures, and that demotion beats the
+  // Streamed.pk source signal (it does carry a few second-tier games).
+  const aTier = getMatchTier(a);
+  const bTier = getMatchTier(b);
+  if (aTier !== bTier) return aTier - bTier; // Lower tier value sorts first
+
+  // Featured / Popular matches first
+  const aPop = a.popular === '1' ? 1 : 0;
+  const bPop = b.popular === '1' ? 1 : 0;
+  if (aPop !== bPop) return bPop - aPop;
+
+  const dateA = a.date ? getKickoff(a.date) : 0;
+  const dateB = b.date ? getKickoff(b.date) : 0;
+
+  // Sort upcoming by closest kickoff first, replays and live by newest first
+  if (dateA > 0 && dateB > 0) {
+    if (isReplayMode || aIsLive) {
+      return dateB - dateA;
+    } else {
+      return dateA - dateB;
+    }
+  } else if (dateA > 0 && dateB === 0) {
+    return -1; // A (with date) comes before B (without date)
+  } else if (dateA === 0 && dateB > 0) {
+    return 1; // B (with date) comes before A (without date)
+  }
+  return 0;
 }
 
 function normalizeImageUrl(url, defaultHost = '') {
@@ -927,46 +993,7 @@ async function handleCatalog(type, id, extra, config) {
     return true;
   });
 
-  filteredMatches = [...filteredMatches].sort((a, b) => {
-    const aIsLive = isMatchLive(a) ? 1 : 0;
-    const bIsLive = isMatchLive(b) ? 1 : 0;
-    if (aIsLive !== bIsLive) return bIsLive - aIsLive; // Live matches first
-
-    // In "Live Now", actual in-progress fixtures must outrank eternal 24/7
-    // channels. A 24/7 network is always "live", so it otherwise sorts as a
-    // live event and floods the top of the list. Two tests are needed:
-    //   1. category !== 'networks'
-    //   2. has a kickoff time — the injected 24/7 channels (Willow, Fox Cricket,
-    //      Fox League, Tennis) carry no date, whereas real fixtures do.
-    // Together these push real matches up while leaving genuine channel-only
-    // networks at the bottom.
-    const isRealFixture = (m) => (m.category !== 'networks' && (!!m.date || !!m.team1 || !!m.team2 || m.title.includes(' vs ') || m.title.includes(' @ '))) ? 1 : 0;
-    const aFix = isRealFixture(a);
-    const bFix = isRealFixture(b);
-    if (aFix !== bFix) return bFix - aFix; // Real fixtures before 24/7 channels
-
-    // Featured / Popular matches first
-    const aPop = a.popular === '1' ? 1 : 0;
-    const bPop = b.popular === '1' ? 1 : 0;
-    if (aPop !== bPop) return bPop - aPop;
-    
-    const dateA = a.date ? getKickoff(a.date) : 0;
-    const dateB = b.date ? getKickoff(b.date) : 0;
-    
-    // Sort upcoming by closest kickoff first, replays and live by newest first
-    if (dateA > 0 && dateB > 0) {
-      if (isReplayMode || aIsLive) {
-        return dateB - dateA;
-      } else {
-        return dateA - dateB;
-      }
-    } else if (dateA > 0 && dateB === 0) {
-      return -1; // A (with date) comes before B (without date)
-    } else if (dateA === 0 && dateB > 0) {
-      return 1; // B (with date) comes before A (without date)
-    }
-    return 0;
-  });
+  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode));
 
   if (categoryMatch === 'replays' && (!extra || !extra.search)) {
     let targetSports = REPLAY_SPORTS;
@@ -1135,6 +1162,8 @@ module.exports = {
   mapMatchToMetaPreview,
   getKickoff,
   getEventDurationMs,
+  compareCatalogMatches,
   SPORT_MAX_DURATION_MS,
-  REPLAY_SPORTS
+  REPLAY_SPORTS,
+  getMatchTier
 };
