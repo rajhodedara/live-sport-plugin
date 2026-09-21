@@ -4,162 +4,232 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Nuvio Live Sports | Premium Setup</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@700;900&display=swap"
-    rel="stylesheet">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0a0c">
+  <title>Nuvio Live Sports | Setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    /* ============================================================
+       Nuvio Live Sports | Setup console
+       Design notes
+       - One accent (brand red). Third-party brands (Discord, Ko-fi)
+         may use their own mark colour only on their own link.
+       - Surfaces are separated by 1px hairlines, not drop shadows.
+       - One radius family: 12px panels, 8px controls, 10px buttons.
+       - No emoji as interface icons; all glyphs are inline SVG.
+       ============================================================ */
+
     :root {
-      --bg: #09090b;
-      --card-bg: rgba(28, 28, 30, 0.4);
-      --card-border: rgba(255, 255, 255, 0.05);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
+      --bg: #0a0a0c;
+      --surface: #131318;
+      --surface-2: #191920;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.18);
+
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      /* Raised from #767680: the old value measured 4.12:1 on the panel
+         surface, under the 4.5:1 floor for small text. */
+      --faint: #8e8e99;
+
       --accent: #ef4444;
-      --accent-glow: rgba(239, 68, 68, 0.3);
-      --glass: rgba(255, 255, 255, 0.02);
+      /* Darker accent step for filled surfaces. White on #ef4444 measures
+         3.76:1; on this step it measures 4.83:1, clearing AA for 15px text. */
+      --accent-strong: #dc2626;
+      --accent-soft: rgba(239, 68, 68, 0.12);
+      --accent-line: rgba(239, 68, 68, 0.45);
+
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+
+      /* Third-party brand marks, used only on their own link. */
+      --discord: #5865f2;
+      --kofi: #ff5e5b;
+
+      --r-panel: 12px;
+      --r-control: 8px;
+      --r-btn: 10px;
+
+      --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-display: "Outfit", var(--font-body);
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+      --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
     }
+
+    * { box-sizing: border-box; }
+
+    html { -webkit-text-size-adjust: 100%; }
 
     body {
       margin: 0;
-      padding: 20px;
-      font-family: 'Inter', sans-serif;
+      padding: 32px 20px 64px;
       background-color: var(--bg);
+      background-image: radial-gradient(120% 60% at 50% -10%, rgba(239, 68, 68, 0.09), transparent 60%);
+      background-repeat: no-repeat;
       color: var(--text);
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      min-height: 100vh;
-      background-image:
-        radial-gradient(circle at 15% 50%, rgba(239, 68, 68, 0.08), transparent 25%),
-        radial-gradient(circle at 85% 30%, rgba(239, 68, 68, 0.05), transparent 25%);
-    }
-
-    .container {
-      background: var(--card-bg);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      padding: 40px;
-      border-radius: 24px;
-      border: 1px solid var(--card-border);
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-      width: 100%;
-      max-width: 500px;
-      position: relative;
-    }
-
-    @media (max-width: 600px) {
-      body { padding: 10px; }
-      .container { padding: 20px; border-radius: 16px; }
-      h1 { font-size: 24px; }
-      .sports-grid { grid-template-columns: 1fr !important; }
-      .footer-actions { flex-direction: column; }
-    }
-
-    .header {
-      text-align: center;
-      margin-bottom: 30px;
-    }
-
-    h1 {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 900;
-      margin: 0 0 10px 0;
-      font-size: 32px;
-      background: linear-gradient(135deg, #fff 0%, #aaa 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 12px;
-    }
-
-    .dot {
-      width: 12px;
-      height: 12px;
-      background: var(--accent);
-      border-radius: 50%;
-      display: inline-block;
-      box-shadow: 0 0 10px var(--accent-glow);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-
-      0%,
-      100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-
-      50% {
-        opacity: 0.5;
-        transform: scale(1.3);
-      }
-    }
-
-    p.subtitle {
-      color: var(--text-muted);
+      font-family: var(--font-body);
       font-size: 15px;
-      margin: 0;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
     }
 
-    .section {
-      background: var(--glass);
-      border: 1px solid var(--card-border);
-      border-radius: 16px;
-      padding: 24px;
+    .shell {
+      width: 100%;
+      max-width: 620px;
+    }
+
+    /* ---------- Masthead ---------- */
+
+    .masthead {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding-bottom: 24px;
       margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
     }
 
-    h3 {
-      margin: 0 0 16px 0;
-      font-size: 16px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
+    .masthead img {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      border: 1px solid var(--line-strong);
+      object-fit: cover;
+      flex: none;
+    }
+
+    .masthead h1 {
+      font-family: var(--font-display);
+      font-weight: 700;
+      font-size: 26px;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      margin: 0 0 4px;
+    }
+
+    .masthead .lede {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    /* Scoped to .masthead so it cannot be overridden by .masthead p rules. */
+    .masthead .brandline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      letter-spacing: 0.14em;
       text-transform: uppercase;
-      color: #fff;
+      color: var(--faint);
+      margin: 0 0 6px;
     }
 
-    .sports-grid {
+    .brandline .pip {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex: none;
+    }
+    /* ---------- Panels ---------- */
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--r-panel);
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow-panel);
+    }
+
+    .panel-primary {
+      border-color: var(--accent-line);
+      background: linear-gradient(180deg, var(--accent-soft), transparent 120px), var(--surface);
+    }
+
+    .panel-head { margin-bottom: 16px; }
+
+    .panel-head h2 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 17px;
+      letter-spacing: -0.01em;
+      margin: 0 0 4px;
+    }
+
+    .panel-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* ---------- Chip grid (sports / sources) ---------- */
+
+    .chip-grid {
       display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+      gap: 8px;
     }
 
     .checkbox-label {
       display: flex;
       align-items: center;
       gap: 10px;
-      cursor: pointer;
+      min-height: 46px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: var(--r-control);
+      background: var(--surface-2);
+      color: var(--muted);
       font-size: 14px;
-      padding: 8px 12px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.03);
-      border: 1px solid transparent;
-      transition: all 0.2s;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+      user-select: none;
     }
 
     .checkbox-label:hover {
-      background: rgba(255, 255, 255, 0.06);
+      background: #1f1f27;
+      border-color: var(--line-strong);
+      color: var(--text);
     }
 
     .checkbox-label.active {
-      border-color: rgba(239, 68, 68, 0.3);
-      background: rgba(239, 68, 68, 0.1);
+      background: var(--accent-soft);
+      border-color: var(--accent-line);
+      color: var(--text);
+    }
+
+    .checkbox-label:focus-within {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
     }
 
     input[type="checkbox"] {
       appearance: none;
+      -webkit-appearance: none;
       width: 18px;
       height: 18px;
-      border: 2px solid #555;
-      border-radius: 4px;
-      outline: none;
+      flex: none;
+      margin: 0;
+      border: 1.5px solid var(--line-strong);
+      border-radius: 5px;
+      background: transparent;
       cursor: pointer;
       position: relative;
-      transition: all 0.2s;
+      transition: background-color 140ms ease, border-color 140ms ease;
     }
+
+    input[type="checkbox"]:hover { border-color: var(--muted); }
 
     input[type="checkbox"]:checked {
       background: var(--accent);
@@ -167,224 +237,584 @@
     }
 
     input[type="checkbox"]:checked::after {
-      content: '✓';
+      content: "";
       position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: white;
-      font-size: 12px;
-      font-weight: bold;
+      left: 5px;
+      top: 1.5px;
+      width: 4px;
+      height: 8px;
+      border: solid #fff;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
     }
 
-    .input-group {
-      margin-top: 16px;
-    }
+    /* ---------- Fields ---------- */
 
-    .input-group label {
+    .field { margin-top: 16px; }
+
+    .field:first-of-type { margin-top: 0; }
+
+    .field > label {
       display: block;
       font-size: 13px;
-      color: var(--text-muted);
-      margin-bottom: 8px;
+      font-weight: 500;
+      color: var(--text);
+      margin-bottom: 7px;
     }
 
-    input[type="text"] {
+    .hint {
+      margin: 7px 0 0;
+      font-size: 12px;
+      color: var(--faint);
+    }
+
+    input[type="text"],
+    select {
       width: 100%;
-      padding: 14px 16px;
-      background: rgba(0, 0, 0, 0.2);
-      border: 1px solid var(--card-border);
-      border-radius: 12px;
-      color: #fff;
+      min-height: 46px;
+      padding: 11px 13px;
+      background: #0d0d11;
+      border: 1px solid var(--line);
+      border-radius: var(--r-control);
+      color: var(--text);
       font-size: 15px;
-      box-sizing: border-box;
-      font-family: 'Inter', sans-serif;
-      transition: all 0.2s;
+      font-family: var(--font-body);
+      transition: border-color 160ms ease, box-shadow 160ms ease;
     }
 
-    input[type="text"]:focus {
+    input[type="text"]::placeholder { color: var(--faint); }
+
+    input[type="text"]:focus,
+    select:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15);
+      box-shadow: 0 0 0 3px var(--accent-soft);
     }
+
+    select {
+      cursor: pointer;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1a1aa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+    }
+
+    select option { background: #16161c; color: var(--text); }
+
+    .mono-field {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      letter-spacing: 0.01em;
+    }
+
+    /* ---------- Buttons ---------- */
 
     .btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      width: 100%;
+      min-height: 50px;
+      padding: 13px 18px;
+      border: 1px solid transparent;
+      border-radius: var(--r-btn);
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      text-align: center;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background-color 160ms ease, border-color 160ms ease, transform 120ms ease;
+    }
+
+    .btn:active { transform: translateY(1px); }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    .btn svg { flex: none; }
+
+    .btn-primary {
+      background: var(--accent-strong);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: #b91c1c; }
+
+    .btn-ghost {
+      background: var(--surface-2);
+      border-color: var(--line-strong);
+      color: var(--text);
+    }
+
+    .btn-ghost:hover { background: #1f1f27; border-color: var(--muted); }
+
+    .btn + .btn { margin-top: 10px; }
+
+    /* ---------- Config summary ---------- */
+
+    .summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 14px;
+      margin: 0 0 16px;
+      padding: 0;
+      list-style: none;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .summary li { display: inline-flex; align-items: center; gap: 7px; }
+
+    .summary b {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    /* ---------- Collections ---------- */
+
+    .steps {
+      margin: 0;
+      padding: 0 0 0 20px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.75;
+    }
+
+    .steps li { padding-left: 2px; }
+
+    .steps strong { color: var(--text); font-weight: 600; }
+
+    /* ---------- Footer / community ---------- */
+
+    .footer {
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+
+    .footer h2 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      font-size: 17px;
+      letter-spacing: -0.01em;
+      margin: 0 0 4px;
+    }
+
+    .footer p {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .link-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .link-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      min-height: 46px;
+      padding: 11px 16px;
+      border: 1px solid var(--line);
+      border-radius: var(--r-btn);
+      background: var(--surface);
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background-color 160ms ease, border-color 160ms ease;
+    }
+
+    .link-btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
+
+    .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    .link-btn svg { flex: none; }
+
+    .link-discord { background: rgba(88, 101, 242, 0.14); border-color: rgba(88, 101, 242, 0.45); }
+    .link-discord:hover { background: rgba(88, 101, 242, 0.22); border-color: var(--discord); }
+    .link-discord svg { color: var(--discord); }
+
+    .support-link {
+      background: rgba(255, 94, 91, 0.1);
+      border-color: rgba(255, 94, 91, 0.4);
+    }
+
+    .support-link:hover { background: rgba(255, 94, 91, 0.18); border-color: rgba(255, 94, 91, 0.65); }
+
+    /* Sports covered by the replay connection. */
+    .sport-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin: 0 0 16px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .sport-list li {
+      padding: 5px 11px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12.5px;
+      font-weight: 500;
+    }
+
+    /* QR codes stay collapsed so the panel does not dominate the page. */
+    .crypto-details {
+      margin-top: 12px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+
+    .crypto-details > summary {
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--muted);
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 0;
+    }
+
+    .crypto-details > summary::-webkit-details-marker { display: none; }
+
+    .crypto-details > summary::after {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-right: 1.6px solid currentColor;
+      border-bottom: 1.6px solid currentColor;
+      transform: rotate(45deg);
+      transition: transform 160ms ease;
+      flex: none;
+      margin-top: -3px;
+    }
+
+    .crypto-details[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+
+    .crypto-details > summary:hover { color: var(--text); }
+
+    .crypto-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .crypto {
+      border: 1px solid var(--line);
+      border-radius: var(--r-control);
+      background: #0d0d11;
+      padding: 9px;
+      min-width: 0;
+      text-align: center;
+    }
+
+    .crypto img {
       display: block;
       width: 100%;
-      padding: 16px;
-      background: var(--accent);
-      color: #fff;
-      text-align: center;
-      border: none;
-      border-radius: 12px;
-      font-size: 16px;
-      font-weight: 800;
-      cursor: pointer;
-      text-decoration: none;
-      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.4);
-      transition: all 0.3s;
-      font-family: 'Outfit', sans-serif;
-      letter-spacing: 1px;
+      max-width: 88px;
+      height: auto;
+      margin: 0 auto 7px;
+      border-radius: 5px;
+      border: 1px solid var(--line-strong);
+      aspect-ratio: 1 / 1;
+      object-fit: contain;
     }
 
-    .btn:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(239, 68, 68, 0.6);
+    .crypto .crypto-name {
+      font-size: 10px;
+      font-weight: 400;
+      color: var(--muted);
+      margin-bottom: 4px;
+      line-height: 1.3;
     }
 
-    .btn:active {
-      transform: translateY(1px);
+    .crypto .crypto-short {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 6px;
+    }
+
+    .crypto .crypto-addr {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      line-height: 1.45;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+      user-select: all;
+    }
+
+    .status {
+      margin: 10px 0 0;
+      font-size: 12.5px;
+      min-height: 18px;
+      color: var(--muted);
+    }
+
+    .status.is-ok { color: var(--ok); }
+    .status.is-err { color: var(--danger); }
+
+    /* ---------- Responsive ---------- */
+
+    @media (max-width: 560px) {
+      body { padding: 20px 14px 48px; font-size: 14.5px; }
+      .masthead { gap: 13px; }
+      .masthead img { width: 48px; height: 48px; border-radius: 12px; }
+      .masthead h1 { font-size: 21px; }
+      .panel { padding: 16px; }
+      .chip-grid { grid-template-columns: 1fr 1fr; }
+      .link-row { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 360px) {
+      .chip-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
     }
   </style>
 </head>
 
 <body>
-  <div class="container">
-    <div class="header">
-      <img src="/logo.png" alt="Nuvio Live Sports" style="width: 88px; height: 88px; border-radius: 20px; margin-bottom: 12px; box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4); border: 2px solid rgba(255, 255, 255, 0.15); object-fit: cover;">
-      <h1><span class="dot"></span> Nuvio Sports</h1>
-      <p class="subtitle">Customize your ultimate live sports dashboard.</p>
-    </div>
+  <div class="shell">
 
-    <div class="section">
-      <h3>Select Sports</h3>
-      <div class="sports-grid" id="sportsGrid">
-        <label class="checkbox-label active"><input type="checkbox" value="football" checked> ⚽ Football</label>
-        <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> 🏀 Basketball</label>
-        <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> 🏏 Cricket</label>
-        <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> 🏈 NFL</label>
-        <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> 🏎️ Racing</label>
-        <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> 🏒 Hockey</label>
-        <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> ⚾ Baseball</label>
-        <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> 🏉 Rugby</label>
-        <label class="checkbox-label active"><input type="checkbox" value="college" checked> 🎓 College</label>
-        <label class="checkbox-label active"><input type="checkbox" value="mma" checked> 🥊 MMA</label>
-        <label class="checkbox-label active"><input type="checkbox" value="golf" checked> ⛳ Golf</label>
-        <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> 🎾 Tennis</label>
-        <label class="checkbox-label active"><input type="checkbox" value="darts" checked> 🎯 Darts</label>
-        <label class="checkbox-label active"><input type="checkbox" value="other" checked> 📡 Other Sports</label>
+    <header class="masthead">
+      <img src="/logo.png" alt="Nuvio Live Sports">
+      <div>
+        <p class="brandline"><span class="pip" aria-hidden="true"></span>Nuvio Live Sports</p>
+        <h1>Set up your sports dashboard</h1>
+        <p class="lede">Pick the sports and stream sources you want, then install the add-on.</p>
       </div>
-    </div>
+    </header>
 
-    <div class="section">
-      <h3>Localization</h3>
-      <div class="input-group">
-        <label>Select your local timezone (Match times will be displayed in this timezone)</label>
-        <select id="timezone" style="width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.2); border: 1px solid var(--card-border); border-radius: 12px; color: #fff; font-size: 15px; box-sizing: border-box; font-family: 'Inter', sans-serif; transition: all 0.2s; outline: none; cursor: pointer;">
-        </select>
-      </div>
-    </div>
+    <main>
 
-    <div class="section">
-      <h3>Priority Tracking</h3>
-      <div class="input-group">
-        <label>Favorite Teams (Comma Separated)</label>
-        <input type="text" id="teams" placeholder="e.g. Arsenal, Lakers, Ferrari">
-      </div>
-    </div>
+      <!-- 1 · Support -->
+      <section class="panel" aria-labelledby="support-h">
+        <div class="panel-head">
+          <h2 id="support-h">Keep the server running</h2>
+          <p>Support covers the public server and the scrapers behind it.</p>
+        </div>
 
-    <div class="section">
-      <h3>Streaming Sources</h3>
-      <div class="sports-grid" id="sourcesGrid">
-        <label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> 📺 TimStreams</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> 📺 Streamed.pk</label>
-        <label class="checkbox-label active"><input type="checkbox" value="daddylive" checked> 📺 DaddyLive</label>
-        <label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> 📺 WatchFooty</label>
-        <label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> 📺 CDNLiveTV</label>
-        <label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> 📺 StreamSports99</label>
-      </div>
-    </div>
+        <a class="link-btn support-link" href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--kofi);" aria-hidden="true">
+            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z" />
+          </svg>
+          Support on Ko-fi
+        </a>
 
-    <a href="#" id="installBtn" class="btn">INSTALL ADDON</a>
-    <button id="copyBtn" class="btn" style="background: #333; margin-top: 12px; font-size: 14px;">COPY LINK (FOR NUVIO APP)</button>
+        <details class="crypto-details">
+          <summary>Pay with crypto instead</summary>
+          <p class="hint">Tap an address to select it, or scan the QR code from a wallet app.</p>
+          <div class="crypto-grid">
+            <div class="crypto">
+              <img src="/Ethereum.png" alt="Ethereum address QR code">
+              <div class="crypto-short">ETH</div>
+              <div class="crypto-name">Polygon, Arbitrum, Base</div>
+              <div class="crypto-addr" title="Click to select">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
+            </div>
+            <div class="crypto">
+              <img src="/solana.png" alt="Solana address QR code">
+              <div class="crypto-short">SOL</div>
+              <div class="crypto-name">Solana</div>
+              <div class="crypto-addr" title="Click to select">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
+            </div>
+            <div class="crypto">
+              <img src="/bitcoin.png" alt="Bitcoin address QR code">
+              <div class="crypto-short">BTC</div>
+              <div class="crypto-name">Bitcoin</div>
+              <div class="crypto-addr" title="Click to select">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
+            </div>
+          </div>
+        </details>
+      </section>
 
-    <div class="input-group" style="margin-top: 12px;">
-      <label>Nuvio Link &mdash; select &amp; copy manually if the button above does nothing (always available, no clipboard permission needed)</label>
-      <input type="text" id="manualUrl" readonly spellcheck="false" autocomplete="off"
-             title="Click to select the whole link"
-             style="font-family: monospace; font-size: 13px; user-select: all;"
-             onclick="this.select()" onfocus="this.select()">
-    </div>
+      <!-- 2 · Sports -->
+      <section class="panel" aria-labelledby="sports-h">
+        <div class="panel-head">
+          <h2 id="sports-h">Sports</h2>
+          <p>All enabled by default. Turn off anything you do not follow.</p>
+        </div>
+        <div class="chip-grid" id="sportsGrid">
+          <label class="checkbox-label active"><input type="checkbox" value="football" checked> Football</label>
+          <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> Basketball</label>
+          <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> Cricket</label>
+          <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> NFL</label>
+          <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> Racing</label>
+          <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> Hockey</label>
+          <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> Baseball</label>
+          <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> Rugby</label>
+          <label class="checkbox-label active"><input type="checkbox" value="college" checked> College</label>
+          <label class="checkbox-label active"><input type="checkbox" value="mma" checked> MMA</label>
+          <label class="checkbox-label active"><input type="checkbox" value="golf" checked> Golf</label>
+          <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> Tennis</label>
+          <label class="checkbox-label active"><input type="checkbox" value="darts" checked> Darts</label>
+          <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
+        </div>
+      </section>
 
-    <!-- ── Nuvio Native Collections Section ── -->
-    <div class="section" style="margin-top: 24px; border: 1px solid rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.05);">
-      <h3 style="display: flex; align-items: center; gap: 8px; color: #fff;">
-        <span>🏆</span> Nuvio Collections (Replay Hubs)
-      </h3>
-      <p style="font-size: 13px; color: var(--text-muted); margin: 0 0 16px 0; line-height: 1.5;">
-        Get dedicated <strong>Landscape cards</strong> on your Nuvio home screen for each sport (like Netflix &amp; Prime Video). Clicking any sport opens organized match replay rows (Recent, Premier League, NBA, F1, etc.)!
-      </p>
+      <!-- 3 · Stream sources -->
+      <section class="panel" aria-labelledby="sources-h">
+        <div class="panel-head">
+          <h2 id="sources-h">Stream sources</h2>
+          <p>Fewer sources means faster, more predictable results.</p>
+        </div>
+        <div class="chip-grid" id="sourcesGrid">
+          <label class="checkbox-label active"><input type="checkbox" value="streamedpk" checked> Streamed.pk</label>
+          <label class="checkbox-label active"><input type="checkbox" value="daddylive" checked> DaddyLive</label>
+          <label class="checkbox-label active"><input type="checkbox" value="watchfooty" checked> WatchFooty</label>
+          <label class="checkbox-label active"><input type="checkbox" value="cdnlive" checked> CDNLiveTV</label>
+          <label class="checkbox-label active"><input type="checkbox" value="streamsports99" checked> StreamSports99</label>
+          <label class="checkbox-label active"><input type="checkbox" value="timstreams" checked> TimStreams</label>
+        </div>
+      </section>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
-        <button id="copyCollectionsBtn" class="btn" style="background: rgba(239, 68, 68, 0.85); font-size: 13px; padding: 12px 10px; margin: 0;">
-          📋 Copy JSON
+      <!-- 4 · Personalization -->
+      <section class="panel" aria-labelledby="prefs-h">
+        <div class="panel-head">
+          <h2 id="prefs-h">Personalization</h2>
+          <p>Used to order fixtures and label kick-off times for you.</p>
+        </div>
+
+        <div class="field">
+          <label for="timezone">Match time timezone</label>
+          <select id="timezone"></select>
+          <p class="hint">Kick-off times are displayed in this timezone.</p>
+        </div>
+
+        <div class="field">
+          <label for="teams">Favorite teams</label>
+          <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false">
+          <p class="hint">Comma separated. These fixtures are surfaced first.</p>
+        </div>
+      </section>
+
+            <!-- 5 · Nuvio Sports Replay Connection -->
+      <section class="panel" aria-labelledby="collections-h">
+        <div class="panel-head">
+          <h2 id="collections-h">Nuvio Sports Replay Connection</h2>
+          <p>Adds a landscape <strong>Sports Replays</strong> row to your Nuvio home screen, with organised replay rows for four sports. Nothing else to install.</p>
+        </div>
+
+        <ul class="sport-list">
+          <li>Football</li>
+          <li>Motorsport</li>
+          <li>Baseball</li>
+          <li>Rugby</li>
+        </ul>
+
+        <button id="copyCollectionsBtn" class="btn btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+          </svg>
+          <span id="collectionsBtnLabel">Copy JSON</span>
         </button>
-        <a id="downloadCollectionsBtn" href="#" class="btn" style="background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); font-size: 13px; padding: 12px 10px; margin: 0; text-decoration: none; text-align: center; display: flex; align-items: center; justify-content: center;">
-          📥 Download JSON
+
+        <div class="field">
+          <label for="collectionsUrlInput">Collections import URL</label>
+          <input type="text" id="collectionsUrlInput" class="mono-field" readonly spellcheck="false" autocomplete="off"
+                 title="Click to select the whole link" onclick="this.select()" onfocus="this.select()">
+        </div>
+
+        <ol class="steps">
+          <li>Choose <strong>Copy JSON</strong>.</li>
+          <li>In the Nuvio app open <strong>Settings</strong>, then <strong>Collections</strong>, then <strong>Import Collection</strong>.</li>
+          <li>Paste the JSON.</li>
+        </ol>
+      </section>
+
+      <!-- 6 · Install (primary action, always last) -->
+      <section class="panel panel-primary" aria-labelledby="install-h">
+        <div class="panel-head">
+          <h2 id="install-h">Install add-on</h2>
+          <p>Your link updates automatically as you change the options above.</p>
+        </div>
+
+        <ul class="summary" id="configSummary"></ul>
+
+        <a href="#" id="installBtn" class="btn btn-primary">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+            <path d="M4 20h16" />
+          </svg>
+          Install add-on
+        </a>
+
+        <button id="copyBtn" class="btn btn-ghost">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="11" height="11" rx="2" />
+            <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+          </svg>
+          <span id="copyBtnLabel">Copy link for Nuvio app</span>
+        </button>
+
+        <div class="field">
+          <label for="manualUrl">Add-on link</label>
+          <input type="text" id="manualUrl" class="mono-field" readonly spellcheck="false" autocomplete="off"
+                 title="Click to select the whole link" onclick="this.select()" onfocus="this.select()">
+          <p class="hint">Select and copy this manually if the button does nothing.</p>
+        </div>
+
+        <p class="status" id="installStatus" role="status" aria-live="polite"></p>
+      </section>
+
+
+
+    </main>
+
+    <!-- Community -->
+    <footer class="footer">
+      <h2>Community</h2>
+      <p>Get setup help, report a broken stream, or follow releases.</p>
+
+      <div class="link-row">
+        <a class="link-btn link-discord" href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg>
+          Discord
+        </a>
+
+        <a class="link-btn" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer">
+          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+          GitHub
         </a>
       </div>
+    </footer>
 
-      <div class="input-group" style="margin-top: 8px;">
-        <label>Collections Import URL (for Nuvio App):</label>
-        <input type="text" id="collectionsUrlInput" readonly spellcheck="false" autocomplete="off"
-               style="font-family: monospace; font-size: 12px; user-select: all;"
-               onclick="this.select()" onfocus="this.select()">
-      </div>
 
-      <div style="margin-top: 14px; padding: 12px; background: rgba(0, 0, 0, 0.3); border-radius: 10px; font-size: 12px; color: #cbd5e1; line-height: 1.6;">
-        <strong style="color: #fff;">How to import in Nuvio:</strong><br>
-        1. Click <strong>Copy JSON</strong> or <strong>Download JSON</strong>.<br>
-        2. In Nuvio app, open <strong>Settings</strong> ➔ <strong>Collections</strong> ➔ <strong>Import Collection</strong>.<br>
-        3. Paste the JSON or select the downloaded file.<br>
-        4. Enjoy Netflix-style sport replay hubs on your home screen!
-      </div>
-    </div>
-
-    <div style="margin-top: 25px; padding: 20px; background: rgba(255, 95, 95, 0.06); border: 1px solid rgba(255, 95, 95, 0.2); border-radius: 16px;">
-      <p style="margin: 0 0 16px 0; font-size: 14px; font-weight: 700; color: #fff; text-align: center; letter-spacing: 0.5px;">
-        ❤️ Donation Center
-      </p>
-      <p style="margin: 0 0 14px 0; font-size: 12px; color: var(--text-muted); text-align: center; line-height: 1.6;">
-        Help keep the public server and scrapers alive!
-      </p>
-
-      <!-- Ko-fi Button -->
-      <a href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #FF5E5B; color: white; padding: 12px 20px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 14px; box-shadow: 0 4px 12px rgba(255, 94, 91, 0.3); width: 100%; box-sizing: border-box; margin-bottom: 14px;">
-        <svg height="18" viewBox="0 0 24 24" width="18" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
-        Support on Ko-fi (Card / PayPal)
-      </a>
-
-      <!-- Divider -->
-      <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
-        <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
-        <span style="font-size: 11px; color: var(--text-muted); white-space: nowrap;">or send crypto</span>
-        <div style="flex: 1; height: 1px; background: rgba(255,255,255,0.08);"></div>
-      </div>
-
-      <!-- Crypto Cards -->
-      <div style="display: grid; grid-template-columns: 1fr; gap: 8px; font-size: 12px; color: var(--text-muted);">
-        <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 10px; text-align: center;">
-          <img src="/Ethereum.png" alt="ETH QR" style="width: 96px; height: 96px; border-radius: 8px; margin-bottom: 8px; border: 2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom: 4px; font-weight: 600; color: #fff;">ETH / Polygon / Arbitrum / Base</div>
-          <div style="font-family: monospace; user-select: all; color: #ccc; word-break: break-all;">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
-        </div>
-        <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 10px; text-align: center;">
-          <img src="/solana.png" alt="SOL QR" style="width: 96px; height: 96px; border-radius: 8px; margin-bottom: 8px; border: 2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom: 4px; font-weight: 600; color: #fff;">Solana (SOL)</div>
-          <div style="font-family: monospace; user-select: all; color: #ccc; word-break: break-all;">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
-        </div>
-        <div style="background: rgba(0,0,0,0.3); padding: 12px; border-radius: 10px; text-align: center;">
-          <img src="/bitcoin.png" alt="BTC QR" style="width: 96px; height: 96px; border-radius: 8px; margin-bottom: 8px; border: 2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom: 4px; font-weight: 600; color: #fff;">Bitcoin (BTC)</div>
-          <div style="font-family: monospace; user-select: all; color: #ccc; word-break: break-all;">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
-        </div>
-      </div>
-
-      <!-- GitHub link at the very bottom, subtle -->
-      <a href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #94a3b8; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: 600; font-size: 13px; width: 100%; box-sizing: border-box; margin-top: 14px;">
-        <svg height="16" viewBox="0 0 16 16" width="16" fill="currentColor"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
-        View Source on GitHub
-      </a>
-    </div>
   </div>
 
   <script>
@@ -392,12 +822,16 @@
     const copyBtn = document.getElementById('copyBtn');
     const manualUrl = document.getElementById('manualUrl');
     const copyCollectionsBtn = document.getElementById('copyCollectionsBtn');
-    const downloadCollectionsBtn = document.getElementById('downloadCollectionsBtn');
     const collectionsUrlInput = document.getElementById('collectionsUrlInput');
+    const collectionsBtnLabel = document.getElementById('collectionsBtnLabel');
+    const copyBtnLabel = document.getElementById('copyBtnLabel');
+    const COPY_LINK_LABEL = 'Copy link for Nuvio app';
     const input = document.getElementById('teams');
     const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
     const sourceCheckboxes = document.querySelectorAll('#sourcesGrid input[type="checkbox"]');
     const timezoneSelect = document.getElementById('timezone');
+    const configSummary = document.getElementById('configSummary');
+    const installStatus = document.getElementById('installStatus');
 
     // Attempt to load existing config from URL
     let existingConfig = {};
@@ -450,8 +884,6 @@
         const option = document.createElement('option');
         option.value = tz.value;
         option.textContent = tz.label;
-        option.style.background = '#1c1c1e';
-        option.style.color = '#fff';
         if (tz.value === localTz) {
           option.selected = true;
           matchedLocal = true;
@@ -469,12 +901,10 @@
         const mins = (Math.abs(offset) % 60).toString().padStart(2, '0');
         const loc = localTz.split('/').pop().replace(/_/g, ' ');
         option.textContent = `${loc} (GMT${sign}${hours}:${mins})`;
-        option.style.background = '#1c1c1e';
-        option.style.color = '#fff';
         option.selected = true;
         timezoneSelect.insertBefore(option, timezoneSelect.firstChild);
       }
-    } catch(e) {
+    } catch (e) {
       console.warn("Timezone API not fully supported.", e);
     }
 
@@ -482,7 +912,7 @@
     if (existingConfig.teams) {
       input.value = existingConfig.teams;
     }
-    
+
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
         checkboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
@@ -512,6 +942,19 @@
     let currentManifestUrl = '';
     let currentCollectionsUrl = '';
     let effectiveOrigin = window.location.origin;
+
+    // Renders the live summary chips from the current selections.
+    function renderSummary(selectedSports, selectedSources, tz) {
+      if (!configSummary) return;
+      const items = [
+        { k: 'Sports', v: selectedSports.length === checkboxes.length ? 'All' : String(selectedSports.length) },
+        { k: 'Sources', v: selectedSources.length === sourceCheckboxes.length ? 'All' : String(selectedSources.length) },
+        { k: 'Timezone', v: tz || 'n/a' }
+      ];
+      configSummary.innerHTML = items
+        .map(i => '<li><span>' + i.k + '</span> <b>' + i.v + '</b></li>')
+        .join('');
+    }
 
     function updateLink() {
       const teams = input.value.trim();
@@ -552,11 +995,12 @@
 
       currentManifestUrl = manifestUrl;
       currentCollectionsUrl = collectionsUrl;
-      // Keep the manual field in sync — it is the guaranteed path on
+      // Keep the manual field in sync. It is the guaranteed path on
       // plain-HTTP self-hosted instances where the Clipboard API is unavailable.
       if (manualUrl) manualUrl.value = manifestUrl;
       if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
-      if (downloadCollectionsBtn) downloadCollectionsBtn.href = downloadUrl;
+
+      renderSummary(selectedSports, selectedSources, tz);
 
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
@@ -587,22 +1031,31 @@
       }
     }
 
-    function flashCopyButton(ok) {
-      const originalText = copyBtn.innerText;
-      const originalBg = copyBtn.style.background;
-      copyBtn.innerText = ok ? 'COPIED TO CLIPBOARD!' : 'COPY FAILED \u2014 SELECT & COPY MANUALLY';
-      copyBtn.style.background = ok ? '#10b981' : '#b91c1c';
-      setTimeout(() => {
-        copyBtn.innerText = originalText;
-        copyBtn.style.background = originalBg || '#333';
-      }, 2000);
+    function setStatus(message, tone) {
+      if (!installStatus) return;
+      installStatus.textContent = message || '';
+      installStatus.className = 'status' + (tone ? ' is-' + tone : '');
+    }
+
+    // Pick the copy label that matches this browser's capability, so the button
+    // copy is accurate even before any click. The clipboard API needs a secure
+    // context (HTTPS or localhost); plain-HTTP LAN instances fall back to the
+    // legacy textarea path, where the manual field is the reliable route.
+    const hasModernClipboard = !!(navigator.clipboard && window.isSecureContext);
+    if (collectionsBtnLabel && !hasModernClipboard) collectionsBtnLabel.textContent = 'Copy JSON (or select the URL)';
+
+    // Restores a button label after a temporary status message.
+    function flashLabel(el, message, restore) {
+      if (!el) return;
+      el.textContent = message;
+      setTimeout(() => { el.textContent = restore; }, 2200);
     }
 
     copyBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       let ok = false;
       try {
-        if (navigator.clipboard && window.isSecureContext) {
+        if (hasModernClipboard) {
           await navigator.clipboard.writeText(currentManifestUrl);
           ok = true;
         } else {
@@ -614,36 +1067,35 @@
       if (!ok && manualUrl) {
         try { manualUrl.focus(); manualUrl.select(); } catch (err) {}
       }
-      flashCopyButton(ok);
+      setStatus(ok ? 'Link copied to clipboard.' : 'Copy blocked. Select the link below and copy it manually.', ok ? 'ok' : 'err');
+      flashLabel(copyBtnLabel, ok ? 'Copied to clipboard' : 'Copy failed', COPY_LINK_LABEL);
     });
 
     if (copyCollectionsBtn) {
       copyCollectionsBtn.addEventListener('click', async (e) => {
         e.preventDefault();
-        const originalText = copyCollectionsBtn.innerText;
-        copyCollectionsBtn.innerText = 'FETCHING JSON...';
+        const restoreLabel = collectionsBtnLabel ? collectionsBtnLabel.textContent : 'Copy JSON';
+        if (collectionsBtnLabel) collectionsBtnLabel.textContent = 'Fetching JSON';
         try {
           const fetchUrl = currentCollectionsUrl + (currentCollectionsUrl.includes('?') ? '&' : '?') + 't=' + Date.now();
           const res = await fetch(fetchUrl, { cache: 'no-store' });
           const jsonText = await res.text();
           let ok = false;
-          if (navigator.clipboard && window.isSecureContext) {
+          if (hasModernClipboard) {
             await navigator.clipboard.writeText(jsonText);
             ok = true;
           } else {
             ok = legacyCopy(jsonText);
           }
-          copyCollectionsBtn.innerText = ok ? 'COPIED JSON! ✓' : 'COPY FAILED';
-          copyCollectionsBtn.style.background = ok ? '#10b981' : '#b91c1c';
+          if (collectionsBtnLabel) collectionsBtnLabel.textContent = ok ? 'Copied to clipboard' : 'Copy failed';
+          setStatus(ok ? 'Collections JSON copied to clipboard.' : 'Copy blocked here. Select the import URL below and copy it manually.', ok ? 'ok' : 'err');
+          setTimeout(() => { if (collectionsBtnLabel) collectionsBtnLabel.textContent = restoreLabel; }, 2200);
         } catch (_) {
           const ok = legacyCopy(currentCollectionsUrl);
-          copyCollectionsBtn.innerText = ok ? 'COPIED URL! ✓' : 'COPY FAILED';
-          copyCollectionsBtn.style.background = ok ? '#10b981' : '#b91c1c';
+          if (collectionsBtnLabel) collectionsBtnLabel.textContent = ok ? 'Copied to clipboard' : 'Copy failed';
+          setStatus(ok ? 'Copied the collections URL instead.' : 'Copy blocked here. Select the import URL below and copy it manually.', ok ? 'ok' : 'err');
+          setTimeout(() => { if (collectionsBtnLabel) collectionsBtnLabel.textContent = restoreLabel; }, 2200);
         }
-        setTimeout(() => {
-          copyCollectionsBtn.innerText = originalText;
-          copyCollectionsBtn.style.background = 'rgba(239, 68, 68, 0.85)';
-        }, 2500);
       });
     }
 
@@ -657,7 +1109,7 @@
         updateLink();
       });
     });
-    
+
     updateLink();
 
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
