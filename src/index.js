@@ -66,6 +66,11 @@ app.use('/posters', express.static(path.join(__dirname, '..', 'public', 'posters
 app.use('/posters', express.static(path.join(__dirname, 'public', 'posters'), posterStaticOptions));
 app.use('/posters', express.static(path.join(__dirname, 'posters'), posterStaticOptions));
 
+// Serve static assets from public (logos, cryptocurrency QR codes, etc.)
+app.use(express.static(path.join(__dirname, '..', 'public')));
+app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(process.cwd(), 'public')));
+
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
