@@ -201,13 +201,38 @@ function isReplayMatch(match) {
  * path (which needs the container, the match cache and the network).
  *
  * Key order, highest priority first:
- *   1. live before not-live
- *   2. real fixtures before 24/7 channels
- *   3. mainstream before local / lower-division (getMatchTier)
- *   4. popular before non-popular
- *   5. date (upcoming = nearest kickoff first; live/replay = newest first)
+ *   1. favourite-team fixtures before everything else (conf.teams)
+ *   2. live before not-live
+ *   3. real fixtures before 24/7 channels
+ *   4. mainstream before local / lower-division (getMatchTier)
+ *   5. popular before non-popular
+ *   6. date (upcoming = nearest kickoff first; live/replay = newest first)
  */
-function compareCatalogMatches(a, b, isReplayMode = false) {
+/**
+ * Normalizes the "Favorite teams" config field into lowercase tokens.
+ * Shared by the teams catalog and the favourites-first ordering below.
+ */
+function parseFavoriteTeams(conf) {
+  const raw = conf && conf.teams;
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  return raw.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
+}
+
+/**
+ * True when the match title mentions any favourite team.
+ */
+function isFavoriteMatch(match, favorites) {
+  if (!favorites || favorites.length === 0) return false;
+  const title = String((match && match.title) || '').toLowerCase();
+  if (!title) return false;
+  return favorites.some(team => title.includes(team));
+}
+
+function compareCatalogMatches(a, b, isReplayMode = false, favorites = null) {
+  const aFav = isFavoriteMatch(a, favorites) ? 0 : 1;
+  const bFav = isFavoriteMatch(b, favorites) ? 0 : 1;
+  if (aFav !== bFav) return aFav - bFav; // Favourite-team fixtures first
+
   const aIsLive = isMatchLive(a) ? 1 : 0;
   const bIsLive = isMatchLive(b) ? 1 : 0;
   if (aIsLive !== bIsLive) return bIsLive - aIsLive; // Live matches first
@@ -919,6 +944,8 @@ async function handleCatalog(type, id, extra, config) {
   
   let filteredMatches = matches;
 
+  const favoriteTeams = parseFavoriteTeams(conf);
+
   if (categoryMatch === 'live') {
     filteredMatches = matches.filter(m => isMatchLive(m));
   } else if (categoryMatch === 'upcoming') {
@@ -932,12 +959,8 @@ async function handleCatalog(type, id, extra, config) {
       return true;
     });
   } else if (categoryMatch === 'teams') {
-    if (typeof conf.teams === 'string' && conf.teams.trim()) {
-      const favoriteTeams = conf.teams.toLowerCase().split(',').map(t => t.trim()).filter(Boolean);
-      filteredMatches = matches.filter(m => {
-        const titleWords = m.title.toLowerCase();
-        return favoriteTeams.some(team => titleWords.includes(team));
-      });
+    if (favoriteTeams.length) {
+      filteredMatches = matches.filter(m => isFavoriteMatch(m, favoriteTeams));
     } else {
       filteredMatches = []; // If no config, return empty
     }
@@ -993,7 +1016,7 @@ async function handleCatalog(type, id, extra, config) {
     return true;
   });
 
-  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode));
+  filteredMatches = [...filteredMatches].sort((a, b) => compareCatalogMatches(a, b, isReplayMode, favoriteTeams));
 
   if (categoryMatch === 'replays' && (!extra || !extra.search)) {
     let targetSports = REPLAY_SPORTS;

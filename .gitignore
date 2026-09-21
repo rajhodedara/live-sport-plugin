@@ -8,3 +8,6 @@ test-scripts/
 cloudflared.exe
 *.exe
 
+# Runtime-generated team logo cache (TeamLogoService writes this in place).
+# The tracked seed lives in src/data/team_logos_cache.json.
+dist/team_logos_cache.json
