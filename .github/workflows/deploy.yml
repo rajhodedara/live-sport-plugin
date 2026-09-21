@@ -1,0 +1,33 @@
+name: Auto Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script_stop: true
+          script: |
+            cd /root/nuvio-live-sports
+            echo "==> Stashing local changes (preserving runtime cache)..."
+            git stash
+            echo "==> Pulling latest changes from main..."
+            git pull origin main
+            echo "==> Restoring stashed runtime cache..."
+            git stash pop || true
+            echo "==> Building distribution bundle..."
+            npm run build
+            echo "==> Reloading PM2 cluster with zero downtime..."
+            pm2 reload nuvio-sports
+            echo "==> Deployment complete!"
