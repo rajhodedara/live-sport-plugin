@@ -12,10 +12,46 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { safeFetch } = require('../impitClient');
 
-const CACHE_FILE = path.join(__dirname, '..', 'data', 'team_logos_cache.json');
+// The committed SEED of curated crests. Read-only at runtime; it is the base
+// every instance starts from.
+const SEED_FILES = [
+  path.join(__dirname, '..', 'data', 'team_logos_seed.json'),
+  // Backward compatibility with the pre-split layout.
+  path.join(__dirname, '..', 'data', 'team_logos_cache.json')
+];
+
+/**
+ * Where learned crests are persisted.
+ *
+ * Deliberately NOT inside the tracked tree. The deploy runs
+ * `git reset --hard HEAD`, which reverts tracked files to the committed state --
+ * so writing learned crests into a tracked path meant every deploy discarded
+ * every crest resolved since the last commit, and the site re-learned them from
+ * scratch (and rendered crest-less cards until it did).
+ *
+ * Order: explicit env override, then an untracked `data/` directory beside the
+ * running process (survives reset because it is not tracked), then temp.
+ */
+function resolveCacheFile() {
+  if (process.env.TEAM_LOGOS_CACHE_FILE) return process.env.TEAM_LOGOS_CACHE_FILE;
+  const candidates = [
+    path.join(process.cwd(), 'data', 'team_logos_cache.json'),
+    path.join(os.tmpdir(), 'nuvio-live-sports', 'team_logos_cache.json')
+  ];
+  for (const candidate of candidates) {
+    try {
+      fs.mkdirSync(path.dirname(candidate), { recursive: true });
+      return candidate;
+    } catch (_) { /* try the next one */ }
+  }
+  return candidates[candidates.length - 1];
+}
+
+const CACHE_FILE = resolveCacheFile();
 const MAX_CACHE_SIZE = 5000;
 const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours for not-found entries
 
@@ -173,19 +209,22 @@ class TeamLogoService {
   }
 
   _loadDiskCache() {
-    try {
-      if (fs.existsSync(CACHE_FILE)) {
-        const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
-        const json = JSON.parse(raw);
-        if (json && typeof json === 'object') {
-          for (const [k, v] of Object.entries(json)) {
-            if (v && typeof v === 'string') {
-              this.cache.set(k, { url: v, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
-            }
-          }
+    const ttl = 30 * 24 * 3600 * 1000;
+    const ingest = (filePath) => {
+      try {
+        if (!filePath || !fs.existsSync(filePath)) return 0;
+        const json = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        if (!json || typeof json !== 'object') return 0;
+        let n = 0;
+        for (const [k, v] of Object.entries(json)) {
+          if (typeof v === 'string' && v) { this.cache.set(k, { url: v, expiresAt: Date.now() + ttl }); n++; }
         }
-      }
-    } catch (_) {}
+        return n;
+      } catch (_) { return 0; }
+    };
+    // Seed first so the runtime cache (loaded second) can override it.
+    for (const seedFile of SEED_FILES) ingest(seedFile);
+    ingest(CACHE_FILE);
   }
 
   _saveDiskCache() {
@@ -194,7 +233,11 @@ class TeamLogoService {
       for (const [k, entry] of this.cache.entries()) {
         if (entry && entry.url) obj[k] = entry.url;
       }
-      fs.writeFileSync(CACHE_FILE, JSON.stringify(obj, null, 2), 'utf-8');
+      const dir = path.dirname(CACHE_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const tempPath = `${CACHE_FILE}.tmp.${process.pid}`;
+      fs.writeFileSync(tempPath, JSON.stringify(obj, null, 2), 'utf-8');
+      fs.renameSync(tempPath, CACHE_FILE);
     } catch (_) {}
   }
 

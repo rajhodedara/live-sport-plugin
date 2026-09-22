@@ -272,6 +272,35 @@ describe('generated cards do not pin stale artwork for 24h', () => {
   });
 });
 
+describe('learned crests survive a deploy', () => {
+  test('the runtime crest cache is not written inside the tracked tree', () => {
+    // The deploy runs `git reset --hard HEAD`, so persisting learned crests into
+    // a tracked path (src/data/team_logos_cache.json) meant every deploy wiped
+    // every crest resolved since the last commit, and the site re-learned them
+    // from scratch. The service must now write outside the tracked tree while
+    // still reading the committed seed.
+    const source = fs.readFileSync(require.resolve('../src/services/TeamLogoService'), 'utf8');
+    expect(source).toContain('team_logos_seed.json');
+    expect(source).toContain('function resolveCacheFile');
+    // The runtime path must not be the tracked data directory.
+    expect(source).not.toMatch(/const CACHE_FILE = path\.join\(__dirname/);
+    expect(source).toContain("path.join(process.cwd(), 'data', 'team_logos_cache.json')");
+  });
+
+  test('the committed seed loads and serves known crests', () => {
+    const TeamLogoService = require('../src/services/TeamLogoService');
+    const svc = new TeamLogoService();
+    expect(svc.cache.size).toBeGreaterThan(300);
+    expect(svc.getCachedLogo('Arsenal')).toContain('uyhbfe1612467038.png');
+  });
+
+  test('the seed file is valid JSON with the curated entries', () => {
+    const seed = require('../src/data/team_logos_seed.json');
+    expect(Object.keys(seed).length).toBeGreaterThan(300);
+    expect(seed.arsenal).toMatch(/^https:\/\//);
+  });
+});
+
 describe('team names are recovered from the title when providers omit them', () => {
   const { mapMatchToMetaPreview } = require('../src/catalog');
   const base = { id: 'x', category: 'tennis', status: 'upcoming', sources: [{ source: 'streamedpk', id: '1' }] };
