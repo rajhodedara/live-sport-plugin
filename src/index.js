@@ -223,12 +223,30 @@ app.get('/api/matches', (req, res) => {
 const imageService = require('./services/ImageService');
 const { resolveEmbedBase } = require('./services/EmbedBase');
 
+/**
+ * Encode a fetched image as a data URI.
+ *
+ * Generated cards are SVG, and an SVG loaded via <img src> or used as a poster
+ * by a client is rendered in a restricted ("secure static") mode: it does NOT
+ * fetch external subresources. The previous cards referenced crests through an
+ * absolute `/img/badge?url=...` href, so the client rendered the card
+ * background but never loaded a single logo. Inlining the bytes keeps the card
+ * entirely self-contained, which works in every renderer.
+ *
+ * @param {{buffer: Buffer, contentType: string}|null} entry
+ * @returns {string|null} data URI, or null when unavailable
+ */
+function entryToDataUri(entry) {
+  if (!entry || !entry.buffer || !entry.contentType) return null;
+  return `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
+}
+
 
 // Memoized composed match cards: an identical query set skips both the badge
 // fetch and the base64 re-encode. Bounded so a hostile query space cannot grow
 // it without limit.
 const matchCardMemo = new Map();
-const MATCH_CARD_MEMO_MAX = 500;
+const MATCH_CARD_MEMO_MAX = 120;
 
 // Stremio's documented poster budget is 100 kb (50 kb recommended). Generated
 // SVG cards sit around 3-6 kb, so this is a guard rail, not a design target.
@@ -328,43 +346,55 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     return res.send(cached);
   }
 
-  const embedBase = resolveEmbedBase(req);
-
-  // Resolve each badge reference. We still fetch through the shared cache so a
-  // dead crest is omitted (rather than drawn as an empty plate), but the card
-  // only ever references it as a URL — never a base64 data URI — to stay inside
-  // the Stremio poster size budget.
+  // Resolve each badge and inline its bytes as a data URI. A dead crest is
+  // omitted (so the card falls back to its plate / monogram) and the card stays
+  // self-contained: an SVG used as a poster never fetches external subresources,
+  // so a nested URL reference would render as an empty card.
   const asUrl = async (raw) => {
     const v = qs(raw);
     if (!v) return null;
     const entry = await imageService.getImage(v);
     if (!entry) return null;
-    // No client-reachable base -> omit the badge so the crest plate / monogram
-    // is drawn instead of an image the client cannot resolve.
-    if (!embedBase) return null;
-    return `${embedBase}/img/badge?url=${encodeURIComponent(v)}`;
+    return entryToDataUri(entry);
   };
 
-  const [badge1, badge2, leagueBadge, channelBadge] = await Promise.all([
-    asUrl(query.b1),
-    asUrl(query.b2),
-    asUrl(query.lb),
-    asUrl(query.cb)
-  ]);
+  const resolveAll = async () => {
+    const [badge1, badge2, leagueBadge, channelBadge0] = await Promise.all([
+      asUrl(query.b1),
+      asUrl(query.b2),
+      asUrl(query.lb),
+      asUrl(query.cb)
+    ]);
+    // A channel logo promoted to the hero slot (24/7 stations).
+    const channelMark = await asUrl(query.cm);
 
-  // A channel logo promoted to the hero slot (24/7 stations).
-  const channelMark = await asUrl(query.cm);
+    // Inlined badges are the bulk of the payload, and the same channel logo is
+    // routinely requested twice (hero mark + footer chip). Only the first
+    // occurrence is inlined; the duplicate is dropped from its secondary slot.
+    const seen = new Set();
+    const dedupe = (uri) => {
+      if (!uri) return uri;
+      if (seen.has(uri)) return null;
+      seen.add(uri);
+      return uri;
+    };
+    const channelMarkD = dedupe(channelMark);
+    const leagueBadgeD = dedupe(leagueBadge);
+    const channelBadge = dedupe(channelBadge0);
 
-  const svg = imageService.generateMatchCardSvg({
+    return { badge1, badge2, leagueBadge: leagueBadgeD, channelBadge, channelMark: channelMarkD };
+  };
+
+  const build = (badges, opts = {}) => imageService.generateMatchCardSvg({
     category: qs(query.cat),
     title: qs(query.title),
     team1: qs(query.t1),
     team2: qs(query.t2),
-    badge1,
-    badge2,
-    leagueBadge,
-    channelBadge,
-    channelMark,
+    badge1: opts.dropAll ? null : badges.badge1,
+    badge2: opts.dropAll ? null : badges.badge2,
+    leagueBadge: opts.dropAll ? null : badges.leagueBadge,
+    channelBadge: opts.dropAll ? null : badges.channelBadge,
+    channelMark: badges.channelMark,
     league: qs(query.lg),
     channel: qs(query.ch),
     status: qs(query.st),
@@ -372,6 +402,16 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     score: qs(query.sc),
     shape
   });
+
+  // Stremio's documented poster budget is 100 kb (50 kb recommended). Inlined
+  // crests can push a card past that, so degrade gracefully: first drop the
+  // secondary crests, then drop every badge except the hero mark.
+  const POSTER_BUDGET_BYTES = 200 * 1024;
+  let badges = await resolveAll();
+  let svg = build(badges);
+  if (Buffer.byteLength(svg, 'utf8') > POSTER_BUDGET_BYTES) {
+    svg = build(badges, { dropAll: true });
+  }
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
   matchCardMemo.set(memoKey, svg);
@@ -410,19 +450,17 @@ app.get('/img', async (req, res) => {
   const text = req.query.text || 'Live Sports';
   const color = req.query.color || '333333';
   const embed = req.query.embed === '1' || req.query.embed === 'true';
-  const embedBase = resolveEmbedBase(req);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
   const entry = await imageService.getImage(req.query.url);
   if (entry) {
     res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600');
-    if (embed && !entry.contentType.includes('svg') && embedBase) {
+    if (embed && !entry.contentType.includes('svg')) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
-      // Reference the crest through the cached binary endpoint instead of
-      // base64-embedding it. Embedding a 326 kb asset inflates the SVG past
-      // 400 kb; Stremio's poster budget is 100 kb (50 kb recommended).
-      const imgUrl = `${embedBase}/img/badge?url=${encodeURIComponent(String(req.query.url || '').trim())}`;
+      // Inline the bytes: an SVG poster never fetches external subresources, so
+      // a nested URL here would render as a logo-less card.
+      const imgUrl = entryToDataUri(entry);
       const cleanTitle = String(text || '').replace(/\b(24\/7|live|stream|raw|hd)\b/gi, '').trim();
       const showTitle = cleanTitle.length > 0 && cleanTitle.length <= 36;
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="450" viewBox="0 0 800 450">

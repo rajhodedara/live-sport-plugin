@@ -225,6 +225,40 @@ describe('24/7 channel logos resolve to live assets', () => {
   });
 });
 
+describe('generated cards are self-contained (logos actually render)', () => {
+  const { generateMatchCardSvg } = require('../src/services/MinimalistPosterService');
+  // 1x1 transparent PNG stand-in for an inlined badge.
+  const DATA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+  test('the card endpoint inlines badge bytes instead of referencing a URL', () => {
+    // An SVG used as a poster (<img>/poster slot) is rendered in a restricted
+    // mode that does NOT fetch external subresources, so a nested
+    // "/img/badge?url=..." href rendered as a logo-less card. This pins the
+    // endpoint to inline data URIs.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).toContain('function entryToDataUri');
+    expect(source).toContain('entryToDataUri(entry)');
+    // The old nested-reference template must be gone.
+    expect(source).not.toMatch(/\/img\/badge\?url=\$\{/);
+  });
+
+  test('a card built from data URIs has no external references', () => {
+    const svg = generateMatchCardSvg({
+      category: 'networks', title: 'CNN', channel: 'CNN', status: 'live',
+      channelMark: DATA, channelBadge: DATA
+    });
+    const external = svg.match(/<image[^>]*href="(?!data:)/g) || [];
+    expect(external).toEqual([]);
+    expect(svg).toContain('data:image/png;base64,');
+  });
+
+  test('inlined cards stay within a sane poster payload', () => {
+    // Two full-size logos plus chrome must not balloon past the budget.
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', badge1: DATA, badge2: DATA, status: 'live' });
+    expect(Buffer.byteLength(svg, 'utf8')).toBeLessThan(200 * 1024);
+  });
+});
+
 describe('generated cards do not pin stale artwork for 24h', () => {
   test('match and embed SVGs use a short client TTL', () => {
     // These cards encode live state (status/score/kickoff) and embed badge URLs,
