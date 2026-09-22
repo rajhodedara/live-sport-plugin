@@ -119,23 +119,25 @@ function parseArchive(html, ymd) {
     return cur ? cur.name : '';
   };
 
-  const rowRe = /<tr>([\s\S]*?)<\/tr>/g;
+  const blocks = html.split(/<table[^>]+height=27/i);
   const out = [];
-  let rm;
-  while ((rm = rowRe.exec(html)) !== null) {
-    const row = rm[1];
-    if (!row.includes('showvideo')) continue;
-    const teams = row.match(/<b>([^<]+)&ndash;([^<]+)<\/b>/);
+
+  let currentBlockIndex = 0;
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i];
+    currentBlockIndex = html.indexOf(block, currentBlockIndex);
+    if (!block.includes('showvideo')) continue;
+    const teams = block.match(/<b>([^<]+)&ndash;([^<]+)<\/b>/);
     if (!teams) continue;
-    const score = row.match(/<font color="#949494"><b>(\d+:\d+)<\/b><\/font>/);
-    const time = row.match(/<span class="date">([^<]+)<\/span>/);
-    const league = compFor(rm.index);
+    const score = block.match(/<font color="#949494"><b>(\d+:\d+)<\/b><\/font>/);
+    const time = block.match(/<span class="date">([^<]+)<\/span>/);
+    const league = compFor(currentBlockIndex !== -1 ? currentBlockIndex : i);
 
     const linkRe = /<a class="small" href="(\/enx\/showvideo\/(\d+)_[^"]*)">([^<]*)<\/a>/g;
     const sources = [];
     const seen = new Set();
     let lm;
-    while ((lm = linkRe.exec(row)) !== null) {
+    while ((lm = linkRe.exec(block)) !== null) {
       const path = lm[1];
       const vid = lm[2];
       const label = clean(lm[3]);
