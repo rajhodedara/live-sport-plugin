@@ -803,17 +803,29 @@
           <span id="collectionsBtnLabel">Copy JSON</span>
         </button>
 
-        <div class="field">
-          <label for="collectionsUrlInput">Collections import URL</label>
-          <input type="text" id="collectionsUrlInput" class="mono-field" readonly spellcheck="false" autocomplete="off"
-                 title="Click to select the whole link" onclick="this.select()" onfocus="this.select()">
-        </div>
+        <a id="downloadCollectionsBtn" class="btn btn-ghost" href="#" download="nuvio-sports-collections.json">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12" />
+            <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+            <path d="M4 20h16" />
+          </svg>
+          <span>Download JSON file</span>
+        </a>
+
+        <p class="hint" style="margin-top:12px">Nuvio imports collections as <strong>JSON text</strong>, not a URL. Use <strong>Copy JSON</strong> and paste it into the app, or <strong>Download JSON file</strong> and open it if you prefer. The URL below is only a fetch link &mdash; open it to copy the raw JSON.</p>
 
         <ol class="steps">
-          <li>Choose <strong>Copy JSON</strong>.</li>
+          <li>Choose <strong>Copy JSON</strong> (or download the file).</li>
           <li>In the Nuvio app open <strong>Settings</strong>, then <strong>Collections</strong>, then <strong>Import Collection</strong>.</li>
           <li>Paste the JSON.</li>
         </ol>
+
+        <div class="field">
+          <label for="collectionsUrlInput">Fetch URL (for manual copy)</label>
+          <input type="text" id="collectionsUrlInput" class="mono-field" readonly spellcheck="false" autocomplete="off"
+                 title="Click to select the whole link" onclick="this.select()" onfocus="this.select()">
+          <p class="hint">Open this in a browser to copy the raw JSON if the buttons are blocked.</p>
+        </div>
       </section>
 
       <!-- 6 · Install (primary action, always last) -->
@@ -887,6 +899,7 @@
     const manualUrl = document.getElementById('manualUrl');
     const copyCollectionsBtn = document.getElementById('copyCollectionsBtn');
     const collectionsUrlInput = document.getElementById('collectionsUrlInput');
+    const downloadCollectionsBtn = document.getElementById('downloadCollectionsBtn');
     const collectionsBtnLabel = document.getElementById('collectionsBtnLabel');
     const copyBtnLabel = document.getElementById('copyBtnLabel');
     const COPY_LINK_LABEL = 'Copy link for Nuvio app';
@@ -1095,6 +1108,9 @@
 
       currentManifestUrl = manifestUrl;
       currentCollectionsUrl = collectionsUrl;
+      // Keep the download button on the current config too (it carries the
+      // same replay filter / languages as the JSON the Copy button fetches).
+      if (downloadCollectionsBtn) downloadCollectionsBtn.href = downloadUrl;
       // Keep the manual field in sync. It is the guaranteed path on
       // plain-HTTP self-hosted instances where the Clipboard API is unavailable.
       if (manualUrl) manualUrl.value = manifestUrl;
