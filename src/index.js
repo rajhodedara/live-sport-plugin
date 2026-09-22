@@ -236,8 +236,15 @@ const { resolveEmbedBase } = require('./services/EmbedBase');
  * @param {{buffer: Buffer, contentType: string}|null} entry
  * @returns {string|null} data URI, or null when unavailable
  */
-function entryToDataUri(entry) {
+async function entryToDataUri(entry) {
   if (!entry || !entry.buffer || !entry.contentType) return null;
+  if (entry.contentType.includes('webp') || entry.contentType.includes('avif')) {
+    try {
+      const sharp = require('sharp');
+      entry.buffer = await sharp(entry.buffer).png().toBuffer();
+      entry.contentType = 'image/png';
+    } catch (e) {}
+  }
   return `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
 }
 
@@ -367,7 +374,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     if (!v) return null;
     const entry = await imageService.getImage(v);
     if (!entry) return null;
-    return entryToDataUri(entry);
+    return await entryToDataUri(entry);
   };
 
   const embedBase = resolveEmbedBase(req);
@@ -393,7 +400,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     if (!v) return null;
     const entry = await imageService.getImage(v);
     if (entry && entry.buffer && entry.buffer.length <= INLINE_MAX_BYTES) {
-      return entryToDataUri(entry);
+      return await entryToDataUri(entry);
     }
     let size = entry && entry.buffer ? entry.buffer.length : 0;
     if (!size) {
@@ -589,7 +596,7 @@ app.get('/img', async (req, res) => {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
       // Inline the bytes: an SVG poster never fetches external subresources, so
       // a nested URL here would render as a logo-less card.
-      const imgUrl = entryToDataUri(entry);
+      const imgUrl = await entryToDataUri(entry);
       const cleanTitle = String(text || '').replace(/\b(24\/7|live|stream|raw|hd)\b/gi, '').trim();
       const showTitle = cleanTitle.length > 0 && cleanTitle.length <= 36;
       // Broadcast Slate. This card previously carried its OWN near-black gradient
