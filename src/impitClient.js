@@ -79,15 +79,17 @@ async function safeFetch(url, opts = {}) {
             timer = setTimeout(() => rej(new Error(`impit timeout ${timeoutMs}ms`)), timeoutMs);
           }),
         ]);
-        const textData = await res.text();
+        const buf = await res.arrayBuffer();
         if (res.status === 400 && url.includes('ok.ru')) {
            throw new Error('ok.ru blocked impit');
         }
         return {
           ok: res.status >= 200 && res.status < 300,
           status: res.status,
-          text: async () => textData,
-          json: async () => JSON.parse(textData),
+          headers: res.headers,
+          text: async () => Buffer.from(buf).toString('utf8'),
+          json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
+          arrayBuffer: async () => buf,
         };
       } catch (impitErr) {
         lastErr = impitErr;
@@ -163,12 +165,14 @@ async function safeFetch(url, opts = {}) {
     }
     currentUrl = nextUrl.toString();
   }
-  const textData = await res.body.text();
+  const buf = await res.body.arrayBuffer();
   return {
     ok: res.statusCode >= 200 && res.statusCode < 300,
     status: res.statusCode,
-    text: async () => textData,
-    json: async () => JSON.parse(textData),
+    headers: res.headers,
+    text: async () => Buffer.from(buf).toString('utf8'),
+    json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
+    arrayBuffer: async () => buf,
   };
 }
 

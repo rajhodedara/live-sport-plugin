@@ -47,13 +47,29 @@ function mergeRemintedUrl(heldUrl, freshUrl, rck = '') {
       return merged.toString();
     }
 
-    // 2. WatchFooty: Path-token replacement mechanism
-    // /secure/<NEW_TOKEN>/<FLAVOR>/<SLUG>/<NUM>/<MATCHID>/<NEW_EXPIRY>/<HELD_FILE>
-    if (provider === 'watchfooty' || fresh.pathname.includes('/secure/')) {
-      const freshDir = fresh.pathname.substring(0, fresh.pathname.lastIndexOf('/'));
-      const heldFile = held.pathname.substring(held.pathname.lastIndexOf('/') + 1) || 'playlist.m3u8';
+    // 2. WatchFooty/EmbedIndia: Path-token replacement mechanism
+    if (provider === 'watchfooty' || provider === 'embedindia' || fresh.pathname.includes('/secure/')) {
+      const freshMatch = fresh.pathname.match(/^(\/secure\/[^/]+\/\d+\/\d+\/[^/]+\/)(.*)$/);
+      const heldMatch = held.pathname.match(/^\/secure\/[^/]+\/\d+\/\d+\/[^/]+\/(.*)$/);
+      
       const merged = new URL(freshUrl);
-      merged.pathname = `${freshDir}/${heldFile}`;
+      if (freshMatch && heldMatch) {
+        merged.pathname = freshMatch[1] + heldMatch[1];
+      } else {
+        const freshDir = fresh.pathname.substring(0, fresh.pathname.lastIndexOf('/'));
+        const heldParts = held.pathname.split('/');
+        const freshParts = fresh.pathname.split('/');
+        let div = 0;
+        for (let i = 0; i < Math.min(heldParts.length, freshParts.length); i++) {
+            if (heldParts[i] === 'secure') { div = i + 5; break; }
+        }
+        if (div > 0 && div < heldParts.length && div < freshParts.length) {
+            merged.pathname = freshParts.slice(0, div).concat(heldParts.slice(div)).join('/');
+        } else {
+            const heldFile = held.pathname.substring(held.pathname.lastIndexOf('/') + 1) || 'playlist.m3u8';
+            merged.pathname = `${freshDir}/${heldFile}`;
+        }
+      }
       return merged.toString();
     }
 
@@ -90,9 +106,9 @@ function getRemintCacheKey(rck, url) {
     const u = new URL(url);
     const provider = String(rck).split(':')[0]?.toLowerCase();
 
-    // 1. WatchFooty: Stable key based on flavor (any NATO/custom flavor) and stream number
-    if (provider === 'watchfooty' || u.pathname.includes('/secure/')) {
-      const wf = u.pathname.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/(\d+)\//i);
+    // 1. WatchFooty/EmbedIndia: Stable key based on flavor (any NATO/custom flavor) and stream number
+    if (provider === 'watchfooty' || provider === 'embedindia' || u.pathname.includes('/secure/')) {
+      const wf = u.pathname.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/([^/]+)\//i);
       if (wf) return `${rck}:${wf[1].toLowerCase()}:${wf[2]}`;
     }
 
@@ -198,9 +214,9 @@ async function attemptRemint(rck, heldUrl = '') {
         const heldParsed = new URL(heldUrl);
         const heldPath = heldParsed.pathname;
 
-        // 1. WatchFooty: Match by flavor (any NATO/custom flavor) and stream number
-        if (provider === 'watchfooty' || heldPath.includes('/secure/')) {
-          const wfMatch = heldPath.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/(\d+)\//i);
+        // 1. WatchFooty/EmbedIndia: Match by flavor (any NATO/custom flavor) and stream number
+        if (provider === 'watchfooty' || provider === 'embedindia' || heldPath.includes('/secure/')) {
+          const wfMatch = heldPath.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/([^/]+)\//i);
           if (wfMatch) {
             const [, flavor, streamNum] = wfMatch;
             const matched = freshUrls.find(u => {

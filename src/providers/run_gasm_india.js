@@ -171,7 +171,7 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
   return global.WebAssembly.instantiate(buffer, importObject);
 };
 
-const originalFetch = global.fetch;
+const { safeFetch } = require('../impitClient');
 
 global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
@@ -212,10 +212,9 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       reqHeaders.set('Content-Type', 'application/octet-stream');
       console.log('HEADERS:', Array.from(reqHeaders.entries()));
       
-      const response = await originalFetch(proxyUrl, {
-
+      const response = await safeFetch(proxyUrl, {
           method: fetchOpts.method || 'POST',
-          headers: reqHeaders,
+          headers: Object.fromEntries(reqHeaders.entries()),
           body: reqBody ? Buffer.from(reqBody) : undefined
       });
       
@@ -224,14 +223,23 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
           process.exit(1);
       }
       
-      return response;
+      const buf = await response.arrayBuffer();
+      const realHeaders = new Headers();
+      if (response.headers) {
+         if (typeof response.headers.forEach === 'function') {
+            response.headers.forEach((v, k) => realHeaders.set(k, v));
+         } else {
+            for (const [k, v] of Object.entries(response.headers)) realHeaders.set(k, Array.isArray(v) ? v[0] : v);
+         }
+      }
+      return new Response(buf, { status: response.status, headers: realHeaders });
     } catch (err) {
       console.error(`[WASM] Network error on proxy fetch: ${err.message}`);
       process.exit(1);
     }
   }
   
-  return originalFetch(url, opts);
+  return safeFetch(url, opts);
 };
 
 (async () => {

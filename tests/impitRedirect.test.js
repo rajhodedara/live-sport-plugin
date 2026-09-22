@@ -43,7 +43,7 @@ function redirectResponse(statusCode, location) {
   return {
     statusCode,
     headers: location === undefined ? {} : { location },
-    body: { dump: jest.fn().mockResolvedValue(undefined), text: async () => '' },
+    body: { dump: jest.fn().mockResolvedValue(undefined), text: async () => '', arrayBuffer: async () => new ArrayBuffer(0) },
   };
 }
 
@@ -51,7 +51,7 @@ function bodyResponse(statusCode, body) {
   return {
     statusCode,
     headers: {},
-    body: { dump: jest.fn().mockResolvedValue(undefined), text: async () => body },
+    body: { dump: jest.fn().mockResolvedValue(undefined), text: async () => body, arrayBuffer: async () => new TextEncoder().encode(body).buffer },
   };
 }
 
