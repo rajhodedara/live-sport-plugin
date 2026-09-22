@@ -589,9 +589,13 @@ async function handleStream(type, id, config) {
   const matches = cacheService.getMatches();
   let rawId = id.replace('nuvio_sport_', '');
   let episodeIndex = null;
+  let isHubEpisode = false;
   if (rawId.includes(':')) {
     const parts = rawId.split(':');
     rawId = parts[0];
+    if (parts[1] && parts[1].startsWith('hub_')) {
+      isHubEpisode = true;
+    }
     episodeIndex = parseInt(parts[2], 10);
   }
   const matchId = rawId;
@@ -606,7 +610,7 @@ async function handleStream(type, id, config) {
   const streams = [];
 
   let candidateSources = match.sources;
-  if (episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
+  if (!isHubEpisode && episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
     const isMultiPart = match.sources.some(s => s.name && /(part|half|period)\s*\d+/i.test(s.name));
     if (isMultiPart) {
       const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
@@ -801,10 +805,20 @@ async function handleStream(type, id, config) {
       }
     }
     
+    let partLabel = '';
+    const partMatch = originalTitle.match(/(?:^|[\s\[\]])(Part\s*\d+|[12]nd\s*Half|[12]st\s*Half|Full\s*Match|Full\s*Replay|Long\s*Highlights?|Highlights?|\d+:\d+)(?:[\s\]\()]|$)/i);
+    if (partMatch) {
+      partLabel = partMatch[1].trim();
+    }
+    if (channelName && (channelName.toLowerCase() === 'direct' || channelName.toLowerCase() === 'browser' || channelName.toLowerCase() === 'ok.ru' || channelName.toLowerCase() === partLabel.toLowerCase())) {
+      channelName = '';
+    }
+
+    const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}` : '';
     const speedLabel = getSpeedLabel(s.speedScore);
     const speedText = speedLabel ? `\n⏱ ${speedLabel}` : '';
-    s.title = `${icon} ${providerName}${channelDisplay}\n📺 Quality: ${quality}${viewersText}${speedText}`;
+    s.title = `${icon} ${providerName}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
