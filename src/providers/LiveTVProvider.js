@@ -198,7 +198,7 @@ async function unshorten(url) {
 class LiveTVProvider {
   constructor() {
     this.sourceName = 'livetv';
-    this.daysBack = Number(process.env.LIVETV_DAYS_BACK || 6);
+    this.daysBack = Number(process.env.LIVETV_DAYS_BACK || 21);
     this.enabled = process.env.LIVETV_DISABLED !== 'true';
     this._streamCache = new Map(); // path -> { at, value }
     this._cacheTtlMs = Number(process.env.LIVETV_STREAM_TTL_MS || 6 * 3600 * 1000);

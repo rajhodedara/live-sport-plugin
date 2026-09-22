@@ -111,60 +111,50 @@ function isMatchLive(match) {
   if (!match) return false;
   if (match.category === 'networks') return true;
 
-  // 1. Explicit finished / postponed / cancelled statuses are never live
+  // 1. Explicit terminal statuses are never live
   if (match.status === 'finished' || match.status === 'ended' || match.status === 'postponed' || match.status === 'cancelled') {
     return false;
   }
 
-  // 2. Explicit live status from provider
-  if (match.status === 'live' || match.status === 'in' || match.status === 'in_progress') {
-    if (match.date) {
-      const kickoff = getKickoff(match.date);
-      if (kickoff > 0) {
-        const maxDuration = getEventDurationMs(match.category);
-        const grace = 30 * 60 * 1000; // stoppage time / extra time / penalties
-        if (Date.now() > kickoff + maxDuration + grace) return false;
-      }
+  // 2. THE KICKOFF CLOCK IS AUTHORITATIVE.
+  //    Providers cache status at fetch time, so a 'live' flag can be wrong in
+  //    both directions: StreamedPk mints it from a stream probe (an upcoming
+  //    event with an active stream gets flagged live), and scraper caches keep
+  //    stale flags for hours. A fixture whose kickoff is still in the future is
+  //    therefore NEVER live regardless of the flag, and a fixture inside its
+  //    sport's live window is always decided by the clock below.
+  //    (Regression-tested both ways: an in-progress match still flagged
+  //    'upcoming' stays live; a match flagged 'live' with a future kickoff is
+  //    not.) 24/7 networks were already handled above.
+  if (match.date) {
+    const kickoff = getKickoff(match.date);
+    if (kickoff > 0) {
+      const now = Date.now();
+      if (now < kickoff) return false; // not started yet - no flag can override this
+      const maxDuration = getEventDurationMs(match.category);
+      return now <= kickoff + maxDuration;
     }
-    return true;
   }
 
-  // 3. 'pre' means the provider says the match has NOT kicked off. WatchFooty
-  //    refreshes this every sync and it is reliable, so it is trusted over the
-  //    clock.
+  // 3. 'pre' means the provider says the match has NOT kicked off. Without a
+  //    usable kickoff the clock cannot decide, so a fresh flag is trusted.
   const PRE_STALE_MS = 20 * 60 * 1000;
   if (match.status === 'pre') {
     const ko = match.date ? getKickoff(match.date) : 0;
     if (ko > 0 && Date.now() > ko + PRE_STALE_MS) {
-      // fall through: the flag is stale, let the time-based branch decide
+      // fall through: the flag is stale, let the clock branch decide
     } else {
       return false; // provider says not started, and the flag is fresh
     }
   }
 
-  // 4. 'upcoming' is NOT trustworthy for every provider: StreamSports99 reports
-  //    it even for in-progress games. So it only means "not started" while the
-  //    kickoff is genuinely still ahead; once kickoff has passed, fall through and
-  //    let the clock decide, otherwise real live games would disappear.
-  if (match.status === 'upcoming') {
-    if (!match.date) return false;
-    if (Date.now() < getKickoff(match.date)) return false;
-    // kicked off -> fall through to the time-based branch
-  }
+  // 4. 'upcoming' with no usable kickoff: the fresh flag is the only signal
+  //    left, so honour it (streamedpk/ss99 emit this for their never-dated
+  //    events; mis-categorised 24/7 channels are already renamed 'networks'
+  //    upstream of this function).
+  if (match.status === 'upcoming' && !match.date) return false;
 
-  if (!match.date) return true;
-
-  // 5. Time-based evaluation.
-  const now = Date.now();
-  const kickoff = match.date ? getKickoff(match.date) : 0;
-
-  if (kickoff > 0) {
-    if (now < kickoff) return false; // not started yet
-    const maxDuration = getEventDurationMs(match.category);
-    return now <= (kickoff + maxDuration);
-  }
-
-  return false;
+  return true;
 }
 
 /**
@@ -1128,7 +1118,7 @@ async function handleCatalog(type, id, extra, config) {
       }
     });
 
-    const sortedDates = Array.from(dateMap.keys()).sort().reverse().slice(0, 14);
+    const sortedDates = Array.from(dateMap.keys()).sort().reverse().slice(0, 21);
     const dateMetas = sortedDates.map(dStr => {
       const count = dateMap.get(dStr);
       const dateObj = new Date(dStr + 'T00:00:00Z');
