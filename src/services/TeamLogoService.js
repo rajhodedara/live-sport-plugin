@@ -67,7 +67,7 @@ function resolveCacheFile() {
 
 const CACHE_FILE = resolveCacheFile();
 const MAX_CACHE_SIZE = 5000;
-const NEGATIVE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours for not-found entries
+const NEGATIVE_TTL_MS = 5 * 60 * 1000; // 5 min — short enough to self-heal after transient failures
 
 // ─── 1. Curated League & Competition Badges ─────────────────────────────────────
 const LEAGUE_EMBLEMS = {
