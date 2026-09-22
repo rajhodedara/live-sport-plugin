@@ -197,7 +197,8 @@ describe('score is the hero, centred and large', () => {
 
 describe('per-sport identity reaches the card chrome', () => {
   const accentOf = (svg) => (svg.match(/id="sportTint"[^>]*>.*?stop-color="(#[0-9a-f]{6})"/) || [])[1];
-  const topBarOf = (svg) => (svg.match(/height="3" fill="(#[0-9a-f]{6})" opacity="0.95"/) || [])[1];
+  // The accent bar is 4px in the Broadcast Slate design (was 3px).
+  const topBarOf = (svg) => (svg.match(/height="4" fill="(#[0-9a-f]{6})" opacity="0.95"/) || [])[1];
 
   test('each sport tints the card with its own accent', () => {
     const football = accentOf(generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' }));

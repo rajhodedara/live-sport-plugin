@@ -250,7 +250,9 @@ describe('card background: one light source, no colour soup', () => {
     // The old warm values.
     expect(svg).not.toContain('#170e08');
     expect(svg).not.toContain('#0a0605');
-    expect(svg).toContain('#141821');
+    // Broadcast Slate ground (was the near-black #141821 / #0d1017 pair).
+    expect(svg).toContain('#232a36');
+    expect(svg).not.toContain('#0d1017');
   });
 
   test('a single arena light carries the sport accent', () => {

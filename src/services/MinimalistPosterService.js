@@ -659,6 +659,13 @@ function generateMatchCardSvg(spec = {}) {
   // middle into grey; a corner wash keeps football and basketball cards
   // distinguishable at a glance without touching the hero area.
   parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#sportTint)"/>');
+  // Broadcast Slate signature: the two halves lean toward their own side, so a
+  // fixture card reads as a contest at a glance without needing team colours
+  // (which we do not store). Deliberately subtle so crests stay the hero.
+  if (available === 2) {
+    parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#homeSplit)"/>');
+    parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#awaySplit)"/>');
+  }
 
   // ── Sport watermark (behind all content) ──
   const glyphOpacity = available === 0 ? 0.12 : 0.05;
@@ -668,9 +675,11 @@ function generateMatchCardSvg(spec = {}) {
   parts.push('<g transform="translate(' + gx.toFixed(1) + ', ' + gy.toFixed(1) + ') scale(' + (glyphSize / 72).toFixed(2) + ')" opacity="' + glyphOpacity + '">' + sportGlyphMarkup(catKey) + '</g>');
 
   // ── Frame ──
-  parts.push('<rect x="1.5" y="1.5" width="' + (w - 3) + '" height="' + (h - 3) + '" rx="10" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>');
-  parts.push('<rect x="0" y="0" width="' + w + '" height="3" fill="' + accent + '" opacity="0.95"/>');
-  parts.push('<rect x="0" y="0" width="' + (w * 0.42).toFixed(1) + '" height="3" fill="' + CARD_HOT + '" opacity="0.95"/>');
+  // Hard edges: a small radius and a 1px hairline instead of a 10px pill edge
+  // with a 1.5px stroke. Reads as a broadcast slate rather than a soft tile.
+  parts.push('<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>');
+  parts.push('<rect x="0" y="0" width="' + w + '" height="4" fill="' + accent + '" opacity="0.95"/>');
+  parts.push('<rect x="0" y="0" width="' + (w * 0.42).toFixed(1) + '" height="4" fill="' + CARD_HOT + '" opacity="0.95"/>');
 
   // ── Header: league chip (left) ──
   if (leagueName || leagueBadge) {
@@ -864,23 +873,33 @@ function generateMatchCardSvg(spec = {}) {
     // Deep neutral graphite with a slight cool bias. Avoids both pure black and
     // the warm brown cast the previous orange-based base introduced.
     '<linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">' +
-      '<stop offset="0%" stop-color="#141821"/>' +
-      '<stop offset="52%" stop-color="#0d1017"/>' +
-      '<stop offset="100%" stop-color="#07090d"/>' +
+      '<stop offset="0%" stop-color="#232a36"/>' +
+      '<stop offset="58%" stop-color="#1a202b"/>' +
+      '<stop offset="100%" stop-color="#141922"/>' +
     '</linearGradient>' +
     // A single soft overhead light in the sport accent. This is the only
     // large-area colour on the card, so the accent never competes with itself.
     '<radialGradient id="arenaLight" cx="50%" cy="-14%" r="92%">' +
-      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.22"/>' +
-      '<stop offset="42%" stop-color="' + accent + '" stop-opacity="0.06"/>' +
+      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.20"/>' +
+      '<stop offset="42%" stop-color="' + accent + '" stop-opacity="0.05"/>' +
       '<stop offset="100%" stop-color="' + accent + '" stop-opacity="0"/>' +
     '</radialGradient>' +
+    // Home / away sides. A single cool tone each, fading to nothing in the
+    // centre, so the fixture reads as a contest without inventing team colours.
+    '<linearGradient id="homeSplit" x1="0%" y1="0%" x2="100%" y2="0%">' +
+      '<stop offset="0%" stop-color="#2f6f8f" stop-opacity="0.30"/>' +
+      '<stop offset="46%" stop-color="#2f6f8f" stop-opacity="0"/>' +
+    '</linearGradient>' +
+    '<linearGradient id="awaySplit" x1="100%" y1="0%" x2="0%" y2="0%">' +
+      '<stop offset="0%" stop-color="#8f5a2f" stop-opacity="0.28"/>' +
+      '<stop offset="46%" stop-color="#8f5a2f" stop-opacity="0"/>' +
+    '</linearGradient>' +
     // Bottom weight: darkens toward the footer so the crests and hero sit on
     // solid ground instead of floating in haze.
     '<linearGradient id="floor" x1="0%" y1="0%" x2="0%" y2="100%">' +
       '<stop offset="0%" stop-color="#000000" stop-opacity="0"/>' +
-      '<stop offset="62%" stop-color="#000000" stop-opacity="0.14"/>' +
-      '<stop offset="100%" stop-color="#000000" stop-opacity="0.52"/>' +
+      '<stop offset="60%" stop-color="#000000" stop-opacity="0.10"/>' +
+      '<stop offset="100%" stop-color="#000000" stop-opacity="0.34"/>' +
     '</linearGradient>' +
     // Per-sport identity: a corner-biased wash of the sport accent. Kept away
     // from the centre so it never desaturates the hero.
