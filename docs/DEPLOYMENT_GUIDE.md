@@ -1,6 +1,16 @@
-# Nuvio Live Sports Plugin — Production Deployment & Architecture Handbook
+# Nuvio Live Sports Plugin - Production Deployment & Architecture Handbook
 
-This handbook documents the complete production infrastructure, configuration, daily maintenance routines, and architecture for the **Nuvio Live Sports Plugin** (`https://nuviosports.xyz`).
+This handbook documents the production infrastructure, configuration, daily maintenance
+routines, and architecture for the **Nuvio Live Sports Plugin** (`https://nuviosports.xyz`).
+
+> **SECURITY NOTE (read first).** This repository is **public**. Do not commit the origin
+> server's IP address, provider/datacenter name, hostnames, credentials, keys, or `.env`
+> contents. The origin IP for this deployment has **already been exposed in an earlier
+> revision of this file** and must therefore be treated as **public and permanently
+> burned**: it cannot be un-leaked by editing files, because it remains in git history,
+> in forks, and in any cache. The only way to obtain a private origin again is to request
+> a new IP from the provider. Until then, assume an attacker can address the origin
+> directly and firewall accordingly (see section 4D).
 
 ---
 
@@ -10,103 +20,97 @@ This handbook documents the complete production infrastructure, configuration, d
 | :--- | :--- | :--- |
 | **Public Manifest** | `https://nuviosports.xyz/manifest.json` | Paste into Stremio or Nuvio to install |
 | **Configure Portal** | `https://nuviosports.xyz/configure` | Web dashboard to choose favorite teams / sports |
-| **Server Origin IP** | `192.236.184.122` | Hidden behind Cloudflare |
-| **Location** | New York, USA (RackNerd Datacenter) | Low latency to Americas and Europe |
-| **Hardware Specs** | 4 vCPU Cores, 4 GB RAM, 57 GB NVMe SSD | Scaled for 10,000–15,000 users |
-| **Swap Space** | 2 GB NVMe Swap (`/swapfile`) | Prevents OOM crashes during kickoff traffic spikes |
-| **Runtime** | Node.js v22.23.2 LTS | High performance ES2023+ V8 engine |
-| **Process Manager** | PM2 (4 Cluster Workers) | Automatic load-balancing across all 4 CPU cores |
-| **Reverse Proxy** | Caddy v2.11.4 | Listens on port 80/443, routes to localhost:7000 |
-| **Edge Network** | Cloudflare Anycast CDN (Free Plan) | Edge TLS termination, DDoS shield, hides origin IP (**Full (strict)** — edge↔origin encrypted) |
+| **Server Origin** | `<VPS_HOST>` | Private. Never commit the real value. Reachable only via SSH |
+| **Location** | Undisclosed | Do not record provider or datacenter in this file |
+| **Host Sizing** | Small managed VPS | Sized for a few thousand concurrent users |
+| **Runtime** | Node.js 22 LTS | Do not pin patch versions in this file |
+| **Process Manager** | PM2 (cluster workers) | Load-balances across available CPU cores |
+| **Reverse Proxy** | Caddy v2 | Terminates TLS, routes to a local-only app port |
+| **Edge Network** | Cloudflare (proxied) | Edge TLS, DDoS shield, origin IP hiding |
+
+Keep `<VPS_HOST>` as a literal placeholder in this document and substitute the real value
+locally when you need it.
 
 ---
 
-## 2. High-Performance Architecture Diagram
+## 2. Architecture Overview
 
 ```
-                        [ 5,000 - 15,000 Stremio / Nuvio Users ]
-                                       │
-                                       ▼ (HTTPS via Port 443)
-                        [ Cloudflare Edge Anycast Shield ]
-                         - Free Universal SSL Certificate
-                         - DDoS Attack Absorption
-                         - Hides Origin IP (192.236.184.122)
-                         - Edge static-asset caching
-                           (catalog/manifest: DYNAMIC, not edge-cached)
-                                       │
-                                       ▼ (HTTPS via Port 443)
-                        [ RackNerd VPS: Caddy Reverse Proxy ]
-                         - High-throughput Go reverse proxy
-                         - Automatic header rewriting (Host, X-Real-IP)
-                         - Forwards to 127.0.0.1:7000
-                                       │
-                                       ▼ (Internal Port 7000)
-                     [ PM2 Multi-Core Cluster (4 Workers) ]
-                    ┌──────────┬──────────┬──────────┬──────────┐
-                    ▼          ▼          ▼          ▼
-                Worker 0   Worker 1   Worker 2   Worker 3
-                (Core 1)   (Core 2)   (Core 3)   (Core 4)
-           all share one HTTP port :7000 (PM2 cluster)
-                   │
-                   ├─► each worker spawns its own resolver child:
-                   │   Resolver 0-3 → :7003 :7004 :7005 :7006
-                   └─► worker 0 only runs cron match syncs (single leader)
-                                       │
-                    ┌──────────────────┴──────────────────┐
-                    ▼                                     ▼
-        [ Direct Upstream CDN ]                [ Cloudflare Worker Pool ]
-      - Raw .ts video segments stream        - Strips 42-byte fake WebP headers
-        directly to the user's player          for Streamed.pk .image streams
-      - ZERO video bandwidth on VPS          - 5 rotating workers.dev proxies
+                        [ Stremio / Nuvio users ]
+                                    |
+                                    v  (HTTPS 443)
+                        [ Cloudflare Edge (proxied) ]
+                         - Universal SSL
+                         - DDoS absorption
+                         - Hides the origin address
+                         - Dynamic catalog/manifest (not edge-cached)
+                                    |
+                                    v  (HTTPS 443)
+                        [ VPS: Caddy reverse proxy ]
+                         - Terminates TLS (Cloudflare Origin Certificate)
+                         - Rewrites Host / X-Real-IP / X-Forwarded-*
+                         - Forwards to 127.0.0.1:<APP_PORT>
+                                    |
+                                    v  (internal app port)
+                        [ PM2 cluster (N workers, one shared port) ]
+                         - Worker 0 only runs the cron match sync
+                         - Each worker spawns its own resolver child
+                                    |
+                    +---------------+----------------+
+                    v                                v
+        [ Direct upstream CDN ]           [ Cloudflare Worker pool ]
+      - Raw .ts segments stream        - Rewrites fake image headers
+        to the user's player             for certain upstream streams
+      - Zero video bandwidth on VPS
 ```
 
 ---
 
 ## 3. Domain & DNS Configuration
 
-### A. Namecheap (Domain Registrar)
+### A. Registrar (domain)
 * **Domain**: `nuviosports.xyz`
-* **WHOIS Privacy**: Enabled (Free Lifetime Privacy Protection)
-* **Nameservers**: Set to **Custom DNS**:
-  * `hank.ns.cloudflare.com`
-  * `sky.ns.cloudflare.com`
+* **WHOIS Privacy**: Enabled
+* **Nameservers**: Custom DNS, pointing at Cloudflare
 
-### B. Cloudflare (DNS Zone & Security Settings)
+### B. Cloudflare (DNS zone & security)
 * **DNS Records**:
-  * **`A` Record**: `@` points to `192.236.184.122` (Status: **Proxied / Orange Cloud ☁️**)
-  * **`CNAME` Record**: `www` points to `nuviosports.xyz` (Status: **Proxied / Orange Cloud ☁️**)
-* **SSL/TLS Encryption Mode**: **Full (strict)** (migrated 2026-09-20). Cloudflare↔origin is now HTTPS end-to-end; the origin serves a Cloudflare Origin Certificate on `:443` (see §4C / §4D).
-* **Always Use HTTPS**: **Enabled**
-* **Automatic HTTPS Rewrites**: **Enabled**
+  * **`A`** `@` -> `<VPS_HOST>`, **Proxied** (orange cloud)
+  * **`CNAME`** `www` -> `nuviosports.xyz`, **Proxied** (orange cloud)
+* **SSL/TLS mode**: **Full (strict)** - edge-to-origin is HTTPS end to end; the origin
+  serves a Cloudflare Origin Certificate on `:443`.
+* **Always Use HTTPS**: Enabled
+* **Automatic HTTPS Rewrites**: Enabled
 
 ---
 
 ## 4. Server Configuration & Setup Reference
 
-### A. Directory Structure on VPS
+### A. Directory structure on the VPS
 ```text
 /root/
-└── nuvio-live-sports/
-    ├── dist/              # Production bundled output (built via @vercel/ncc)
-    │   ├── index.js       # Main bundled entrypoint
-    │   └── src/           # Resolver sources copied during build
-    ├── resolver/          # Streamed.pk stream resolver & WASM decryptor
-    ├── src/               # Express addon source code
-    ├── .env               # Production environment variables
-    └── package.json       # Dependencies & build scripts
+  nuvio-live-sports/
+    dist/              # Production bundle (built via @vercel/ncc)
+      index.js         # Bundled entrypoint
+      src/             # Resolver sources copied during build
+    resolver/          # Stream resolver & WASM decryptor
+    src/               # Express addon source
+    .env               # Production environment variables (never commit)
+    package.json
 ```
 
-### B. Production Environment (`/root/nuvio-live-sports/.env`)
+### B. Production environment (`/root/nuvio-live-sports/.env`)
 ```ini
-PORT=7000
+PORT=<APP_PORT>
 ADDON_URL=https://nuviosports.xyz
 ```
+Keep `.env` out of git. It is already listed in `.gitignore`; confirm before every commit.
 
-### C. Caddy Reverse Proxy Configuration (`/etc/caddy/Caddyfile`)
+### C. Caddy reverse proxy (`/etc/caddy/Caddyfile`)
 ```caddy
 nuviosports.xyz {
     tls /etc/caddy/origin.pem /etc/caddy/origin.key
-    reverse_proxy 127.0.0.1:7000 {
+    reverse_proxy 127.0.0.1:<APP_PORT> {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
@@ -115,91 +119,108 @@ nuviosports.xyz {
 }
 ```
 
-> **Note:** serves `:443` with the Cloudflare Origin Certificate and auto-redirects `:80` → `:443` (Caddy default). This pairs with Cloudflare **Full (strict)**. The cert/key live in `/etc/caddy/` and must be readable by the `caddy` service user (`root:caddy`, mode `640`) — `chmod 600 root:root` causes `open origin.key: permission denied` and breaks the reload.
+> **Note:** serves `:443` with the Cloudflare Origin Certificate and redirects `:80` to
+> `:443` (Caddy default). Pairs with Cloudflare **Full (strict)**. The cert/key live in
+> `/etc/caddy/` and must be readable by the `caddy` service user (`root:caddy`, mode
+> `640`) - `chmod 600 root:root` causes `open origin.key: permission denied` and breaks reload.
 
-Backup before editing: `cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak`.
+Back up before editing: `cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak`.
 
 ---
 
-## 4D. Origin Exposure & Recommended Hardening (Full *strict*)
+## 4D. Origin Exposure & Required Hardening
 
-**Status (2026-09-20): migrated to Full (strict) — DONE.** The origin serves a Cloudflare Origin Certificate on `:443` (`/etc/caddy/origin.pem` + `origin.key`, owned `root:caddy` mode `640`), Caddy redirects `:80` → `:443`, and Cloudflare SSL mode is **Full (strict)**. Public verification: `https://nuviosports.xyz/manifest.json` → `200`, zero redirects.
+**Status (2026-09-20): Cloudflare is on Full (strict).** The origin serves a Cloudflare
+Origin Certificate on `:443`, Caddy redirects `:80` to `:443`, and Cloudflare SSL mode is
+**Full (strict)**. Verified with `curl -sI https://nuviosports.xyz/manifest.json` -> `200`.
 
-**Remaining step — hide the origin behind a firewall.** The origin still accepts *direct* connections on `:80`/`:443` from any IP, so it can be reached by its raw address and bypasses Cloudflare's DDoS shield. The Origin Certificate is not publicly trusted, so a browser hitting `https://<origin-ip>` directly shows a cert warning — but a script can still reach it. Lock it down:
+**Outstanding risk - the origin address is public.** The origin IP was previously written
+into this repository and is therefore known. An attacker can try to reach the origin
+directly and bypass Cloudflare's DDoS shield. Lock this down, in this order:
 
 1. `apt update && apt install -y ufw`
-2. **Allow SSH first** (or you lock yourself out): `ufw allow 22/tcp`
-3. Allow only Cloudflare's ranges:
+2. **Allow SSH first** (or you will lock yourself out): `ufw allow 22/tcp`
+3. Allow only Cloudflare's ranges on 80/443:
    ```bash
    for ip in $(curl -s https://www.cloudflare.com/ips-v4); do ufw allow proto tcp from $ip to any port 80;  ufw allow proto tcp from $ip to any port 443; done
    for ip in $(curl -s https://www.cloudflare.com/ips-v6); do ufw allow proto tcp from $ip to any port 80;  ufw allow proto tcp from $ip to any port 443; done
    ```
 4. `ufw default deny incoming && ufw default allow outgoing && ufw enable`
-5. Verify from **another machine**: the site still `200`, and `http://<origin-ip>` no longer responds. Rollback if needed: `ufw disable` (or the RackNerd VNC console if SSH is lost).
+5. Verify from **another machine**: the site still returns `200`, and the raw origin address
+   no longer responds. Rollback: `ufw disable` (or the provider's VNC console if SSH is lost).
 
-> **Failure notes from the migration:** if the origin serves a cert but Cloudflare is still *Flexible*, Caddy's `:80`→`:443` redirect causes an infinite **308 loop** (the site stops opening). The fix is to move Cloudflare to **Full (strict)**, not to disable the redirect. And `systemctl reload caddy` failing with a bare "Job failed" almost always means the cert/key isn't readable by the `caddy` user — read the real error with `caddy reload --config /etc/caddy/Caddyfile` or `journalctl -xeu caddy.service`.
+**Harden SSH (do this as well).** Open SSH on a public IP is the highest-value target:
+
+* `PermitRootLogin prohibit-password` in `/etc/ssh/sshd_config`
+* `PasswordAuthentication no` (key-only)
+* Restrict `22/tcp` to your own admin address in `ufw`, or move SSH behind
+  Cloudflare Tunnel / a bastion
+* `apt install -y fail2ban` with an `sshd` jail
+* Reload with `systemctl reload ssh` and keep your current session open until you have
+  confirmed a fresh login works
+
+**To actually re-hide the origin:** request a new IP from the provider, re-point DNS, then
+follow steps 1-5. Editing files cannot undo the exposure.
+
+> **Failure notes from the migration:** if the origin serves a cert but Cloudflare is still
+> *Flexible*, Caddy's `:80` -> `:443` redirect causes an infinite **308 loop** (the site
+> stops opening). Fix: move Cloudflare to **Full (strict)**; do not disable the redirect.
+> And `systemctl reload caddy` failing with a bare "Job failed" almost always means the
+> cert/key is not readable by the `caddy` user - read the real error with
+> `caddy reload --config /etc/caddy/Caddyfile` or `journalctl -xeu caddy.service`.
 
 ---
 
-## 5. Daily Operations & Maintenance Cheat Sheet
+## 5. Daily Operations & Maintenance
 
-Connect via SSH:
+Connect via SSH (substitute your own host; never commit the value):
 ```bash
-ssh root@192.236.184.122
+ssh <user>@<VPS_HOST>
 ```
 
-### How to Update After Pushing New Code to GitHub:
+### How to update after pushing new code to GitHub
 ```bash
 cd /root/nuvio-live-sports && git pull && npm run build && pm2 reload nuvio-sports
 ```
-*(Reload is rolling / zero-downtime only when the process runs in **cluster mode** — see the start command below.)*
+*(Reload is rolling / zero-downtime only when the process runs in **cluster mode** - see the
+start command below.)*
 
-> ⚠️ **Deploy only ships committed code.** `git pull` fetches the remote branch; uncommitted work in the VPS working tree is not carried anywhere else, and a fresh `git pull && npm run build` can replace a locally-built (uncommitted) running binary with older committed sources. Commit or stash before deploying.
+> **Deploy only ships committed code.** `git pull` fetches the remote branch; uncommitted
+> work in the VPS working tree is not carried anywhere else, and a fresh
+> `git pull && npm run build` can replace a locally-built (uncommitted) running binary with
+> older committed sources. Commit or stash before deploying.
 
-### First-time / reinstall process start (cluster mode, 4 workers):
+### First-time / reinstall process start (cluster mode)
 ```bash
-pm2 start dist/index.js -i 4 --name nuvio-sports   # -i 4 = 4 cluster workers sharing port 7000
+pm2 start dist/index.js -i <WORKERS> --name nuvio-sports   # one worker per CPU core
 pm2 save
 pm2 startup
 ```
-*Without `-i 4`, PM2 runs a single fork-mode process and `pm2 reload` is not zero-downtime.*
+*Without the `-i` flag, PM2 runs a single fork-mode process and `pm2 reload` is not
+zero-downtime.*
 
-### Process Management:
+### Process management
 ```bash
-# Check worker status, memory & CPU:
-pm2 status
-
-# Live split-screen dashboard:
-pm2 monit
-
-# Temporarily stop the server:
-pm2 stop nuvio-sports
-
-# Resume the server:
-pm2 start nuvio-sports
-
-# Restart the server:
-pm2 restart nuvio-sports
+pm2 status                 # worker status, memory & CPU
+pm2 monit                  # live dashboard
+pm2 stop nuvio-sports      # temporarily stop
+pm2 start nuvio-sports     # resume
+pm2 restart nuvio-sports   # restart
 ```
 
-### Viewing Logs:
+### Logs
 ```bash
-# Watch real-time stream resolution & user requests:
-pm2 logs nuvio-sports
-
-# View the last 50 lines without streaming:
+pm2 logs nuvio-sports                     # real-time
 pm2 logs nuvio-sports --lines 50 --nostream
-
-# View ONLY errors:
-pm2 logs nuvio-sports --err --lines 50
-
-# Clear old log files:
-pm2 flush
+pm2 logs nuvio-sports --err --lines 50    # errors only
+pm2 flush                                 # clear old logs
 ```
 
-### Reboot Safety Checklist
+### Reboot safety checklist
 
-Everything configured during the Full (strict) migration survives a reboot — it lives on disk (`/etc/caddy/Caddyfile`, `origin.pem`/`origin.key`) or in Cloudflare, and Caddy is systemd-enabled. The only thing that can fail to come back is **PM2**. Verify once:
+Everything configured during the Full (strict) migration survives a reboot - it lives on
+disk (`/etc/caddy/Caddyfile`, `origin.pem`/`origin.key`) or in Cloudflare, and Caddy is
+systemd-enabled. The only thing that can fail to come back is **PM2**. Verify once:
 
 ```bash
 systemctl is-enabled caddy        # expect: enabled
@@ -210,48 +231,46 @@ pm2 ls                            # expect: nuvio-sports online
 If `pm2-root` is `disabled`/missing, register it so the app auto-starts after a reboot:
 ```bash
 pm2 save
-pm2 startup systemd -u root --hp /root   # then run the exact `sudo env ...` line it prints
+pm2 startup systemd -u root --hp /root   # then run the exact command it prints
 pm2 save
 ```
 
 After any reboot, a 30-second check:
 ```bash
-pm2 ls                                                        # app online
-curl -sI https://nuviosports.xyz/manifest.json | head -1      # HTTP/2 200
+pm2 ls
+curl -sI https://nuviosports.xyz/manifest.json | head -1   # HTTP/2 200
 ```
-If the app is missing after reboot: `pm2 resurrect`. Firewall rules persist once `ufw enable` has been run (stored under `/etc/ufw`); if the site returns **502**, Caddy is up but the app on `:7000` isn't — that's the PM2 case above.
+If the app is missing after reboot: `pm2 resurrect`. Firewall rules persist once
+`ufw enable` has been run (stored under `/etc/ufw`); if the site returns **502**, Caddy is
+up but the app is not - that is the PM2 case above.
 
-### Cluster Mode (PM2 `-i 4`) — What's Safe, What to Watch
+### Cluster mode - what is safe, what to watch
 
-Running 4 cluster workers is **supported by design**, not a footgun:
+Running a multi-worker cluster is **supported by design**, not a footgun:
 
 | Concern | Behaviour | Evidence |
 | :--- | :--- | :--- |
-| Duplicate cron jobs | Only **worker 0** starts cron | `src/index.js`: `if (workerOffset === 0) cronService.start()` |
-| Resolver port collision | Each worker spawns its **own** resolver on a unique port | `src/resolverManager.js`: `RESOLVER_PORT = 7003 + NODE_APP_INSTANCE` |
-| Shared HTTP port | All workers share `:7000` (normal Node cluster behaviour) | `app.listen(PORT)` |
+| Duplicate cron jobs | Only worker 0 starts cron | `src/index.js`: `if (workerOffset === 0) cronService.start()` |
+| Resolver port collision | Each worker spawns its own resolver on a unique port | `src/resolverManager.js` |
+| Shared HTTP port | All workers share one port (normal Node cluster behaviour) | `app.listen(PORT)` |
 
-Trade-offs (not breakage) to keep an eye on:
-- **~4× memory**: the match cache and stream-resolve cache are **in-memory per worker** (`CacheService` holds `this.cachedMatches`), so each worker keeps its own copy.
-- **Up to 4× upstream scrapes**: the scheduled sync is single-leader, but the traffic-driven re-sync (`CronService.ensureFresh`) can fire per worker under sustained load — watch provider rate-limits on a busy site.
-- **Shared cache file**: `TeamLogoService` writes a cache JSON; concurrent `writeFileSync` from multiple workers is an *untested* edge (candidate, not observed).
+Trade-offs (not breakage) to watch:
+- **Memory scales with workers**: the match cache and stream-resolve cache are in-memory
+  **per worker** (`CacheService` holds `this.cachedMatches`), so each worker keeps its own copy.
+- **Up to N x upstream scrapes**: the scheduled sync is single-leader, but the traffic-driven
+  re-sync (`CronService.ensureFresh`) can fire per worker under sustained load - watch provider
+  rate limits on a busy site.
+- **Shared cache file**: `TeamLogoService` writes a cache JSON; concurrent `writeFileSync`
+  from multiple workers is an *untested* edge (candidate, not observed).
 
 Confirm the live mode:
 ```bash
-pm2 ls   # Mode column = cluster; inst = 4
+pm2 ls   # Mode column = cluster
 ```
-**Verified 2026-09-20** via `pm2 monit`: four `nuvio-sports` instances `[0]`–`[3]` running in **cluster mode**, ~225–327 MB RSS each (**~1 GB total** — consistent with the 4× in-memory-cache trade-off above). Heap on the sampled worker sat at ~93% of a small (~51 MiB) heap, which is normal V8 behaviour (it keeps the heap tight), not a leak on its own — only worth investigating if "Heap Size" grows steadily over time. `Restarts` was 3 with 2h uptime (stable).
 
-If you ever see crashes on boot with `-i 4`, the resolver-port offset line above is the first thing to check.
-
-### System Health & Resource Checks:
+### System health checks
 ```bash
-# Check available RAM and Swap:
-free -h
-
-# Interactive CPU and core monitor:
-htop
-
-# Check disk space:
-df -h
+free -h    # RAM and swap
+htop       # CPU and cores
+df -h      # disk space
 ```
