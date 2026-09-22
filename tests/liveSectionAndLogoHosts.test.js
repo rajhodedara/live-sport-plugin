@@ -238,6 +238,71 @@ describe('generated cards do not pin stale artwork for 24h', () => {
   });
 });
 
+describe('logo map integrity and fuzzy channel matching', () => {
+  const { getChannelLogo } = require('../src/services/ChannelLogoService');
+  const logoMap = require('../src/data/tv_logos_map.json');
+
+  test('the curated map contains no URL-breaking characters', () => {
+    // A bare '%' is not a valid percent-escape and made jsDelivr answer 400 for
+    // that one asset. Everything else in the map audited clean (9,897 assets).
+    const bad = Object.values(logoMap).filter((v) => /%(?![0-9A-Fa-f]{2})/.test(v));
+    expect(bad).toEqual([]);
+  });
+
+  test('the previously broken ukraine asset is percent-encoded', () => {
+    const hit = Object.entries(logoMap).find(([, v]) => /100%25-news-ua.png$/.test(v));
+    expect(hit).toBeTruthy();
+    expect(Object.values(logoMap).some((v) => /100%-news-ua.png$/.test(v))).toBe(false);
+  });
+
+  test('channels whose upstream spelling differs from the curated key still resolve', () => {
+    // These returned null before the fuzzy matcher and rendered logo-less.
+    const cases = [
+      ['Altitude', /altitude-sports/],
+      ['Canal 11', /canal11-pt/],
+      ['Canal Foot', /canal-plus-foot/],
+      ['Canal Sport', /canal-plus-sport/],
+      ['Canal Sport 2', /canal-plus-sport-2/],
+      ['Canal Sport360', /canal-plus-sport-360/],
+      ['Euro Sport 1', /eurosport-1/],
+      ['Euro Sport 2', /eurosport-2/],
+      ['Nova Sports Premier League Greece', /nova-sports-1-gr/],
+      ['Chicago Sports Network', /nbc-sports-chicago/]
+    ];
+    for (const [title, re] of cases) {
+      const url = getChannelLogo(title);
+      expect(url).toBeTruthy();
+      expect(url).toMatch(re);
+    }
+  });
+
+  test('a lone generic token never auto-resolves to an unrelated feed', () => {
+    // "Canal" must not become canal-4-ar and "Network" must not become
+    // network-10-au; only the curated/alias tables may map these.
+    for (const t of ['Canal', 'Sport', 'Sports', 'Network', 'Channel', 'Plus', 'TV']) {
+      expect(getChannelLogo(t)).toBeNull();
+    }
+  });
+
+  test('the fuzzy matcher did not regress existing resolutions', () => {
+    const cases = [
+      ['ESPN', /espn-us/],
+      ['CNN', /cnn-us/],
+      ['Sky Sports F1', /sky-sports-f1-uk/],
+      ['NBA TV', /nba-tv-us/],
+      ['MASN', /masn-us/],
+      ['SEC Network', /sec-network-us/],
+      ['DAZN 2', /dazn-2/],
+      ['truTV', /tru-tv-us/]
+    ];
+    for (const [title, re] of cases) {
+      const url = getChannelLogo(title);
+      expect(url).toBeTruthy();
+      expect(url).toMatch(re);
+    }
+  });
+});
+
 describe('24/7 channels are not re-tagged into sport rows', () => {
   test('StreamedPk keeps every 24/7 channel under "networks"', () => {
     // Re-tagging 24/7 channels with a sport (e.g. "Tennis Channel" -> tennis,

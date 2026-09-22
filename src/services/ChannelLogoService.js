@@ -133,6 +133,9 @@ const CHANNEL_LOGOS = {
   "bally sports": `${CDN_BASE}/countries/united-states/bally-sports-us.png`,
   "arena sport": `${CDN_BASE}/countries/croatia/arena-sport-1-hr.png`,
   "astro supersport": `${CDN_BASE}/countries/malaysia/screen-bug/astro-supersport-bug-my.png`,
+  "nova sports premier league": `${CDN_BASE}/countries/greece/nova-sports-1-gr.png`,
+  "nova sports premier league greece": `${CDN_BASE}/countries/greece/nova-sports-1-gr.png`,
+  "chicago sports network": `${CDN_BASE}/countries/united-states/nbc-sports-chicago-us.png`,
 };
 
 // Aliases for common alternative channel spellings and feed titles
@@ -494,6 +497,107 @@ function resolveDeepLogo(title) {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// Fuzzy fallback over the curated map.
+//
+// Upstream channel titles frequently differ from the curated key only in
+// separators, a quality/country suffix, or a singular/plural sport token
+// ("Euro Sport 1" vs "eurosport-1", "Canal Sport 360" vs
+// "canal-plus-sport-360-fr", "Altitude" vs "altitude-sports"). Without this the
+// lookups returned null and the card rendered with no logo. Only ever consulted
+// AFTER every exact/alias/substring/deep lookup has missed, so it cannot change
+// an existing resolution.
+// ---------------------------------------------------------------------------
+// A lone generic word matches unrelated international feeds (e.g. "Canal" ->
+// canal-4-ar, "Network" -> network-10-au). Those must never be auto-resolved;
+// only the curated/alias tables may map them.
+const GENERIC_SINGLE_TOKENS = new Set(['canal', 'tv', 'sport', 'sports', 'network', 'channel', 'live', 'hd', 'plus', 'news', 'one', 'max']);
+
+let _compactIndex = null;  // compactKey -> [keys, shortest first]
+let _tokenIndex = null;    // key -> normalized tokens
+
+function buildMapIndexes() {
+  if (_compactIndex) return;
+  _compactIndex = new Map();
+  _tokenIndex = new Map();
+  for (const key of Object.keys(TV_LOGOS_MAP || {})) {
+    const compact = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (!compact) continue;
+    if (!_compactIndex.has(compact)) _compactIndex.set(compact, []);
+    _compactIndex.get(compact).push(key);
+    _tokenIndex.set(key, normalizeKeyTokens(key));
+  }
+  for (const list of _compactIndex.values()) list.sort((a, b) => a.length - b.length);
+}
+
+/** Split letter/digit runs so "sport360" -> ["sport","360"] and "tv2" -> ["tv","2"]. */
+function normalizeKeyTokens(str) {
+  return String(str)
+    .toLowerCase()
+    .replace(/([a-z])(\d)/g, '$1 $2')
+    .replace(/(\d)([a-z])/g, '$1 $2')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean);
+}
+
+function resolveFuzzyMapMatch(title) {
+  if (!title || !TV_LOGOS_MAP) return null;
+  buildMapIndexes();
+  const compact = slugify(title).replace(/-/g, '');
+  if (!compact) return null;
+
+  // (a) separator-insensitive exact match: "eurosport1" === "eurosport-1"
+  if (_compactIndex.has(compact)) {
+    for (const k of _compactIndex.get(compact)) if (TV_LOGOS_MAP[k]) return TV_LOGOS_MAP[k];
+  }
+
+  // (b) the query is a prefix of the key (shortest key wins): "altitude" ->
+  //     "altitude-sports". Guarded on length so short tokens cannot match junk.
+  // A single generic token must not prefix-match ("canal" -> canal-4-ar).
+  const queryTokens = normalizeKeyTokens(title);
+  const isGenericSingle = queryTokens.length === 1 && GENERIC_SINGLE_TOKENS.has(queryTokens[0]);
+  if (compact.length >= 5 && !isGenericSingle) {
+    let best = null;
+    for (const [ck, list] of _compactIndex) {
+      if (ck.length > compact.length && ck.startsWith(compact)) {
+        if (!best || ck.length < best.ck.length) best = { ck, list };
+      }
+    }
+    if (best) for (const k of best.list) if (TV_LOGOS_MAP[k]) return TV_LOGOS_MAP[k];
+  }
+
+  // (c) every query token appears in order within the key tokens (query must
+  //     carry at least two tokens): "canal sport" -> "canal-plus-sport-fr".
+  //     Fewest extra tokens wins, which prefers the generic feed over a
+  //     numbered/regional variant.
+  const qt = normalizeKeyTokens(title);
+  // A lone generic word ("canal", "sport") matches unrelated international
+  // feeds (e.g. "Canal" -> canal-4-ar). Those are left to the curated/alias
+  // lookup; the fuzzy pass only handles multi-token or distinctive queries.
+  if (qt.length >= 2 || (qt.length === 1 && !GENERIC_SINGLE_TOKENS.has(qt[0]))) {
+    let best = null;
+    for (const [key, kt] of _tokenIndex) {
+      if (kt.length < qt.length) continue;
+      let cursor = 0, all = true;
+      for (const q of qt) {
+        const idx = kt.indexOf(q, cursor);
+        if (idx === -1) { all = false; break; }
+        cursor = idx + 1;
+      }
+      if (!all) continue;
+      const extra = kt.length - qt.length;
+      if (!best || extra < best.extra || (extra === best.extra && key.length < best.key.length)) {
+        best = { key, extra };
+      }
+    }
+    if (best && TV_LOGOS_MAP[best.key]) return TV_LOGOS_MAP[best.key];
+  }
+
+  return null;
+}
+
 function getChannelLogo(title) {
   if (!title) return null;
   const rawLower = String(title).toLowerCase().trim();
@@ -525,6 +629,13 @@ function getChannelLogo(title) {
       return deepMatch;
     }
     return `${CDN_BASE}/${deepMatch.replace(/^\/+/, '')}`;
+  }
+
+  // 5. Fuzzy match against the curated map (separator/suffix/spelling variants).
+  const fuzzy = resolveFuzzyMapMatch(title);
+  if (fuzzy) {
+    if (fuzzy.startsWith('http://') || fuzzy.startsWith('https://')) return fuzzy;
+    return `${CDN_BASE}/${fuzzy.replace(/^\/+/, '')}`;
   }
 
   return null;
