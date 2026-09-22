@@ -664,6 +664,16 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   // Clone manifest catalogs
   const newManifest = JSON.parse(JSON.stringify(manifest));
 
+  // Compact personalization params (see generateCollections): the Nuvio
+  // Collections export appends these to each row's manifestUrl, so they must
+  // mean the same thing as the config keys.
+  if (typeof req.query.rf === 'string' && req.query.rf.trim()) {
+    parsedConfig.replayFilter = req.query.rf.trim();
+  }
+  if (typeof req.query.lg === 'string' && req.query.lg.trim()) {
+    parsedConfig.languages = req.query.lg.trim();
+  }
+
   // ── Replay collection rows, injected here to stay under the 8kb manifest cap ──
   // The Stremio SDK rejects a manifest > 8192 bytes at build time, and the base
   // manifest already sits close to that ceiling. The sport-head catalogs are
@@ -757,14 +767,31 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   res.send(newManifest);
 });
 
+// Compact personalization params (rf = replayFilter, lg = languages).
+// generateCollections appends these to the manifestUrl it embeds in the Nuvio
+// Collections export, so every catalog/meta/stream request a collection makes
+// carries them. A full base64 config segment per row pushed that export past
+// Nuvio's paste size ceiling, hence the short params.
+function applyCompactParams(target, query) {
+  const out = target && typeof target === 'object' ? target : {};
+  if (query && typeof query.rf === 'string' && query.rf.trim()) out.replayFilter = query.rf.trim();
+  if (query && typeof query.lg === 'string' && query.lg.trim()) out.languages = query.lg.trim();
+  return out;
+}
+
 // The SDK router JSON.parses the raw config segment. Nuvio installs use a
 // base64url config, so rewrite it to URL-encoded JSON before the SDK sees it.
 app.use((req, res, next) => {
   const m = req.url.match(/^\/([A-Za-z0-9_-]+)(\/(?:catalog|meta|stream)\/.+)$/);
-  if (m && !m[1].startsWith('%7B')) {
-    const parsed = decodeConfigSegment(m[1]);
+  const rest = m ? m[2] : null;
+
+  // Fold the compact personalization params (rf/lg) into whatever config this
+  // request carries, then hand the SDK router a URL-encoded config segment.
+  const hasCompact = typeof req.query.rf === 'string' || typeof req.query.lg === 'string';
+  if (rest && (m[1] && !m[1].startsWith('%7B') || hasCompact)) {
+    const parsed = m[1] ? decodeConfigSegment(m[1]) : {};
     if (parsed !== null) {
-      req.url = `/${encodeURIComponent(JSON.stringify(parsed))}${m[2]}`;
+      req.url = `/${encodeURIComponent(JSON.stringify(applyCompactParams(parsed, req.query)))}${rest}`;
     }
   }
   next();
@@ -782,7 +809,10 @@ app.get([
 ], async (req, res, next) => {
   const { type, id } = req.params;
   if (id && id.startsWith('nuvio_sports_replays_') && id !== 'nuvio_sports_replays') {
-    const config = req.params.config ? decodeConfigSegment(req.params.config) : {};
+    const config = applyCompactParams(
+      req.params.config ? decodeConfigSegment(req.params.config) : {},
+      req.query
+    );
     let extra = {};
     if (req.params.extra) {
       try {

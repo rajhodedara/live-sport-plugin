@@ -169,16 +169,23 @@ function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
   const overrides = {};
   if (options && options.replayFilter) overrides.replayFilter = String(options.replayFilter);
   if (options && options.languages) overrides.languages = String(options.languages);
-  const hasOverrides = Object.keys(overrides).length > 0;
 
-  let effectiveSegment = config || '';
-  if (hasOverrides) {
-    const base = config ? (decodeConfigSegment(config) || {}) : {};
-    effectiveSegment = encodeConfigSegment(Object.assign({}, base, overrides));
-  }
-
-  const manifestPath = effectiveSegment ? `/${effectiveSegment}/manifest.json` : '/manifest.json';
-  const manifestUrl = `${cleanBaseUrl}${manifestPath}`;
+  // The rows' manifestUrl must carry the personalization, but it is written
+  // into EVERY folder/source pair (48 of them), so the encoding matters: a
+  // full base64 config segment repeated 48x pushed the exported document past
+  // Nuvio's paste size ceiling, which surfaced as a mid-document EOF parse
+  // error rather than a syntax error.
+  //
+  // When the request already carried a config segment it is reused verbatim in
+  // the path (no duplication, no recomputation). Explicit options are appended
+  // as two short query params instead of being merged into a second segment:
+  // `?rf=mainstream&lg=Spanish` costs a few bytes per row rather than ~41.
+  const manifestPath = config ? `/${config}/manifest.json` : '/manifest.json';
+  const manifestParams = new URLSearchParams();
+  if (overrides.replayFilter) manifestParams.set('rf', overrides.replayFilter);
+  if (overrides.languages) manifestParams.set('lg', overrides.languages);
+  const manifestQuery = manifestParams.toString();
+  const manifestUrl = `${cleanBaseUrl}${manifestPath}${manifestQuery ? `?${manifestQuery}` : ''}`;
 
   const folders = FOLDER_DEFINITIONS.map(def => {
     const coverImageUrl = `${cleanBaseUrl}${def.poster}?v=luffy`;
@@ -189,8 +196,11 @@ function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
       manifestUrl: manifestUrl,
       catalogId: cat.id,
       catalogName: cat.name,
-      name: cat.name,
-      title: cat.name,
+      // `name` and `title` were byte-identical duplicates of catalogName.
+      // With the config segment repeated in all 48 manifestUrls, the export
+      // had grown to ~20.5 kB, which Nuvio's paste import truncates (it
+      // reports EOF mid-document rather than a syntax error). One label is
+      // all the schema needs; the functional fields are unchanged.
       type: 'tv',
       showInHome: false
     }));
