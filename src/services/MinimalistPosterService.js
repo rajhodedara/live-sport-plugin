@@ -523,6 +523,21 @@ const CARD_HOT = '#ff7a1a';
 const CARD_HOT_SOFT = '#ff9a45';
 const CARD_SAFE_MARGIN = 44;
 
+/**
+ * Very faint diagonal terracing.
+ *
+ * Deliberate texture instead of a decorative blob or a white wash: it reads as a
+ * sports surface and adds depth without brightening the middle of the card.
+ */
+function pitchLines(w, h) {
+  const out = [];
+  const step = Math.max(48, Math.round(w / 12));
+  for (let x = -h; x < w + h; x += step) {
+    out.push('<line x1="' + x + '" y1="' + h + '" x2="' + (x + h) + '" y2="0" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>');
+  }
+  return out.join('');
+}
+
 function truncateLabel(value, maxChars) {
   const str = String(value === undefined || value === null ? '' : value).trim();
   if (!str) return '';
@@ -630,12 +645,20 @@ function generateMatchCardSvg(spec = {}) {
 
   const parts = [];
 
-  // ── Background layers ──
+  // ── Background ──
+  // One deep neutral base, one soft arena light in the sport accent, faint
+  // terracing for texture, then a bottom weight so the eye settles on the hero.
+  // Deliberately NOT a stack of coloured washes: warm glow + teal glow + a white
+  // streak + tint + vignette averaged into flat grey-brown and the teal fought
+  // the accent.
   parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#cardBg)"/>');
-  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#warmGlow)"/>');
-  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#coolGlow)"/>');
-  parts.push('<g transform="rotate(-13 ' + (w / 2) + ' ' + (h / 2) + ')"><rect x="' + (-w * 0.18) + '" y="' + (h * 0.33) + '" width="' + (w * 1.36) + '" height="' + (h * 0.20) + '" fill="url(#streak)"/></g>');
-  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#vignette)"/>');
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#arenaLight)"/>');
+  parts.push('<g>' + pitchLines(w, h) + '</g>');
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#floor)"/>');
+  // Per-sport identity, confined to the edges. A full-card tint desaturated the
+  // middle into grey; a corner wash keeps football and basketball cards
+  // distinguishable at a glance without touching the hero area.
+  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#sportTint)"/>');
 
   // ── Sport watermark (behind all content) ──
   const glyphOpacity = available === 0 ? 0.12 : 0.05;
@@ -644,13 +667,8 @@ function generateMatchCardSvg(spec = {}) {
   const gy = isPoster ? h - 190 : h - 120;
   parts.push('<g transform="translate(' + gx.toFixed(1) + ', ' + gy.toFixed(1) + ') scale(' + (glyphSize / 72).toFixed(2) + ')" opacity="' + glyphOpacity + '">' + sportGlyphMarkup(catKey) + '</g>');
 
-  // Per-sport identity: the sport accent now tints the card chrome, so a
-  // football card and a basketball card are distinguishable at a glance. The
-  // hot orange stays reserved for live/urgent signals.
-  parts.push('<rect width="' + w + '" height="' + h + '" fill="url(#sportTint)"/>');
-
   // ── Frame ──
-  parts.push('<rect x="1.5" y="1.5" width="' + (w - 3) + '" height="' + (h - 3) + '" rx="10" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="1.5"/>');
+  parts.push('<rect x="1.5" y="1.5" width="' + (w - 3) + '" height="' + (h - 3) + '" rx="10" fill="none" stroke="rgba(255,255,255,0.10)" stroke-width="1.5"/>');
   parts.push('<rect x="0" y="0" width="' + w + '" height="3" fill="' + accent + '" opacity="0.95"/>');
   parts.push('<rect x="0" y="0" width="' + (w * 0.42).toFixed(1) + '" height="3" fill="' + CARD_HOT + '" opacity="0.95"/>');
 
@@ -733,14 +751,14 @@ function generateMatchCardSvg(spec = {}) {
       parts.push('<rect x="' + (400 - heroRule / 2).toFixed(1) + '" y="264" width="' + heroRule.toFixed(1) + '" height="3" rx="1.5" fill="' + CARD_HOT + '" opacity="0.85"/>');
       parts.push(teamName(168, 312, team1, 21));
       parts.push(teamName(632, 312, team2, 21));
-      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 2) {
       parts.push(crest(200, 188, 104, badge1, team1));
       parts.push(crest(600, 188, 104, badge2, team2));
       parts.push(vsBadge(400, 188, 30));
       parts.push(teamName(200, 346, team1, 25));
       parts.push(teamName(600, 346, team2, 25));
-      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 1) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
@@ -748,9 +766,9 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(crest(400, 170, 96, shownBadge, shownName));
       parts.push(teamName(400, 312, shownName, 25));
       if (otherName) {
-        parts.push('<text x="400" y="350" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+        parts.push('<text x="400" y="350" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.60)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
       }
-      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else {
       // No fixture crests. If a channel logo exists it becomes the hero mark
       // (24/7 stations, where the logo IS the artwork); otherwise typographic.
@@ -771,7 +789,7 @@ function generateMatchCardSvg(spec = {}) {
           parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
         });
       }
-      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     }
   } else {
     // ── Poster (2:3): cinematic vertical stack ──
@@ -784,14 +802,14 @@ function generateMatchCardSvg(spec = {}) {
       parts.push('<rect x="' + (300 - heroRule / 2).toFixed(1) + '" y="338" width="' + heroRule.toFixed(1) + '" height="3" rx="1.5" fill="' + CARD_HOT + '" opacity="0.85"/>');
       parts.push(teamName(110, 390, team1, 20));
       parts.push(teamName(490, 390, team2, 20));
-      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 2) {
       parts.push(crest(186, 296, 78, badge1, team1));
       parts.push(crest(414, 296, 78, badge2, team2));
       parts.push(vsBadge(300, 296, 26));
       parts.push(teamName(186, 432, team1, 24));
       parts.push(teamName(414, 432, team2, 24));
-      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 1) {
       const shownBadge = badge1 || badge2;
       const shownName = badge1 ? team1 : team2;
@@ -799,9 +817,9 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(crest(300, 286, 80, shownBadge, shownName));
       parts.push(teamName(300, 424, shownName, 24));
       if (otherName) {
-        parts.push('<text x="300" y="462" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.42)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
+        parts.push('<text x="300" y="462" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.60)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
       }
-      parts.push('<line x1="' + margin + '" y1="532" x2="' + (w - margin) + '" y2="532" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="532" x2="' + (w - margin) + '" y2="532" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else {
       if (channelMark) {
         const heroName = truncateToWidth(spec.title || leagueName || channelName, 460, 34);
@@ -820,14 +838,14 @@ function generateMatchCardSvg(spec = {}) {
           parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
         });
       }
-      parts.push('<line x1="' + margin + '" y1="560" x2="' + (w - margin) + '" y2="560" stroke="rgba(255,255,255,0.10)" stroke-width="1"/>');
+      parts.push('<line x1="' + margin + '" y1="560" x2="' + (w - margin) + '" y2="560" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     }
   }
 
   // ── Footer: centred time + channel mark ──
   const footerY = isPoster ? h - 58 : 412;
   if (timeText) {
-    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="14" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.52)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
+    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="14" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.68)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
   }
   if (channelName || channelBadge) {
     const label = channelName.toUpperCase();
@@ -838,50 +856,50 @@ function generateMatchCardSvg(spec = {}) {
       px += 28;
     }
     if (label) {
-      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="12.5" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.38)">' + escapeXml(label) + '</text>');
+      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="12.5" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.58)">' + escapeXml(label) + '</text>');
     }
   }
 
   const defs = '<defs>' +
+    // Deep neutral graphite with a slight cool bias. Avoids both pure black and
+    // the warm brown cast the previous orange-based base introduced.
     '<linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">' +
-      '<stop offset="0%" stop-color="#170e08"/>' +
-      '<stop offset="100%" stop-color="#0a0605"/>' +
+      '<stop offset="0%" stop-color="#141821"/>' +
+      '<stop offset="52%" stop-color="#0d1017"/>' +
+      '<stop offset="100%" stop-color="#07090d"/>' +
     '</linearGradient>' +
-    '<radialGradient id="warmGlow" cx="22%" cy="58%" r="58%">' +
-      '<stop offset="0%" stop-color="' + CARD_HOT + '" stop-opacity="0.30"/>' +
-      '<stop offset="100%" stop-color="' + CARD_HOT + '" stop-opacity="0"/>' +
-    '</radialGradient>' +
-    '<radialGradient id="coolGlow" cx="84%" cy="40%" r="52%">' +
-      '<stop offset="0%" stop-color="#17c9b8" stop-opacity="0.22"/>' +
-      '<stop offset="100%" stop-color="#17c9b8" stop-opacity="0"/>' +
-    '</radialGradient>' +
-    '<linearGradient id="streak" x1="0%" y1="0%" x2="100%" y2="0%">' +
-      '<stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>' +
-      '<stop offset="45%" stop-color="#ffffff" stop-opacity="0.10"/>' +
-      '<stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>' +
-    '</linearGradient>' +
-    '<linearGradient id="nameFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
-      '<stop offset="0%" stop-color="#ffffff"/>' +
-      '<stop offset="100%" stop-color="#c6c1bb"/>' +
-    '</linearGradient>' +
-    // The hero score reads brightest at the top and falls off, so it holds up
-    // against the glow behind it without needing a plate.
-    '<linearGradient id="scoreFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
-      '<stop offset="0%" stop-color="#ffffff"/>' +
-      '<stop offset="72%" stop-color="#f4f6f8"/>' +
-      '<stop offset="100%" stop-color="#c9cdd4"/>' +
-    '</linearGradient>' +
-    // Per-sport identity tint: a low-opacity wash of the sport's accent colour.
-    '<radialGradient id="sportTint" cx="18%" cy="8%" r="85%">' +
-      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.16"/>' +
-      '<stop offset="55%" stop-color="' + accent + '" stop-opacity="0.04"/>' +
+    // A single soft overhead light in the sport accent. This is the only
+    // large-area colour on the card, so the accent never competes with itself.
+    '<radialGradient id="arenaLight" cx="50%" cy="-14%" r="92%">' +
+      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.22"/>' +
+      '<stop offset="42%" stop-color="' + accent + '" stop-opacity="0.06"/>' +
       '<stop offset="100%" stop-color="' + accent + '" stop-opacity="0"/>' +
     '</radialGradient>' +
-    // Gentle edge falloff so the card does not look flat at the corners.
-    '<radialGradient id="vignette" cx="50%" cy="46%" r="72%">' +
+    // Bottom weight: darkens toward the footer so the crests and hero sit on
+    // solid ground instead of floating in haze.
+    '<linearGradient id="floor" x1="0%" y1="0%" x2="0%" y2="100%">' +
       '<stop offset="0%" stop-color="#000000" stop-opacity="0"/>' +
-      '<stop offset="100%" stop-color="#000000" stop-opacity="0.34"/>' +
+      '<stop offset="62%" stop-color="#000000" stop-opacity="0.14"/>' +
+      '<stop offset="100%" stop-color="#000000" stop-opacity="0.52"/>' +
+    '</linearGradient>' +
+    // Per-sport identity: a corner-biased wash of the sport accent. Kept away
+    // from the centre so it never desaturates the hero.
+    '<radialGradient id="sportTint" cx="6%" cy="4%" r="78%">' +
+      '<stop offset="0%" stop-color="' + accent + '" stop-opacity="0.20"/>' +
+      '<stop offset="40%" stop-color="' + accent + '" stop-opacity="0.05"/>' +
+      '<stop offset="100%" stop-color="' + accent + '" stop-opacity="0"/>' +
     '</radialGradient>' +
+    '<linearGradient id="nameFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" stop-color="#ffffff"/>' +
+      '<stop offset="100%" stop-color="#c9cfda"/>' +
+    '</linearGradient>' +
+    // The hero score reads brightest at the top and falls off, so it holds up
+    // against the light behind it without needing a plate.
+    '<linearGradient id="scoreFill" x1="0%" y1="0%" x2="0%" y2="100%">' +
+      '<stop offset="0%" stop-color="#ffffff"/>' +
+      '<stop offset="72%" stop-color="#f2f5f9"/>' +
+      '<stop offset="100%" stop-color="#c2c9d6"/>' +
+    '</linearGradient>' +
   '</defs>';
 
   return '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="' + w + '" height="' + h + '" viewBox="0 0 ' + w + ' ' + h + '">\n  ' +

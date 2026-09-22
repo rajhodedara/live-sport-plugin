@@ -225,6 +225,66 @@ describe('24/7 channel logos resolve to live assets', () => {
   });
 });
 
+describe('card background: one light source, no colour soup', () => {
+  const { generateMatchCardSvg } = require('../src/services/MinimalistPosterService');
+
+  // The previous background stacked warm-orange glow + teal glow + a diagonal
+  // white streak + a per-sport tint + a vignette. Five overlapping washes
+  // averaged the middle into a desaturated grey-brown haze and the teal fought
+  // the sport accent. These pin the replacement contract.
+  const layers = (svg) => (svg.match(/fill="url\(#[a-zA-Z]+\)"/g) || []);
+
+  test('the competing coloured washes are gone', () => {
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' });
+    expect(svg).not.toContain('warmGlow');
+    expect(svg).not.toContain('coolGlow');
+    expect(svg).not.toContain('id="streak"');
+    expect(svg).not.toContain('id="vignette"');
+    // Teal must never appear as a competing accent.
+    expect(svg).not.toContain('#17c9b8');
+  });
+
+  test('the base is a deep neutral, not a warm black', () => {
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' });
+    expect(svg).toContain('id="cardBg"');
+    // The old warm values.
+    expect(svg).not.toContain('#170e08');
+    expect(svg).not.toContain('#0a0605');
+    expect(svg).toContain('#141821');
+  });
+
+  test('a single arena light carries the sport accent', () => {
+    const football = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' });
+    const hockey = generateMatchCardSvg({ category: 'hockey', team1: 'A', team2: 'B', status: 'live' });
+    expect(football).toContain('id="arenaLight"');
+    // Each sport still tints its own card (the identity the endpoint test checks).
+    const accentOf = (svg) => (svg.match(/id="sportTint"[^>]*>.*?stop-color="(#[0-9a-f]{6})"/) || [])[1];
+    expect(accentOf(football)).toBe('#10b981');
+    expect(accentOf(hockey)).toBe('#06b6d4');
+  });
+
+  test('there is a bottom weight so the hero is grounded', () => {
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' });
+    expect(svg).toContain('id="floor"');
+  });
+
+  test('background texture is faint, not a white haze', () => {
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live' });
+    // Terrace lines must stay well below any visible wash.
+    const m = svg.match(/stroke-opacity="([0-9.]+)"/);
+    expect(m).toBeTruthy();
+    expect(Number(m[1])).toBeLessThanOrEqual(0.05);
+  });
+
+  test('secondary text clears a readable contrast floor', () => {
+    const svg = generateMatchCardSvg({ category: 'football', team1: 'A', team2: 'B', status: 'live', time: '8:30 PM' });
+    // No text fill may sit below ~0.55 alpha on the dark base.
+    const fills = [...svg.matchAll(/<text[^>]*fill="rgba\(255,255,255,([0-9.]+)\)"/g)].map((m) => Number(m[1]));
+    expect(fills.length).toBeGreaterThan(0);
+    expect(Math.min(...fills)).toBeGreaterThanOrEqual(0.55);
+  });
+});
+
 describe('generated cards are self-contained (logos actually render)', () => {
   const { generateMatchCardSvg } = require('../src/services/MinimalistPosterService');
   // 1x1 transparent PNG stand-in for an inlined badge.
