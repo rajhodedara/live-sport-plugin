@@ -252,7 +252,19 @@ const MATCH_CARD_MEMO_MAX = 120;
 // SVG cards sit around 3-6 kb, so this is a guard rail, not a design target.
 const IMAGE_SVG_BUDGET_BYTES = 100 * 1024;
 
-app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res) => {
+async function sendRasterizedIfPossible(res, svg) {
+  try {
+    const sharp = require('sharp');
+    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    res.setHeader('Content-Type', 'image/png');
+    res.send(pngBuffer);
+  } catch (err) {
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    res.send(svg);
+  }
+}
+
+app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], async (req, res) => {
   const sport = (req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '');
   const candidatePaths = [
     path.join(__dirname, '..', 'public', 'posters', 'collections', `${sport}.jpg`),
@@ -270,29 +282,27 @@ app.get(['/img/collection/:sport', '/:config/img/collection/:sport'], (req, res)
     }
   }
   const svg = imageService.generateSportSvg(sport, 'landscape', { badge: 'REPLAYS' });
-  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(svg);
+  await sendRasterizedIfPossible(res, svg);
 });
 
-app.get(['/img/placeholder', '/:config/img/placeholder'], (req, res) => {
+app.get(['/img/placeholder', '/:config/img/placeholder'], async (req, res) => {
   // placeholderUrl() has always emitted &shape=... but this route ignored it,
   // so a 2:3 catalog row was served a 16:9 card. Honour it now.
   const shape = req.query.shape === 'poster' ? 'poster' : 'landscape';
   const svg = imageService.svgPlaceholder(req.query.text || 'Live Sports', req.query.color || '333333', undefined, undefined, shape);
-  res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(svg);
+  await sendRasterizedIfPossible(res, svg);
 });
 
 // /img/date?...          → generated date poster for one day of replays, so a
 //                          sport hub's date rows are visually distinct instead of
 //                          repeating the same sport JPEG for every date.
-app.get(['/img/date', '/:config/img/date'], (req, res) => {
+app.get(['/img/date', '/:config/img/date'], async (req, res) => {
   const shape = req.query.shape === 'landscape' ? 'landscape' : 'poster';
   const dateStr = typeof req.query.date === 'string' ? req.query.date.trim().slice(0, 60) : '';
   const parsedCount = parseInt(req.query.count, 10);
@@ -300,25 +310,23 @@ app.get(['/img/date', '/:config/img/date'], (req, res) => {
   const sport = typeof req.query.sport === 'string' ? req.query.sport.trim().toLowerCase().slice(0, 32) : '';
 
   const svg = imageService.generateDateSvg(dateStr || 'Replays', count, sport || null, shape);
-  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(svg);
+  await sendRasterizedIfPossible(res, svg);
 });
 
 // /img/sport/:sport      → generated per-sport archive card, used when no
 //                          curated sport poster exists on disk.
-app.get(['/img/sport/:sport', '/:config/img/sport/:sport'], (req, res) => {
+app.get(['/img/sport/:sport', '/:config/img/sport/:sport'], async (req, res) => {
   const shape = req.query.shape === 'landscape' ? 'landscape' : 'poster';
   const sport = String(req.params.sport || 'football').toLowerCase().replace(/\.(jpg|jpeg|png|svg)$/i, '').slice(0, 32);
 
   const svg = imageService.generateSportSvg(sport, shape, { badge: 'REPLAYS' });
-  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-  res.send(svg);
+  await sendRasterizedIfPossible(res, svg);
 });
 
 // /img/match?...         → composed "broadcast" match card. Used when a fixture
@@ -342,7 +350,11 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
 
   const cached = matchCardMemo.get(memoKey);
   if (cached) {
-    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    if (Buffer.isBuffer(cached)) {
+      res.setHeader('Content-Type', 'image/png');
+    } else {
+      res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    }
     return res.send(cached);
   }
 
@@ -497,10 +509,18 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   });
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
-  matchCardMemo.set(memoKey, svg);
 
-  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-  res.send(svg);
+  try {
+    const sharp = require('sharp');
+    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
+    matchCardMemo.set(memoKey, pngBuffer);
+    res.setHeader('Content-Type', 'image/png');
+    return res.send(pngBuffer);
+  } catch (err) {
+    matchCardMemo.set(memoKey, svg);
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    return res.send(svg);
+  }
 });
 
 // /img/badge?url=...     → a single cached crest as real binary, so composed
@@ -594,24 +614,22 @@ app.get('/img', async (req, res) => {
   <rect x="0" y="0" width="800" height="4" fill="${bg}" opacity="0.95"/>
   <rect x="0.5" y="0.5" width="799" height="449" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>
   ${chLabel ? `<text x="400" y="42" font-family="'Arial Narrow','Roboto Condensed',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="${bg}" text-anchor="middle">${chLabel.replace(/[&<>'"]/g, '')}</text>` : ''}
-  <image href="${imgUrl}" xlink:href="${imgUrl}" x="250" y="105" width="300" height="240" preserveAspectRatio="xMidYMid meet"/>
+  <image href="${imgUrl}" x="250" y="105" width="300" height="240" preserveAspectRatio="xMidYMid meet"/>
 </svg>`;
-      res.setHeader('Content-Type', 'image/svg+xml');
       // Belt-and-braces budget guard: if anything ever pushes this card past the
       // Stremio poster ceiling, degrade to the lightweight text card rather than
       // shipping an oversized poster the client may reject.
       if (Buffer.byteLength(svg, 'utf8') > IMAGE_SVG_BUDGET_BYTES) {
-        return res.send(imageService.svgPlaceholder(text, color));
+        return await sendRasterizedIfPossible(res, imageService.svgPlaceholder(text, color));
       }
-      return res.send(svg);
+      return await sendRasterizedIfPossible(res, svg);
     }
     res.setHeader('Content-Type', entry.contentType);
     return res.send(entry.buffer);
   }
   const svg = imageService.svgPlaceholder(text, color);
-  res.setHeader('Content-Type', 'image/svg+xml');
   res.setHeader('Cache-Control', 'public, max-age=300');
-  res.send(svg);
+  await sendRasterizedIfPossible(res, svg);
 });
 
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────

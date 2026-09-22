@@ -546,7 +546,16 @@ function truncateLabel(value, maxChars) {
 }
 
 function badgeImage(dataUri, x, y, size) {
-  return '<image href="' + dataUri + '" xlink:href="' + dataUri + '" x="' + x + '" y="' + y + '" width="' + size + '" height="' + size + '" preserveAspectRatio="xMidYMid meet"/>';
+  // Only `href` is emitted.
+  //
+  // A badge here is a data URI whose payload is raw base64 - the bulk of the card.
+  // Writing it into BOTH href and xlink:href duplicated the entire payload, so a
+  // channel card reached 226 kb. Stremio/Nuvio enforces a poster size budget and
+  // replaces an oversize poster with its own placeholder, while a browser (no such
+  // budget) rendered the same SVG perfectly. That is exactly "fine on the website,
+  // wrong in the app". xlink:href is the legacy form; every renderer that matters
+  // supports plain href.
+  return '<image href="' + dataUri + '" x="' + x + '" y="' + y + '" width="' + size + '" height="' + size + '" preserveAspectRatio="xMidYMid meet"/>';
 }
 
 function buildHeroLines(spec, team1, team2, maxChars) {
