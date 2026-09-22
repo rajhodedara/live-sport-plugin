@@ -238,7 +238,7 @@ const { resolveEmbedBase } = require('./services/EmbedBase');
  */
 async function entryToDataUri(entry) {
   if (!entry || !entry.buffer || !entry.contentType) return null;
-  if (entry.contentType.includes('webp') || entry.contentType.includes('avif')) {
+  if (entry.contentType !== 'image/png' && entry.contentType !== 'image/jpeg') {
     try {
       const sharp = require('sharp');
       entry.buffer = await sharp(entry.buffer).png().toBuffer();
@@ -399,17 +399,10 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     const v = qs(raw);
     if (!v) return null;
     const entry = await imageService.getImage(v);
-    if (entry && entry.buffer && entry.buffer.length <= INLINE_MAX_BYTES) {
+    if (entry && entry.buffer) {
       return await entryToDataUri(entry);
     }
-    let size = entry && entry.buffer ? entry.buffer.length : 0;
-    if (!size) {
-      const probe = await imageService.fetchImage(v);
-      if (!probe.ok) return null;   // genuinely dead -> omit so a plate is drawn
-      size = probe.bytes;
-    }
-    if (size > URL_MAX_BYTES || !embedBase) return null;
-    return `${embedBase}/img/badge?w=360&url=${encodeURIComponent(v)}`;
+    return null;
   };
 
   // Resolve a crest for a competitor name when the caller supplied none.
