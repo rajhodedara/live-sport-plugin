@@ -92,7 +92,14 @@ const manifest = {
       title: 'Timezone', 
       type: 'text',
       default: 'UTC'
-    }
+    },
+    // Preferred commentary languages, in order. Names or codes both work
+    // ("Spanish, Arabic, Hindi", "es, ar, hi"); English is always ranked first
+  // regardless.
+    { key: 'languages', title: 'Preferred Languages (comma separated, English always first)', type: 'text' },
+    // 'all' (default) lists every replay; 'mainstream' hides niche and
+    // lower-division fixtures from the replay catalogs and hubs.
+    { key: 'replayFilter', title: 'Replay Catalog (all or mainstream)', type: 'text', default: 'all' }
   ],
 
   idPrefixes: ['nuvio_sport_'],

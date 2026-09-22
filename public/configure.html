@@ -719,6 +719,66 @@
           <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false">
           <p class="hint">Comma separated. These fixtures are surfaced first.</p>
         </div>
+
+        <div class="field">
+          <label for="languages">Preferred languages</label>
+          <input type="text" id="languages" placeholder="Spanish, Arabic, Hindi" list="languageOptions" autocomplete="off" spellcheck="false">
+          <datalist id="languageOptions"></datalist>
+          <p class="hint">Comma separated. Names or ISO codes both work, for example Spanish or es. English is always shown first.</p>
+
+          <details class="crypto-details" style="margin-top:12px">
+            <summary>Which languages appear on streams?</summary>
+            <div style="font-size:12.5px; color: var(--faint); line-height:1.6; margin-top:10px">
+              <p>These are the commentary languages the providers actually serve. English is not listed because it is always shown first.</p>
+              <ul class="sport-list" id="languageList" style="margin:10px 0 4px">
+                <li>Loading&hellip;</li>
+              </ul>
+              <p>Other languages can still be typed and will be matched, but they are unlikely to appear on any stream.</p>
+            </div>
+          </details>
+        </div>
+
+        <div class="field">
+          <label for="replayFilter">Replay catalog</label>
+          <select id="replayFilter">
+            <option value="all">All replays</option>
+            <option value="mainstream">Mainstream only</option>
+          </select>
+          <p class="hint">All replays keeps every fixture the providers list. Mainstream only hides the ones nobody outside the local region follows.</p>
+
+          <details class="crypto-details" style="margin-top:12px">
+            <summary>What counts as mainstream?</summary>
+            <div style="font-size:12.5px; color: var(--faint); line-height:1.6; margin-top:10px">
+              <p><strong style="color:var(--text)">Shown (mainstream)</strong></p>
+              <ul class="sport-list" style="margin:8px 0 14px">
+                <li>Premier League</li>
+                <li>La Liga</li>
+                <li>Serie A</li>
+                <li>Bundesliga</li>
+                <li>Champions League</li>
+                <li>NBA</li>
+                <li>NFL</li>
+                <li>MLB</li>
+                <li>NHL</li>
+                <li>Formula 1</li>
+                <li>UFC</li>
+                <li>Wimbledon</li>
+              </ul>
+              <p><strong style="color:var(--text)">Hidden (not mainstream)</strong></p>
+              <ul class="sport-list" style="margin:8px 0 14px">
+                <li>La Liga 2</li>
+                <li>Serie B</li>
+                <li>2. Bundesliga</li>
+                <li>League One / Two</li>
+                <li>Regional &amp; county leagues</li>
+                <li>U-20 / U-21 / youth</li>
+                <li>Reserve &amp; B teams</li>
+                <li>Minor league (AHL, G League)</li>
+              </ul>
+              <p>Judged from the match name and competition, not from a fixed list. Famous clubs and the major US leagues are always kept, and a lower-division or youth fixture is hidden even when a big club is named in it (e.g. a reserve side like &ldquo;Real Madrid Castilla&rdquo;).</p>
+            </div>
+          </details>
+        </div>
       </section>
 
             <!-- 5 · Nuvio Sports Replay Connection -->
@@ -834,6 +894,8 @@
     const checkboxes = document.querySelectorAll('#sportsGrid input[type="checkbox"]');
     const sourceCheckboxes = document.querySelectorAll('#sourcesGrid input[type="checkbox"]');
     const timezoneSelect = document.getElementById('timezone');
+    const languagesInput = document.getElementById('languages');
+    const replayFilterSelect = document.getElementById('replayFilter');
     const configSummary = document.getElementById('configSummary');
     const installStatus = document.getElementById('installStatus');
 
@@ -917,6 +979,16 @@
       input.value = existingConfig.teams;
     }
 
+    // Preferred commentary languages, and the replay-catalog scope. Both are
+    // optional; blanks fall back to the defaults (English-first, all replays).
+    if (languagesInput && typeof existingConfig.languages === 'string') {
+      languagesInput.value = existingConfig.languages;
+    }
+
+    if (replayFilterSelect) {
+      replayFilterSelect.value = existingConfig.replayFilter === 'mainstream' ? 'mainstream' : 'all';
+    }
+
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
         checkboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
@@ -948,20 +1020,28 @@
     let effectiveOrigin = window.location.origin;
 
     // Renders the live summary chips from the current selections.
-    function renderSummary(selectedSports, selectedSources, tz) {
+    function renderSummary(selectedSports, selectedSources, tz, languages, replayFilter) {
       if (!configSummary) return;
+      // Values come straight from user input, so escape before interpolating
+      // into innerHTML.
+      const esc = (s) => String(s == null ? '' : s)
+        .replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
       const items = [
         { k: 'Sports', v: selectedSports.length === checkboxes.length ? 'All' : String(selectedSports.length) },
         { k: 'Sources', v: selectedSources.length === sourceCheckboxes.length ? 'All' : String(selectedSources.length) },
-        { k: 'Timezone', v: tz || 'n/a' }
+        { k: 'Timezone', v: tz || 'n/a' },
+        { k: 'Languages', v: languages || 'English only' },
+        { k: 'Replays', v: replayFilter === 'mainstream' ? 'Mainstream' : 'All' }
       ];
       configSummary.innerHTML = items
-        .map(i => '<li><span>' + i.k + '</span> <b>' + i.v + '</b></li>')
+        .map(i => '<li><span>' + esc(i.k) + '</span> <b>' + esc(i.v) + '</b></li>')
         .join('');
     }
 
     function updateLink() {
       const teams = input.value.trim();
+      const languages = languagesInput ? languagesInput.value.trim() : '';
+      const replayFilter = replayFilterSelect ? replayFilterSelect.value : 'all';
       const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
       const selectedSources = Array.from(sourceCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
       let tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -978,6 +1058,10 @@
       const config = {};
       if (teams) config.teams = teams;
       if (tz) config.timezone = tz;
+      // Only emit non-default values, mirroring how sports/sources are added
+      // only when narrowed. English-first and 'all' are baked in server-side.
+      if (languages) config.languages = languages;
+      if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
 
       if (selectedSports.length < checkboxes.length) {
         config.sports = selectedSports.join(',');
@@ -1004,7 +1088,7 @@
       if (manualUrl) manualUrl.value = manifestUrl;
       if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
 
-      renderSummary(selectedSports, selectedSources, tz);
+      renderSummary(selectedSports, selectedSources, tz, languages, replayFilter);
 
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
@@ -1105,6 +1189,11 @@
 
     input.addEventListener('input', updateLink);
     timezoneSelect.addEventListener('change', updateLink);
+    // The two personalization controls must re-derive the addon URL the same
+    // way teams/timezone do; without these listeners typing a language or
+    // changing the replay scope left the copied link on its previous config.
+    if (languagesInput) languagesInput.addEventListener('input', updateLink);
+    if (replayFilterSelect) replayFilterSelect.addEventListener('change', updateLink);
     [...checkboxes, ...sourceCheckboxes].forEach(cb => {
       cb.addEventListener('change', (e) => {
         const label = e.target.closest('.checkbox-label');
@@ -1115,6 +1204,40 @@
     });
 
     updateLink();
+
+    // Surface the languages the providers actually serve. /api/options derives
+    // them from ChannelCountryService server-side, so this list cannot drift
+    // from what streams really carry. Failure is non-fatal: the field still
+    // accepts free text, it just loses autocomplete.
+    (async () => {
+      try {
+        const res = await fetch('/api/options', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const langs = Array.isArray(data.languages) ? data.languages : [];
+        if (langs.length === 0) return;
+
+        const dl = document.getElementById('languageOptions');
+        if (dl) {
+          dl.innerHTML = langs.map(l => {
+            const o = document.createElement('option');
+            o.value = l;
+            return o.outerHTML;
+          }).join('');
+        }
+
+        const list = document.getElementById('languageList');
+        if (list) {
+          list.innerHTML = langs.map(l => {
+            const li = document.createElement('li');
+            li.textContent = l;
+            return li.outerHTML;
+          }).join('');
+        }
+      } catch (_) {
+        /* autocomplete is a nicety; never let it break the page */
+      }
+    })();
 
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       fetch('/api/server-info')

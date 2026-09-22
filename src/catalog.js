@@ -5,6 +5,7 @@ const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const { parseTimezone } = require('./timezone');
 const { getMatchTier } = require('./services/MainstreamRankingService');
+const { filterReplayMatches } = require('./services/ReplayFilterService');
 
 function getKickoff(d) {
   if (!d) return 0;
@@ -655,7 +656,15 @@ async function buildReplayHubMeta(id, config = {}) {
       if (synced && synced.length > 0) rawMatches = synced;
     } catch (_) {}
   }
-  const replayMatches = rawMatches.filter(m => isReplayMatch(m) && m.sources && m.sources.some(s => REPLAY_SOURCES.has(s.source)));
+  const replayMatches = filterReplayMatches(
+    rawMatches.filter(m => isReplayMatch(m) && m.sources && m.sources.some(s => REPLAY_SOURCES.has(s.source))),
+    config
+  );
+  // When replayFilter === 'mainstream' the hubs legitimately narrow to the
+  // mainstream set — a day with no mainstream replays yields an empty video
+  // list, which the code below already renders as a valid meta with no videos.
+  // The sync trigger above is deliberately left untouched so the no-config
+  // behaviour (and when the aggregator fires) stays exactly as before.
 
   // Case A: Date Hub (e.g. nuvio_sport_replay_date_2026-09-16 or nuvio_sport_replay_football_date_2026-09-16)
   if (id.includes('_date_')) {
@@ -894,6 +903,13 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     }
     return m.category === targetSport;
   });
+
+  // Personalization: `replayFilter: 'mainstream'` narrows the listing to
+  // mainstream fixtures. Applied here — immediately after the replay-capability
+  // requirements and BEFORE the date/competition windows, search and pagination
+  // — so it composes with them instead of bypassing or reordering them, and so
+  // `skip` pages the filtered set exactly as it pages the unfiltered one.
+  matches = filterReplayMatches(matches, config);
 
   // Apply sub-filters
   const dateMatch = filterType.match(/(?:date_)?(\d{4}-\d{2}-\d{2})/);

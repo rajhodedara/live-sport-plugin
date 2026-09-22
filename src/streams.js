@@ -2,6 +2,7 @@ const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
 const { rewriteHlsUri } = require('./services/HlsRewriteService');
+const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 
@@ -865,18 +866,14 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Hid ${hidden} non-RZ web fallback(s) — ${directOnly.length} stream(s) kept`);
   }
 
-  // English first, then unknown, then other languages.
-  const langTier = (s) => (s.language === 'English' ? 0 : (s.language ? 2 : 1));
+  // Ordering is: direct stream, then language rank, then rankScore.
+  // Language rank is English (always first) -> the languages the user listed in
+  // config.languages, in order -> unknown -> other known languages. With no
+  // config that is exactly the old English -> unknown -> other ordering; see
+  // LanguagePriorityService for the ranking and the alias handling.
+  const languagePriorities = parseLanguagePriority(config);
 
-  streams.sort((a, b) => {
-    const aIsDirect = a.name === '⚡ Direct Stream' ? 1 : 0;
-    const bIsDirect = b.name === '⚡ Direct Stream' ? 1 : 0;
-    if (aIsDirect !== bIsDirect) return bIsDirect - aIsDirect;
-    const lt = langTier(a) - langTier(b);
-    if (lt) return lt;
-    const rankScore = (stream) => ((stream.score || 0) * 0.8) + ((stream.speedScore ?? 50) * 0.2);
-    return rankScore(b) - rankScore(a);
-  });
+  streams.sort((a, b) => compareStreams(a, b, languagePriorities));
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
   // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
