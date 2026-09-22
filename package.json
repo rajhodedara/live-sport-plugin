@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node dist/index.js",
     "dev": "node --watch-path=src src/index.js",
-    "build": "npx @vercel/ncc build src/index.js -o dist --minify && npx -y copyfiles -f \"src/providers/*.wasm\" \"src/providers/*.js\" dist && npx -y copyfiles -u 2 \"resolver/src/**/*\" dist/src && node -e \"require('fs').writeFileSync('dist/src/package.json', JSON.stringify({type:'module'},null,2))\" && npx -y copyfiles -u 1 \"public/**/*\" dist/public",
+    "build": "npx @vercel/ncc build src/index.js -o dist --minify && npx -y copyfiles -f \"src/providers/*.wasm\" \"src/providers/*.js\" dist && npx -y copyfiles -u 2 \"resolver/src/**/*\" dist/src && node -e \"require('fs').writeFileSync('dist/src/package.json', JSON.stringify({type:'module'},null,2))\" && npx -y copyfiles -u 1 \"public/**/*\" dist/public && npx -y copyfiles -f \"src/data/*.json\" dist/data && npx -y copyfiles -f \"src/data/*.json\" dist/src/data",
     "test": "jest",
     "test:e2e-client": "node scripts/test-e2e-simulated-client.js",
     "test:sanity": "node scripts/test-e2e-simulated-client.js",

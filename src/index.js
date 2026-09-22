@@ -533,28 +533,42 @@ app.get('/img', async (req, res) => {
       const imgUrl = entryToDataUri(entry);
       const cleanTitle = String(text || '').replace(/\b(24\/7|live|stream|raw|hd)\b/gi, '').trim();
       const showTitle = cleanTitle.length > 0 && cleanTitle.length <= 36;
+      // Broadcast Slate. This card previously carried its OWN near-black gradient
+      // (#191c24 -> #090a0d) with a coloured bar top and bottom, so the 24/7
+      // channel and broadcast cards looked nothing like the redesigned fixture
+      // cards. Its stretched 560x320 logo box is also what ghosted the artwork.
+      // It now shares the fixture card's ground, light, texture, scaling rule and
+      // single top accent.
+      const chLabel = (() => {
+        const t = String(text || '').trim();
+        return t && t.length <= 30 ? t.toUpperCase() : '';
+      })();
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="450" viewBox="0 0 800 450">
   <defs>
-    <linearGradient id="cardBg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#191c24"/>
-      <stop offset="50%" stop-color="#111319"/>
-      <stop offset="100%" stop-color="#090a0d"/>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#232a36"/>
+      <stop offset="58%" stop-color="#1a202b"/>
+      <stop offset="100%" stop-color="#141922"/>
     </linearGradient>
-    <radialGradient id="spotlight" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.10"/>
-      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.02"/>
-      <stop offset="100%" stop-color="#000000" stop-opacity="0.45"/>
+    <radialGradient id="arenaLight" cx="50%" cy="-14%" r="92%">
+      <stop offset="0%" stop-color="${bg}" stop-opacity="0.22"/>
+      <stop offset="42%" stop-color="${bg}" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="${bg}" stop-opacity="0"/>
     </radialGradient>
-    <filter id="logoShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000000" flood-opacity="0.75"/>
-    </filter>
+    <linearGradient id="floor" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="60%" stop-color="#000000" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.36"/>
+    </linearGradient>
   </defs>
   <rect width="800" height="450" fill="url(#cardBg)"/>
-  <rect width="800" height="450" fill="url(#spotlight)"/>
-  <rect x="0" y="0" width="800" height="4" fill="${bg}"/>
-  <rect x="0" y="446" width="800" height="4" fill="${bg}"/>
-  ${showTitle ? `<text x="50%" y="38" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" font-weight="700" letter-spacing="2" fill="rgba(255,255,255,0.72)" text-anchor="middle">${cleanTitle.toUpperCase().replace(/[&<>'"]/g, '')}</text>` : ''}
-  <image href="${imgUrl}" xlink:href="${imgUrl}" x="120" y="55" width="560" height="320" preserveAspectRatio="xMidYMid meet" filter="url(#logoShadow)"/>
+  <rect width="800" height="450" fill="url(#arenaLight)"/>
+  ${Array.from({ length: 23 }, (_, i) => '<line x1="' + (-450 + i * 67) + '" y1="450" x2="' + (i * 67) + '" y2="0" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>').join('')}
+  <rect width="800" height="450" fill="url(#floor)"/>
+  <rect x="0" y="0" width="800" height="4" fill="${bg}" opacity="0.95"/>
+  <rect x="0.5" y="0.5" width="799" height="449" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>
+  ${chLabel ? `<text x="400" y="42" font-family="'Arial Narrow','Roboto Condensed',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="${bg}" text-anchor="middle">${chLabel.replace(/[&<>'"]/g, '')}</text>` : ''}
+  <image href="${imgUrl}" xlink:href="${imgUrl}" x="250" y="105" width="300" height="240" preserveAspectRatio="xMidYMid meet"/>
 </svg>`;
       res.setHeader('Content-Type', 'image/svg+xml');
       // Belt-and-braces budget guard: if anything ever pushes this card past the

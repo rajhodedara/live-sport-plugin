@@ -18,9 +18,23 @@ const { safeFetch } = require('../impitClient');
 
 // The committed SEED of curated crests. Read-only at runtime; it is the base
 // every instance starts from.
+/**
+ * Candidate locations for the committed crest seed.
+ *
+ * __dirname is not reliable here: the production bundle is built with ncc into a
+ * single dist/index.js, so a path relative to __dirname resolves outside the
+ * tree and the committed seed silently never loaded. Every plausible layout is
+ * therefore tried, including paths relative to the working directory (PM2 starts
+ * the app from the repository root).
+ */
 const SEED_FILES = [
+  path.join(process.cwd(), 'src', 'data', 'team_logos_seed.json'),
+  path.join(process.cwd(), 'data', 'team_logos_seed.json'),
   path.join(__dirname, '..', 'data', 'team_logos_seed.json'),
+  path.join(__dirname, 'data', 'team_logos_seed.json'),
+  path.join(__dirname, '..', 'src', 'data', 'team_logos_seed.json'),
   // Backward compatibility with the pre-split layout.
+  path.join(process.cwd(), 'src', 'data', 'team_logos_cache.json'),
   path.join(__dirname, '..', 'data', 'team_logos_cache.json')
 ];
 

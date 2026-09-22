@@ -225,6 +225,48 @@ describe('24/7 channel logos resolve to live assets', () => {
   });
 });
 
+describe('the embed card shares the fixture design', () => {
+  // /img?embed=1 powers the 24/7 channel and broadcast cards (DAZN Ligue 1,
+  // Canal+ MotoGP, France vs Romania). It used to carry its OWN near-black
+  // gradient, so those cards looked nothing like the redesigned fixture cards.
+  test('the embed generator uses the Broadcast Slate ground, not its old black', () => {
+    // Assert on the markup, not on prose (the file documents the old values in a
+    // comment, which is fine and intentional).
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).not.toContain('stop-color="#191c24"');
+    expect(source).not.toContain('stop-color="#090a0d"');
+    expect(source).not.toContain('id="spotlight"');
+    expect(source).not.toContain('url(#spotlight)');
+    // It must reuse the same tokens as the fixture card.
+    expect(source).toContain('id="arenaLight"');
+    expect(source).toContain('stop-color="#232a36"');
+  });
+
+  test('the embed card no longer stretches the logo into a wide box', () => {
+    // A 560x320 box with xMidYMid meet is what ghosted broadcast artwork.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).not.toContain('width="560" height="320"');
+  });
+});
+
+describe('the committed crest seed survives the deploy', () => {
+  test('the seed is resolved from several locations, not just __dirname', () => {
+    // The bundle is built with ncc into dist/index.js, so a path relative to
+    // __dirname resolved outside the tree and the seed silently never loaded in
+    // production. Resolution must not depend on a single built-time layout.
+    const source = fs.readFileSync(require.resolve('../src/services/TeamLogoService'), 'utf8');
+    expect(source).toContain("path.join(process.cwd(), 'src', 'data', 'team_logos_seed.json')");
+    expect(source).toContain("path.join(process.cwd(), 'data', 'team_logos_seed.json')");
+    const candidates = (source.match(/team_logos_seed\.json/g) || []).length;
+    expect(candidates).toBeGreaterThanOrEqual(3);
+  });
+
+  test('the build copies the data directory into dist', () => {
+    const pkg = require('../package.json');
+    expect(pkg.scripts.build).toContain('src/data/*.json');
+  });
+});
+
 describe('card background: one light source, no colour soup', () => {
   const { generateMatchCardSvg } = require('../src/services/MinimalistPosterService');
 
