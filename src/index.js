@@ -490,16 +490,17 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   };
 
   const badges = await resolveAll();
-  const svg = imageService.generateMatchCardSvg({
+
+  const renderCard = (b) => imageService.generateMatchCardSvg({
     category: qs(query.cat),
     title: qs(query.title),
     team1: qs(query.t1),
     team2: qs(query.t2),
-    badge1: badges.badge1,
-    badge2: badges.badge2,
-    leagueBadge: badges.leagueBadge,
-    channelBadge: badges.channelBadge,
-    channelMark: badges.channelMark,
+    badge1: b.badge1,
+    badge2: b.badge2,
+    leagueBadge: b.leagueBadge,
+    channelBadge: b.channelBadge,
+    channelMark: b.channelMark,
     league: qs(query.lg),
     channel: qs(query.ch),
     status: qs(query.st),
@@ -507,6 +508,18 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     score: qs(query.sc),
     shape
   });
+
+  // Size guard. The client budget is about 100 kb, and a poster it deems oversize
+  // is REPLACED by the client's own placeholder - which is what made an oversize
+  // card show as a generic gradient in the app while rendering fine in a browser.
+  // Inlined crests are the bulk of the payload, so if the card is oversize, drop
+  // the two team crests (largest first) rather than shipping something the client
+  // will reject outright.
+  const CARD_BUDGET_BYTES = 90 * 1024;
+  let svg = renderCard(badges);
+  if (Buffer.byteLength(svg, 'utf8') > CARD_BUDGET_BYTES && (badges.badge1 || badges.badge2)) {
+    svg = renderCard({ ...badges, badge1: null, badge2: null });
+  }
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
 
@@ -614,7 +627,7 @@ app.get('/img', async (req, res) => {
   <rect x="0" y="0" width="800" height="4" fill="${bg}" opacity="0.95"/>
   <rect x="0.5" y="0.5" width="799" height="449" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>
   ${chLabel ? `<text x="400" y="42" font-family="'Arial Narrow','Roboto Condensed',Arial,sans-serif" font-size="15" font-weight="700" letter-spacing="3" fill="${bg}" text-anchor="middle">${chLabel.replace(/[&<>'"]/g, '')}</text>` : ''}
-  <image href="${imgUrl}" x="250" y="105" width="300" height="240" preserveAspectRatio="xMidYMid meet"/>
+  <image href="${imgUrl}" xlink:href="${imgUrl}" x="250" y="105" width="300" height="240" preserveAspectRatio="xMidYMid meet"/>
 </svg>`;
       // Belt-and-braces budget guard: if anything ever pushes this card past the
       // Stremio poster ceiling, degrade to the lightweight text card rather than

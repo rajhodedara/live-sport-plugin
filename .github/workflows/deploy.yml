@@ -24,6 +24,8 @@ jobs:
             git reset --hard HEAD
             echo "==> Pulling latest changes from main..."
             git pull origin main
+            echo "==> Installing dependencies (sharp is required for raster posters)..."
+            npm install --no-audit --no-fund
             echo "==> Building distribution bundle..."
             npm run build
             echo "==> Reloading PM2 cluster with zero downtime..."
