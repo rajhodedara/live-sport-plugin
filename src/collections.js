@@ -131,9 +131,53 @@ function getSportCatalogs(def) {
   return [...def.catalogs];
 }
 
-function generateCollections(baseUrl = BASE_URL, config = '') {
+/** Encodes a config object to the base64url segment the addon URLs use. */
+function encodeConfigSegment(obj) {
+  return Buffer.from(JSON.stringify(obj), 'utf8').toString('base64')
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Decodes a base64url config segment; null when it is not a config object. */
+function decodeConfigSegment(segment) {
+  try {
+    let b = String(segment).replace(/-/g, '+').replace(/_/g, '/');
+    while (b.length % 4) b += '=';
+    const parsed = JSON.parse(Buffer.from(b, 'base64').toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    return parsed;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Builds the Nuvio Collections JSON.
+ *
+ * `options` lets the caller force personalization into the rows' manifestUrl
+ * (e.g. { replayFilter: 'mainstream' }). This matters because every collection
+ * row queries its OWN manifestUrl: if that URL carries no config, an imported
+ * collection silently ignores the user's replay scope. Explicit options are
+ * merged over any config segment already in the URL, so a bare
+ * /collections.json?replayFilter=mainstream import still honours the filter.
+ *
+ * With no options the pre-existing behaviour is preserved exactly: the segment
+ * is used verbatim.
+ */
+function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
   const cleanBaseUrl = (baseUrl || '').replace(/\/+$/, '');
-  const manifestPath = config ? `/${config}/manifest.json` : '/manifest.json';
+
+  const overrides = {};
+  if (options && options.replayFilter) overrides.replayFilter = String(options.replayFilter);
+  if (options && options.languages) overrides.languages = String(options.languages);
+  const hasOverrides = Object.keys(overrides).length > 0;
+
+  let effectiveSegment = config || '';
+  if (hasOverrides) {
+    const base = config ? (decodeConfigSegment(config) || {}) : {};
+    effectiveSegment = encodeConfigSegment(Object.assign({}, base, overrides));
+  }
+
+  const manifestPath = effectiveSegment ? `/${effectiveSegment}/manifest.json` : '/manifest.json';
   const manifestUrl = `${cleanBaseUrl}${manifestPath}`;
 
   const folders = FOLDER_DEFINITIONS.map(def => {

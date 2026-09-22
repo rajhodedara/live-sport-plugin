@@ -1081,6 +1081,18 @@
         downloadUrl = window.location.origin + '/' + encoded + '/api/collections/download';
       }
 
+      // Pin the replay scope (and languages) onto the Collections import URL as
+      // well. Every collection row queries its own manifestUrl, so without this
+      // an imported collection would ignore the filter when the URL carries no
+      // config segment.
+      {
+        const colParams = new URLSearchParams();
+        if (config.languages) colParams.set('languages', config.languages);
+        if (config.replayFilter) colParams.set('replayFilter', config.replayFilter);
+        const colQuery = colParams.toString();
+        if (colQuery) collectionsUrl += (collectionsUrl.includes('?') ? '&' : '?') + colQuery;
+      }
+
       currentManifestUrl = manifestUrl;
       currentCollectionsUrl = collectionsUrl;
       // Keep the manual field in sync. It is the guaranteed path on

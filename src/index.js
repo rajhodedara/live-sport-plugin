@@ -118,7 +118,13 @@ const REPLAY_MANIFEST_ROWS = [
 app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.json', '/:config/nuvio-collections.json'], (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   const config = req.params.config || '';
-  const collections = generateCollections(reqBaseUrl, config);
+  // Explicit query overrides let a bare collections URL still pin the replay
+  // scope, since each row queries its own manifestUrl.
+  const options = {
+    replayFilter: typeof req.query.replayFilter === 'string' ? req.query.replayFilter : undefined,
+    languages: typeof req.query.languages === 'string' ? req.query.languages : undefined,
+  };
+  const collections = generateCollections(reqBaseUrl, config, options);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
@@ -128,7 +134,11 @@ app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.j
 app.get(['/api/collections/download', '/:config/api/collections/download'], (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   const config = req.params.config || '';
-  const collections = generateCollections(reqBaseUrl, config);
+  const options = {
+    replayFilter: typeof req.query.replayFilter === 'string' ? req.query.replayFilter : undefined,
+    languages: typeof req.query.languages === 'string' ? req.query.languages : undefined,
+  };
+  const collections = generateCollections(reqBaseUrl, config, options);
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="nuvio-sports-collections.json"');
   res.setHeader('Access-Control-Allow-Origin', '*');
