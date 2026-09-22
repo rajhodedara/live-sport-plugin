@@ -22,7 +22,13 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const IMAGE_TTL_MS = 10 * 60 * 1000;   // 10 minutes
 const CACHE_MAX_ENTRIES = 120;
 const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 3000;
+// Total per-request cap (headers + body). This was 3000 ms, which is tight for a
+// CDN logo: jsDelivr routinely exceeds it under load, so a perfectly good logo
+// failed, went into the 60 s negative cache, and the card fell back to the
+// placeholder - showing as "no logo AND the old background". The retrying
+// probe used for rendering decisions already gets 2x this, so lifting the base
+// keeps the slow-loris protection while removing the spurious failures.
+const FETCH_TIMEOUT_MS = 8000;
 
 const cache = new Map();     // url -> { buffer, contentType, expiresAt }
 const inFlight = new Map();  // url -> Promise
@@ -75,23 +81,37 @@ function svgPlaceholder(text, color, w = 800, h = 450, shape = 'landscape') {
     return `<text x="50%" y="${y.toFixed(1)}" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="${fontSize}" font-weight="700" letter-spacing="1.5" fill="#f8fafc" text-anchor="middle" dominant-baseline="middle">${escapeXml(l)}</text>`;
   }).join('\n  ');
 
+  // Broadcast Slate, matching the generated cards exactly. This is the fallback
+  // whenever an upstream logo cannot be fetched, so if it keeps an older look the
+  // result is precisely "cards with a logo use the new design, cards without one
+  // do not". Same ground, same accent light, same terrace texture, same hard edge
+  // and top bar as the fixture and embed cards.
+  const terrace = Array.from({ length: Math.ceil((w + h) / 67) + 2 }, (_, i) =>
+    `<line x1="${(-h + i * 67).toFixed(0)}" y1="${h}" x2="${(i * 67 - h + h).toFixed(0)}" y2="0" stroke="#ffffff" stroke-opacity="0.035" stroke-width="1"/>`).join('');
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
   <defs>
-    <linearGradient id="holderBg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#141a29"/>
-      <stop offset="60%" stop-color="#0d111c"/>
-      <stop offset="100%" stop-color="#080a11"/>
+    <linearGradient id="holderBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#232a36"/>
+      <stop offset="58%" stop-color="#1a202b"/>
+      <stop offset="100%" stop-color="#141922"/>
     </linearGradient>
-    <radialGradient id="holderSpot" cx="50%" cy="50%" r="55%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.06"/>
-      <stop offset="60%" stop-color="#ffffff" stop-opacity="0.01"/>
-      <stop offset="100%" stop-color="transparent"/>
+    <radialGradient id="holderLight" cx="50%" cy="-14%" r="92%">
+      <stop offset="0%" stop-color="${bg}" stop-opacity="0.22"/>
+      <stop offset="42%" stop-color="${bg}" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="${bg}" stop-opacity="0"/>
     </radialGradient>
+    <linearGradient id="holderFloor" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="60%" stop-color="#000000" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.36"/>
+    </linearGradient>
   </defs>
   <rect width="${w}" height="${h}" fill="url(#holderBg)"/>
-  <rect width="${w}" height="${h}" fill="url(#holderSpot)"/>
-  <rect x="1.5" y="1.5" width="${w - 3}" height="${h - 3}" rx="12" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="1.5"/>
-  <rect x="${(w - 60) / 2}" y="10" width="60" height="3" rx="1.5" fill="${bg}" opacity="0.85"/>
+  <rect width="${w}" height="${h}" fill="url(#holderLight)"/>
+  ${terrace}
+  <rect width="${w}" height="${h}" fill="url(#holderFloor)"/>
+  <rect x="0" y="0" width="${w}" height="4" fill="${bg}" opacity="0.95"/>
+  <rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>
   ${textEls}
 </svg>`;
 }
