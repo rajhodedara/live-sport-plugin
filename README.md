@@ -2,7 +2,7 @@
   <img src="public/logo.png" width="120" height="120" alt="Nuvio Live Sports Logo">
 </p>
 
-# 🔴 Nuvio Live Sports Plugin
+# 🔴 Nuvio Live Sports Addon
 
 [![Ko-fi](https://img.shields.io/badge/Support_on_Ko--fi-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/rajodedara)
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/rajhodedara/live-sport-plugin)
