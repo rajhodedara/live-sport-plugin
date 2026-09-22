@@ -183,7 +183,30 @@ const TEAM_ALIASES = {
   'cowboys': 'Dallas Cowboys',
   'yankees': 'New York Yankees',
   'dodgers': 'Los Angeles Dodgers',
-  'red sox': 'Boston Red Sox'
+  'red sox': 'Boston Red Sox',
+  // Arabic / Middle East clubs — providers often hyphenate or double-spell consonants
+  'al-shabbab': 'Al Shabab',
+  'al shabbab': 'Al Shabab',
+  'al-shabab': 'Al Shabab',
+  'alshabbab': 'Al Shabab',
+  'al-fateh': 'Al-Fateh',
+  'alfateh': 'Al-Fateh',
+  'al-ahli': 'Al Ahli',
+  'al ahli saudi': 'Al Ahli',
+  'al-ittihad': 'Al Ittihad',
+  'al ittihad': 'Al Ittihad',
+  'al-hilal': 'Al Hilal',
+  'al hilal sa': 'Al Hilal',
+  'al-nassr': 'Al Nassr',
+  'al nassr fc': 'Al Nassr',
+  'al-qadsiah': 'Al Qadsiah',
+  'al-taawoun': 'Al Taawoun',
+  'al-feiha': 'Al Feiha',
+  'al-khaleej': 'Al Khaleej',
+  'al-riyadh': 'Al Riyadh',
+  'al-ettifaq': 'Al Ettifaq',
+  'bahrain sc': 'Bahrain SC',
+  'bahrain club': 'Bahrain SC'
 };
 
 // ─── 3. Instant Curated Top Badges ──────────────────────────────────────────────

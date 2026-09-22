@@ -545,14 +545,24 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     png = await rasterize(svg);
   }
 
-  if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
+  // Don't memoize a logo-less card when team names are present — it just means
+  // the async logo lookups were still in-flight on first render. The next request
+  // will retry and find the cached logo. Without this guard the empty-badge card
+  // gets permanently stuck in memo and every subsequent render is logo-less too.
+  const hasTeamNames = qs(query.t1) || qs(query.t2);
+  const hasBadges = badgesToUse.badge1 || badgesToUse.badge2;
+  const shouldMemo = !hasTeamNames || hasBadges;
+
+  if (shouldMemo) {
+    if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
+  }
 
   if (png) {
-    matchCardMemo.set(memoKey, png);
+    if (shouldMemo) matchCardMemo.set(memoKey, png);
     res.setHeader('Content-Type', 'image/png');
     return res.send(png);
   }
-  matchCardMemo.set(memoKey, svg);
+  if (shouldMemo) matchCardMemo.set(memoKey, svg);
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   return res.send(svg);
 });
