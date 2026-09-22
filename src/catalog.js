@@ -318,6 +318,42 @@ function normalizeImageUrl(url, defaultHost = '') {
   return `${defaultHost}/${u}`;
 }
 
+/**
+ * Derive the two competitors from a fixture title.
+ *
+ * Several providers (tennis singles is the common case: "WTA - Singles: A vs B")
+ * publish a head-to-head title but never populate team1/team2. Without names the
+ * card has no fixture shape at all and degrades to a bare text tile, so this
+ * recovers them from the title.
+ *
+ * Only unambiguous fixture separators are used ("vs", "vs.", "v", "@"). Dash
+ * separators are deliberately NOT split on: motorsport and show titles such as
+ * "Nascar Cup Series 2026 - Hollywood Casino 400" are "X - Y" shaped but are not
+ * two competitors.
+ *
+ * @param {string} title
+ * @returns {[string,string]|null}
+ */
+function extractTeamsFromTitle(title) {
+  if (!title || typeof title !== 'string') return null;
+  const vsRe = /\s+(?:vs\.?|v|@)\s+/i;
+  if (!vsRe.test(title)) return null;
+
+  // Category prefixes such as "WTA - Singles:" name the competition, not a
+  // competitor, so drop everything up to the final colon before splitting.
+  let t = title.trim();
+  const colon = t.lastIndexOf(':');
+  if (colon > 0 && colon < t.length - 3) t = t.slice(colon + 1).trim();
+
+  const parts = t.split(vsRe);
+  if (parts.length !== 2) return null;
+  const a = parts[0].trim();
+  const b = parts[1].trim();
+  const plausible = (s) => s.length >= 2 && s.length <= 48 && /[A-Za-z0-9]/.test(s);
+  if (!plausible(a) || !plausible(b)) return null;
+  return [a, b];
+}
+
 function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const isLive = isMatchLive(match);
   const isReplay = !isLive && isReplayMatch(match);
@@ -342,13 +378,18 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     college: 'd946ef' // fuchsia
   };
   const color = categoryColors[match.category] || '333333';
-  
+
+  // Competitor names, filled from the title when the provider omitted them.
+  const derivedTeams = extractTeamsFromTitle(match.title);
+  const team1Name = (match.team1 && match.team1.name) || (derivedTeams ? derivedTeams[0] : null);
+  const team2Name = (match.team2 && match.team2.name) || (derivedTeams ? derivedTeams[1] : null);
+
   // Channel logos come from the unified ChannelLogoService (tv-logos CDN + Wikimedia).
 
   // Generate a clean, readable fallback poster using the match title
   let posterText = match.title;
-  if (match.team1 && match.team2 && match.team1.name && match.team2.name) {
-      posterText = `${match.team1.name}\nvs\n${match.team2.name}`;
+  if (team1Name && team2Name) {
+      posterText = `${team1Name}\nvs\n${team2Name}`;
   } else if (isReplay) {
       // Replay titles are session titles ("A @ B - League - Full Game Replay -
       // September 14, 2026"), not "X vs Y" fixtures. Split on the first dash so
@@ -414,19 +455,19 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     } catch (_) {}
 
     // A. Fallback team crest from TheSportsDB / Cache
-    if (match.team1 && match.team1.name && teamLogoService) {
-      fallbackTeamLogo = teamLogoService.getCachedLogo(match.team1.name);
+    if (team1Name && teamLogoService) {
+      fallbackTeamLogo = teamLogoService.getCachedLogo(team1Name);
       if (!fallbackTeamLogo) {
-        teamLogoService.findTeamLogo(match.team1.name).catch(() => {});
+        teamLogoService.findTeamLogo(team1Name).catch(() => {});
       }
     }
 
     // A2. Same for the away side. The second crest was previously never
     // resolved, which left composed cards half-empty.
-    if (match.team2 && match.team2.name && teamLogoService) {
-      fallbackTeamLogo2 = teamLogoService.getCachedLogo(match.team2.name);
+    if (team2Name && teamLogoService) {
+      fallbackTeamLogo2 = teamLogoService.getCachedLogo(team2Name);
       if (!fallbackTeamLogo2) {
-        teamLogoService.findTeamLogo(match.team2.name).catch(() => {});
+        teamLogoService.findTeamLogo(team2Name).catch(() => {});
       }
     }
 
@@ -469,14 +510,14 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     // resolved channel logo lands on the HERO slot for channel-style entries —
     // otherwise a 24/7 station renders as a big text card with its logo reduced
     // to a 20px footer chip, which reads as "no logo".
-    const isChannelLike = !match.team1 && !match.team2;
+    const isChannelLike = !team1Name && !team2Name;
     const channelMark = broadcasterLogo || channelLogo;
 
     poster = imageService.matchCardUrl(BASE_URL, {
       category: match.category,
       title: match.title,
-      team1: match.team1 && match.team1.name,
-      team2: match.team2 && match.team2.name,
+      team1: team1Name,
+      team2: team2Name,
       // For channel entries the logo becomes the hero mark.
       badge1: isChannelLike ? null : (providerTeamLogo || fallbackTeamLogo),
       badge2: isChannelLike ? null : (providerTeamLogo2 || fallbackTeamLogo2),
@@ -556,8 +597,8 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const scoreSuffix = match.score ? ` (${match.score})` : '';
   const prefix = isReplay ? '⏪ ' : (isLive ? (is247 ? '📺 ' : '🔴 LIVE: ') : '⏱️ ');
   const cast = [];
-  if (match.team1 && match.team1.name) cast.push(match.team1.name);
-  if (match.team2 && match.team2.name) cast.push(match.team2.name);
+  if (team1Name) cast.push(team1Name);
+  if (team2Name) cast.push(team2Name);
 
   const replayReleaseInfo = dateString || (match.date && typeof match.date === 'string' && match.date !== '0' ? match.date.slice(0, 10) : 'Replay');
 

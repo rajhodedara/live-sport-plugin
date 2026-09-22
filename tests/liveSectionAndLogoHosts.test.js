@@ -272,6 +272,55 @@ describe('generated cards do not pin stale artwork for 24h', () => {
   });
 });
 
+describe('team names are recovered from the title when providers omit them', () => {
+  const { mapMatchToMetaPreview } = require('../src/catalog');
+  const base = { id: 'x', category: 'tennis', status: 'upcoming', sources: [{ source: 'streamedpk', id: '1' }] };
+  const teamsOf = (title) => {
+    const meta = mapMatchToMetaPreview({ ...base, title, date: String(Date.now() + 3600e3) }, {}, 'tv');
+    const u = new URL(meta.poster);
+    return [u.searchParams.get('t1'), u.searchParams.get('t2')];
+  };
+
+  test('a tennis head-to-head title yields both competitors', () => {
+    // These arrived from the provider with no team1/team2, so the card had no
+    // fixture shape and degraded to a bare text tile.
+    expect(teamsOf('WTA - Singles: Barbora Krejcikova vs Anna-Lena Friedsam'))
+      .toEqual(['Barbora Krejcikova', 'Anna-Lena Friedsam']);
+    expect(teamsOf('HC Taifun U20 vs Krylya Sovetov Moscow U20'))
+      .toEqual(['HC Taifun U20', 'Krylya Sovetov Moscow U20']);
+    expect(teamsOf('Tuskegee Golden Tigers vs Benedict Tigers'))
+      .toEqual(['Tuskegee Golden Tigers', 'Benedict Tigers']);
+  });
+
+  test('the derived competitors reach cast and the crest lookup', () => {
+    const meta = mapMatchToMetaPreview({
+      ...base, title: 'WTA - Singles: Alina Charaeva vs Sofia Kenin', date: String(Date.now() + 3600e3)
+    }, {}, 'tv');
+    expect(meta.cast).toEqual(['Alina Charaeva', 'Sofia Kenin']);
+  });
+
+  test('dash-separated event titles are NOT split into fake competitors', () => {
+    // Motorsport and show titles are "X - Y" shaped but are not head-to-heads.
+    for (const t of ['Formula 1 2026 - Azerbaijan GP', 'Nascar Cup Series 2026 - Hollywood Casino 400', '2026 NASCAR Cup Series Playoff at Kansas']) {
+      expect(teamsOf(t)).toEqual([null, null]);
+    }
+  });
+
+  test('a plain channel name yields no competitors', () => {
+    expect(teamsOf('CNN')).toEqual([null, null]);
+  });
+
+  test('an explicit provider team pair still wins over the title', () => {
+    const meta = mapMatchToMetaPreview({
+      ...base, category: 'football', title: 'Some Promo String vs Other',
+      team1: { name: 'Arsenal' }, team2: { name: 'Chelsea' }, date: String(Date.now() + 3600e3)
+    }, {}, 'tv');
+    const u = new URL(meta.poster);
+    expect(u.searchParams.get('t1')).toBe('Arsenal');
+    expect(u.searchParams.get('t2')).toBe('Chelsea');
+  });
+});
+
 describe('logo map integrity and fuzzy channel matching', () => {
   const { getChannelLogo } = require('../src/services/ChannelLogoService');
   const logoMap = require('../src/data/tv_logos_map.json');
