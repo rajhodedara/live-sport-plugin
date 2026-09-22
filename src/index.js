@@ -509,31 +509,52 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     shape
   });
 
-  // Size guard. The client budget is about 100 kb, and a poster it deems oversize
-  // is REPLACED by the client's own placeholder - which is what made an oversize
-  // card show as a generic gradient in the app while rendering fine in a browser.
-  // Inlined crests are the bulk of the payload, so if the card is oversize, drop
-  // the two team crests (largest first) rather than shipping something the client
-  // will reject outright.
-  const CARD_BUDGET_BYTES = 90 * 1024;
-  let svg = renderCard(badges);
-  if (Buffer.byteLength(svg, 'utf8') > CARD_BUDGET_BYTES && (badges.badge1 || badges.badge2)) {
-    svg = renderCard({ ...badges, badge1: null, badge2: null });
+  // Size guard - measured on what is ACTUALLY DELIVERED.
+  //
+  // The client budget is about 100 kb, and a poster the client deems oversize is
+  // replaced by its own placeholder. Inlined crests are the bulk of the payload, so
+  // an oversize card is rebuilt without the two team crests.
+  //
+  // The measurement must be taken on the delivered artefact, not the intermediate
+  // SVG: when sharp is present the client receives a rasterised PNG, and the raw
+  // SVG is irrelevant (and is roughly twice as large, because every data URI is
+  // written into both href and xlink:href). Measuring the SVG stripped the crests
+  // off cards that would have been delivered well inside budget - which is exactly
+  // how replay cards lost their logos while the guard was in place.
+  const CARD_BUDGET_BYTES = 96 * 1024;
+
+  const rasterize = async (svgText) => {
+    try {
+      const sharp = require('sharp');
+      return await sharp(Buffer.from(svgText)).png().toBuffer();
+    } catch (_) {
+      return null;
+    }
+  };
+
+  let badgesToUse = badges;
+  let svg = renderCard(badgesToUse);
+  let png = await rasterize(svg);
+
+  // Only the delivered form is budgeted. Fall back to the SVG size only when
+  // rasterisation is unavailable, because then the SVG is what ships.
+  const deliveredSize = png ? png.length : Buffer.byteLength(svg, 'utf8');
+  if (deliveredSize > CARD_BUDGET_BYTES && (badgesToUse.badge1 || badgesToUse.badge2)) {
+    badgesToUse = { ...badgesToUse, badge1: null, badge2: null };
+    svg = renderCard(badgesToUse);
+    png = await rasterize(svg);
   }
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
 
-  try {
-    const sharp = require('sharp');
-    const pngBuffer = await sharp(Buffer.from(svg)).png().toBuffer();
-    matchCardMemo.set(memoKey, pngBuffer);
+  if (png) {
+    matchCardMemo.set(memoKey, png);
     res.setHeader('Content-Type', 'image/png');
-    return res.send(pngBuffer);
-  } catch (err) {
-    matchCardMemo.set(memoKey, svg);
-    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
-    return res.send(svg);
+    return res.send(png);
   }
+  matchCardMemo.set(memoKey, svg);
+  res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+  return res.send(svg);
 });
 
 // /img/badge?url=...     → a single cached crest as real binary, so composed

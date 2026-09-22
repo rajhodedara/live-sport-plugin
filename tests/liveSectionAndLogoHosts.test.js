@@ -225,6 +225,20 @@ describe('24/7 channel logos resolve to live assets', () => {
   });
 });
 
+describe('the poster budget guard measures the delivered artefact', () => {
+  test('it does not strip crests based on the intermediate SVG size', () => {
+    // The guard originally compared the raw SVG length. With sharp present the
+    // client receives a rasterised PNG (a fraction of the SVG, because every data
+    // URI is written twice - href and xlink:href), so measuring the SVG stripped
+    // the crests off replay cards that would have shipped well inside budget.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).toContain('rasterize');
+    expect(source).toContain('const deliveredSize = png ? png.length : Buffer.byteLength(svg');
+    // The old form (svg-only comparison) must be gone.
+    expect(source).not.toContain("if (Buffer.byteLength(svg, 'utf8') > CARD_BUDGET_BYTES");
+  });
+});
+
 describe('channel cards resolve a crest on demand too', () => {
   test('the card endpoint falls back to the channel TITLE when no crest is supplied', () => {
     // The mapper fills cm/cb from a SYNCHRONOUS cache lookup only, so a channel
