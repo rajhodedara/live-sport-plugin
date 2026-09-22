@@ -5,6 +5,7 @@ const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const { parseTimezone } = require('./timezone');
 const { getMatchTier } = require('./services/MainstreamRankingService');
+const { extractTeamsFromTitle } = require('./services/TeamNameExtractor');
 const { filterReplayMatches } = require('./services/ReplayFilterService');
 
 function getKickoff(d) {
@@ -316,42 +317,6 @@ function normalizeImageUrl(url, defaultHost = '') {
   if (u.startsWith('http://') || u.startsWith('https://')) return u;
   if (u.startsWith('/')) return `${defaultHost}${u}`;
   return `${defaultHost}/${u}`;
-}
-
-/**
- * Derive the two competitors from a fixture title.
- *
- * Several providers (tennis singles is the common case: "WTA - Singles: A vs B")
- * publish a head-to-head title but never populate team1/team2. Without names the
- * card has no fixture shape at all and degrades to a bare text tile, so this
- * recovers them from the title.
- *
- * Only unambiguous fixture separators are used ("vs", "vs.", "v", "@"). Dash
- * separators are deliberately NOT split on: motorsport and show titles such as
- * "Nascar Cup Series 2026 - Hollywood Casino 400" are "X - Y" shaped but are not
- * two competitors.
- *
- * @param {string} title
- * @returns {[string,string]|null}
- */
-function extractTeamsFromTitle(title) {
-  if (!title || typeof title !== 'string') return null;
-  const vsRe = /\s+(?:vs\.?|v|@)\s+/i;
-  if (!vsRe.test(title)) return null;
-
-  // Category prefixes such as "WTA - Singles:" name the competition, not a
-  // competitor, so drop everything up to the final colon before splitting.
-  let t = title.trim();
-  const colon = t.lastIndexOf(':');
-  if (colon > 0 && colon < t.length - 3) t = t.slice(colon + 1).trim();
-
-  const parts = t.split(vsRe);
-  if (parts.length !== 2) return null;
-  const a = parts[0].trim();
-  const b = parts[1].trim();
-  const plausible = (s) => s.length >= 2 && s.length <= 48 && /[A-Za-z0-9]/.test(s);
-  if (!plausible(a) || !plausible(b)) return null;
-  return [a, b];
 }
 
 function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {

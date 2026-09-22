@@ -150,6 +150,8 @@ function _tryExtractTeams(title) {
 
 // ────────────────────────────────────────────────────────────────────────────
 
+const { extractTeamsFromTitle } = require('./TeamNameExtractor');
+
 class MatchAggregator {
   constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider }) {
     this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : [])];
@@ -400,6 +402,25 @@ class MatchAggregator {
 
     console.log(`[MatchAggregator] Sync complete. Merged ${activeMatches.length} active events.`);
     if (anyProviderSucceeded) {
+      // Backfill competitors derived from the title before persisting. Providers
+      // that publish a head-to-head title without team1/team2 (tennis singles,
+      // some cup ties) were otherwise invisible to crest enrichment, so their
+      // crests were never warmed and the card had no fixture shape on first
+      // render. With the names present the enrichment pass below covers them and
+      // the names survive into the persisted cache.
+      let backfilled = 0;
+      for (const m of activeMatches) {
+        if (!m || (m.team1 && m.team2)) continue;
+        const derived = extractTeamsFromTitle(m.title);
+        if (!derived) continue;
+        if (!m.team1) m.team1 = { name: derived[0] };
+        if (!m.team2) m.team2 = { name: derived[1] };
+        backfilled++;
+      }
+      if (backfilled > 0) {
+        console.log(`[MatchAggregator] Derived competitors for ${backfilled} title-only fixture(s).`);
+      }
+
       this.cacheService.setMatches(activeMatches);
 
       if (this.teamLogoService) {
