@@ -238,7 +238,7 @@ const { resolveEmbedBase } = require('./services/EmbedBase');
  */
 async function entryToDataUri(entry) {
   if (!entry || !entry.buffer || !entry.contentType) return null;
-  if (entry.contentType !== 'image/png' && entry.contentType !== 'image/jpeg') {
+  if (entry.contentType.includes('webp') || entry.contentType.includes('avif')) {
     try {
       const sharp = require('sharp');
       entry.buffer = await sharp(entry.buffer).png().toBuffer();
