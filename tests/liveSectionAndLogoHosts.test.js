@@ -243,6 +243,21 @@ describe('channel cards resolve a crest on demand too', () => {
   });
 });
 
+describe('a crest miss must stay retryable', () => {
+  test('the name->crest memo never caches a miss', () => {
+    // Caching a miss pinned a team to "no logo" for the worker's whole lifetime
+    // (one throttle was enough), which is the "team A has a crest but B is
+    // missing" symptom. A miss has to be retryable; TeamLogoService already
+    // negative-caches correctly one layer down.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).toContain('if (url) {');
+    expect(source).toContain('LOGO_BY_NAME.set(key, url);');
+    expect(source).not.toContain('LOGO_BY_NAME.set(key, url);\n    return url;');
+    // and it must be bounded
+    expect(source).toContain('LOGO_BY_NAME_MAX');
+  });
+});
+
 describe('the embed card shares the fixture design', () => {
   // /img?embed=1 powers the 24/7 channel and broadcast cards (DAZN Ligue 1,
   // Canal+ MotoGP, France vs Romania). It used to carry its OWN near-black

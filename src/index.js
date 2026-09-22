@@ -401,7 +401,17 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   // Resolving here makes the card correct the first time it is drawn. Genuine
   // misses are negatively cached by TeamLogoService, so an unknown name costs at
   // most one lookup per cache lifetime.
+  // Memoised name -> crest. Only SUCCESSES are cached.
+  //
+  // Caching a miss here was a real defect: this map lives for the worker's
+  // lifetime, so a single failure (a throttled lookup, or a crest that had not
+  // been warmed yet) pinned that team to "no logo" forever on that worker - which
+  // is exactly the "team A has a crest, team B is missing" symptom. Negative
+  // caching is already handled correctly a layer down, by TeamLogoService's 24h
+  // negative TTL, so a miss here is cheap and must stay retryable.
+  // Bounded as well, since this otherwise grows with every name ever requested.
   const LOGO_BY_NAME = new Map();
+  const LOGO_BY_NAME_MAX = 2000;
   const resolveNameToCrest = async (name) => {
     const key = qs(name);
     if (!key) return null;
@@ -412,7 +422,10 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
       url = teamLogoService.getCachedLogo(key);
       if (!url) url = await teamLogoService.findTeamLogo(key);
     } catch (_) { url = null; }
-    LOGO_BY_NAME.set(key, url);
+    if (url) {
+      if (LOGO_BY_NAME.size >= LOGO_BY_NAME_MAX) LOGO_BY_NAME.clear();
+      LOGO_BY_NAME.set(key, url);
+    }
     return url;
   };
 
