@@ -283,7 +283,18 @@ class DaddyLiveProvider extends BaseProvider {
     //    first query param and dropping "e"/"sig", which the CDN rejects with
     //    403. _cleanManifestUrl unescapes afterwards.
     const directMatch = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
-    if (directMatch && directMatch[1]) return { url: _cleanManifestUrl(directMatch[1]), referer: pageUrl, strategy: 'direct' };
+    const escapedMatch = html.match(/(https?:\\\/\\\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+    const configMatch = html.match(/streamUrl:\s*["']([^"']+)["']/i);
+    
+    if (configMatch && configMatch[1]) {
+      return { url: _cleanManifestUrl(configMatch[1]), referer: pageUrl, strategy: 'config' };
+    }
+    if (directMatch && directMatch[1]) {
+      return { url: _cleanManifestUrl(directMatch[1]), referer: pageUrl, strategy: 'direct' };
+    }
+    if (escapedMatch && escapedMatch[1]) {
+      return { url: _cleanManifestUrl(escapedMatch[1]), referer: pageUrl, strategy: 'escaped' };
+    }
 
     if (depth >= DaddyLiveProvider.MAX_EMBED_DEPTH) return null;
 
@@ -400,7 +411,7 @@ class DaddyLiveProvider extends BaseProvider {
       // Self-healing: when THIS page supplied the manifest directly, the strategy
       // that worked is a fact about THIS host - remember it. Recursive strategies
       // (json-hop / nested) are learned on the deeper host by the recursive call.
-      if (result && this.domainRegistry && ['econfig', 'chain', 'direct'].includes(result.strategy)) {
+      if (result && this.domainRegistry && ['econfig', 'chain', 'direct', 'config', 'escaped'].includes(result.strategy)) {
         this._learnHostStrategy(embedUrl, result.strategy, 'embed');
       }
 
