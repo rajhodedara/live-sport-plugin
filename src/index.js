@@ -434,6 +434,16 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     const badge1 = given1 || byName1;
     const badge2 = given2 || byName2;
 
+    // Channel / 24-7 cards have no t1/t2. The mapper fills cm/cb from a
+    // synchronous cache lookup only, so a channel whose name is not in the
+    // curated map arrives with NO logo - even though the live lookup resolves it
+    // (Boston Red Sox, Canal, MAX and the MLB team channels all do). Resolve the
+    // title the same way the competitor names are resolved.
+    let channelMark = channelMark0;
+    if (!channelMark && !badge1 && !badge2 && qs(query.title)) {
+      channelMark = await resolveNameToCrest(query.title).then(resolveBadge);
+    }
+
     // The same asset is routinely requested twice (a channel logo is both the
     // hero mark and the footer chip). Only one reference is kept per asset so the
     // payload does not carry it twice.
@@ -446,7 +456,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     };
     const leagueBadge = dedupe(leagueBadge0);
     const channelBadge = dedupe(channelBadge0);
-    const channelMark = dedupe(channelMark0);
+    channelMark = dedupe(channelMark);
 
     return { badge1, badge2, leagueBadge, channelBadge, channelMark };
   };

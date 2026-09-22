@@ -225,6 +225,24 @@ describe('24/7 channel logos resolve to live assets', () => {
   });
 });
 
+describe('channel cards resolve a crest on demand too', () => {
+  test('the card endpoint falls back to the channel TITLE when no crest is supplied', () => {
+    // The mapper fills cm/cb from a SYNCHRONOUS cache lookup only, so a channel
+    // whose name is not curated (Boston Red Sox, Canal, MAX, the MLB team
+    // channels) shipped with no logo params at all - even though the live lookup
+    // resolves all of them. The on-demand resolver used to cover t1/t2 only.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    expect(source).toContain("!badge1 && !badge2 && qs(query.title)");
+    expect(source).toContain('resolveNameToCrest(query.title)');
+  });
+
+  test('channel rows are included in the crest warm-up pass', () => {
+    // Channel/24-7 rows have no team1, so they were skipped by enrichment.
+    const source = fs.readFileSync(require.resolve('../src/services/MatchAggregator'), 'utf8');
+    expect(source).toContain("m.category === 'networks'");
+  });
+});
+
 describe('the embed card shares the fixture design', () => {
   // /img?embed=1 powers the 24/7 channel and broadcast cards (DAZN Ligue 1,
   // Canal+ MotoGP, France vs Romania). It used to carry its OWN near-black

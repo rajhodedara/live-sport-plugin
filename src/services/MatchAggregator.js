@@ -429,7 +429,12 @@ class MatchAggregator {
 // their crest warmed and rendered crest-less. enrichMatch is I/O bound but runs
 // concurrently and is fire-and-forget, and TeamLogoService negative-caches
 // misses, so a much larger window is safe.
-        const enrichable = activeMatches.filter(m => (m.team1 && m.team1.name && !m.team1.logo) || !m.logo).slice(0, 600);
+        // Channel/24-7 rows have no team1, so they were never warmed even though the
+        // live lookup resolves most of them. Include them via their title.
+        const enrichable = activeMatches.filter(m => {
+          if (m.category === 'networks' || (!m.team1 && !m.team2)) return !!m.title && !m.logo;
+          return (m.team1 && m.team1.name && !m.team1.logo) || !m.logo;
+        }).slice(0, 600);
         Promise.allSettled(enrichable.map(m => this.teamLogoService.enrichMatch(m))).catch(() => {});
       }
 
