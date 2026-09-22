@@ -460,6 +460,9 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     // The same asset is routinely requested twice (a channel logo is both the
     // hero mark and the footer chip). Only one reference is kept per asset so the
     // payload does not carry it twice.
+    // NOTE: channelMark (the hero slot) is deduplicated BEFORE channelBadge (the
+    // footer chip). Both typically point to the same image; the hero must win the
+    // seen-set so the centred logo is embedded — not silently wiped by the footer.
     const seen = new Set();
     const dedupe = (value) => {
       if (!value) return value;
@@ -467,9 +470,9 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
       seen.add(value);
       return value;
     };
-    const leagueBadge = dedupe(leagueBadge0);
-    const channelBadge = dedupe(channelBadge0);
-    channelMark = dedupe(channelMark);
+    const leagueBadge  = dedupe(leagueBadge0);
+    channelMark        = dedupe(channelMark);    // hero mark gets priority
+    const channelBadge = dedupe(channelBadge0); // footer chip deduped after
 
     return { badge1, badge2, leagueBadge, channelBadge, channelMark };
   };

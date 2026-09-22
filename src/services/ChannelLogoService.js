@@ -136,6 +136,40 @@ const CHANNEL_LOGOS = {
   "nova sports premier league": `${CDN_BASE}/countries/greece/nova-sports-1-gr.png`,
   "nova sports premier league greece": `${CDN_BASE}/countries/greece/nova-sports-1-gr.png`,
   "chicago sports network": `${CDN_BASE}/countries/united-states/nbc-sports-chicago-us.png`,
+
+  // --- Broadcast networks and UK terrestrial channels ---
+  // Every path below was verified to return 200 image/* from the CDN. Compound
+  // names ("ABC Sports") previously fell through the deep resolver even though a
+  // bare "ABC" resolved, which is why some of these cards had no logo.
+  "abc": `${CDN_BASE}/countries/united-states/abc-us.png`,
+  "abc sports": `${CDN_BASE}/countries/united-states/abc-us.png`,
+  "abc news": `${CDN_BASE}/countries/united-states/abc-news-us.png`,
+  "nbc": `${CDN_BASE}/countries/united-states/nbc-us.png`,
+  "cbs": `${CDN_BASE}/countries/united-states/cbs-logo-white-us.png`,
+  "fox": `${CDN_BASE}/countries/united-states/fox-us.png`,
+  "cw": `${CDN_BASE}/countries/united-states/cw-us.png`,
+  "pbs": `${CDN_BASE}/countries/united-states/pbs-us.png`,
+  "bbc sport": `${CDN_BASE}/countries/united-kingdom/bbc-one-uk.png`,
+  "bbc sports": `${CDN_BASE}/countries/united-kingdom/bbc-one-uk.png`,
+  "bbc one": `${CDN_BASE}/countries/united-kingdom/bbc-one-uk.png`,
+  "bbc two": `${CDN_BASE}/countries/united-kingdom/bbc-two-uk.png`,
+  "bbc three": `${CDN_BASE}/countries/united-kingdom/bbc-three-uk.png`,
+  "bbc four": `${CDN_BASE}/countries/united-kingdom/bbc-four-uk.png`,
+  "bbc news": `${CDN_BASE}/countries/united-kingdom/bbc-news-uk.png`,
+  "bbc": `${CDN_BASE}/countries/united-kingdom/bbc-one-uk.png`,
+  "itv": `${CDN_BASE}/countries/united-kingdom/itv-uk.png`,
+  "itv 2": `${CDN_BASE}/countries/united-kingdom/itv-2-uk.png`,
+  "itv 4": `${CDN_BASE}/countries/united-kingdom/itv-4-uk.png`,
+  "channel 4": `${CDN_BASE}/countries/united-kingdom/channel-4-uk.png`,
+  "channel 5": `${CDN_BASE}/countries/united-kingdom/channel-5-uk.png`,
+  "cinemax": `${CDN_BASE}/countries/croatia/cinemax-hr.png`,
+  "cinemax 2": `${CDN_BASE}/countries/croatia/cinemax2-hr.png`,
+  "tbs": `${CDN_BASE}/countries/united-states/tbs-us.png`,
+  "tnt": `${CDN_BASE}/countries/united-states/tnt-us.png`,
+  "nickelodeon": `${CDN_BASE}/countries/united-states/nickelodeon-us.png`,
+  "nick": `${CDN_BASE}/countries/united-states/nick-us.png`,
+  "nick jr": `${CDN_BASE}/countries/united-states/nick-jr-us.png`,
+  "nick toons": `${CDN_BASE}/countries/united-states/nick-toons-us.png`,
 };
 
 // Aliases for common alternative channel spellings and feed titles

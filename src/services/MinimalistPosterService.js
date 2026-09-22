@@ -790,9 +790,26 @@ function generateMatchCardSvg(spec = {}) {
         }
       } else {
         const heroLines = buildHeroLines(spec, team1, team2, 22);
-        const fs = heroLines.length >= 3 ? 36 : heroLines.length === 2 ? 46 : 54;
-        const lh = fs + 16;
-        const startY = 200 - ((heroLines.length - 1) * lh) / 2;
+        const isMatchup = heroLines.some(l => l.toUpperCase() === 'VS');
+        
+        if (!isMatchup) {
+          // Pure typographic card (e.g. cycling events: "MTS Caravan", "CRO Race Stage 1",
+          // any single-entity event with no team/channel structure).
+          // Show the sport glyph prominently centred as a visual anchor so the card
+          // doesn't look empty — the event title sits below it.
+          const glyphDisplaySize = 120;
+          const glyphScale = (glyphDisplaySize / 72).toFixed(2);
+          const glyphCX = w / 2 - glyphDisplaySize / 2;
+          const glyphCY = 120;
+          parts.push('<g transform="translate(' + glyphCX.toFixed(1) + ',' + glyphCY.toFixed(1) + ') scale(' + glyphScale + ')" opacity="0.40">' + sportGlyphMarkup(catKey) + '</g>');
+        }
+
+        // Use original larger font sizes and centred position if it's a matchup,
+        // otherwise use smaller sizes shifted down to accommodate the glyph.
+        const fs = heroLines.length >= 3 ? (isMatchup ? 36 : 28) : heroLines.length === 2 ? (isMatchup ? 46 : 36) : (isMatchup ? 54 : 42);
+        const lh = fs + (isMatchup ? 16 : 14);
+        const startY = (isMatchup ? 200 : 285) - ((heroLines.length - 1) * lh) / 2;
+        
         heroLines.forEach((line, i) => {
           const isVs = line.toUpperCase() === 'VS';
           parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
@@ -839,9 +856,22 @@ function generateMatchCardSvg(spec = {}) {
         }
       } else {
         const heroLines = buildHeroLines(spec, team1, team2, 16);
-        const fs = heroLines.length >= 3 ? 38 : heroLines.length === 2 ? 48 : 56;
+        const isMatchup = heroLines.some(l => l.toUpperCase() === 'VS');
+        
+        if (!isMatchup) {
+          // Pure typographic card — show sport glyph prominently centred above the title
+          // so the poster has visual identity (e.g. cycling events: MTS Caravan, CRO Race Stage 1).
+          const glyphDisplaySize = 140;
+          const glyphScale = (glyphDisplaySize / 72).toFixed(2);
+          const glyphCX = w / 2 - glyphDisplaySize / 2;
+          const glyphCY = 230;
+          parts.push('<g transform="translate(' + glyphCX.toFixed(1) + ',' + glyphCY.toFixed(1) + ') scale(' + glyphScale + ')" opacity="0.40">' + sportGlyphMarkup(catKey) + '</g>');
+        }
+
+        const fs = heroLines.length >= 3 ? (isMatchup ? 38 : 34) : heroLines.length === 2 ? (isMatchup ? 48 : 44) : (isMatchup ? 56 : 50);
         const lh = fs + 18;
-        const startY = 400 - ((heroLines.length - 1) * lh) / 2;
+        const startY = (isMatchup ? 400 : 420) - ((heroLines.length - 1) * lh) / 2;
+        
         heroLines.forEach((line, i) => {
           const isVs = line.toUpperCase() === 'VS';
           parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
