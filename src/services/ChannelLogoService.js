@@ -15,8 +15,8 @@ const CHANNEL_LOGOS = {
   "sky sports f1": `${CDN_BASE}/countries/united-kingdom/sky-sports-f1-uk.png`,
   "f1 tv": `${CDN_BASE}/countries/united-kingdom/sky-sports-f1-uk.png`,
   "formula 1": `${CDN_BASE}/countries/united-kingdom/sky-sports-f1-uk.png`,
-  "rally tv": `${CDN_BASE}/countries/international/wrc-plus.png`,
-  "motogp": `${CDN_BASE}/countries/international/motogp.png`,
+  "rally tv": `${CDN_BASE}/countries/australia/fox-sports-theme-motorsport-au.png`,
+  "motogp": `${CDN_BASE}/countries/italy/sky-sport-motogp-it.png`,
 
   // --- Baseball (MLB) ---
   "mlb strike zone": `${CDN_BASE}/countries/united-states/mlb-network-strike-zone-us.png`,
@@ -68,8 +68,8 @@ const CHANNEL_LOGOS = {
   "tnt sport 3": `${CDN_BASE}/countries/united-kingdom/tnt-sports-3-uk.png`,
   "tnt sport 4": `${CDN_BASE}/countries/united-kingdom/tnt-sports-4-uk.png`,
   "tnt sport": `${CDN_BASE}/countries/united-kingdom/tnt-sports-1-uk.png`,
-  "magenta sport": `${CDN_BASE}/countries/germany/magenta-sport-de.png`,
-  "blue sport": `${CDN_BASE}/countries/switzerland/blue-sport-ch.png`,
+  "magenta sport": `${CDN_BASE}/countries/austria/magenta-sport-1-at.png`,
+  "blue sport": `${CDN_BASE}/countries/switzerland/my-sports-eins-ch.png`,
 
   // --- Eurosport ---
   "eurosport 1": `${CDN_BASE}/countries/united-kingdom/eurosport-1-uk.png`,
@@ -91,7 +91,7 @@ const CHANNEL_LOGOS = {
   "fs2": `${CDN_BASE}/countries/united-states/fox-sports-2-us.png`,
   "fox deportes": `${CDN_BASE}/countries/united-states/fox-sports-deportes-us.png`,
   "fox league": `${CDN_BASE}/countries/australia/fox-sports-league-502-au.png`,
-  "fox footy": `${CDN_BASE}/countries/australia/fox-footy-504-au.png`,
+  "fox footy": `${CDN_BASE}/countries/australia/fox-sports-footy-504-au.png`,
   "fox sports": `${CDN_BASE}/countries/united-states/fox-sports-us.png`,
 
   // --- CBS & NBC Sports ---
@@ -196,7 +196,7 @@ const BRAND_DEFAULTS = [
   ["tsn", "countries/canada/tsn-ca.png"],
   ["ziggo-sport", "countries/netherlands/ziggo-sport-nl.png"],
   ["viaplay", "countries/netherlands/viaplay-nl.png"],
-  ["dazn", "countries/international/dazn-hz.png"],
+  ["dazn", "countries/international/dazn-int.png"],
   ["optus-sport", "countries/australia/optus-sport-au.png"],
   ["star-sports", "countries/india/star-sports-1-in.png"],
   ["premier-sports", "countries/united-kingdom/premier-sports-1-uk.png"],
@@ -206,7 +206,7 @@ const BRAND_DEFAULTS = [
   ["abu-dhabi-sports", "countries/united-arab-emirates/abu-dhabi-sports-tv-ae.png"],
   ["bbc-news", "countries/united-kingdom/bbc-news-uk.png"],
   ["bbc", "countries/united-kingdom/bbc-news-uk.png"],
-  ["e-entertainment", "countries/united-states/e-entertainment-television-us.png"]
+  ["e-entertainment", "countries/united-states/e-entertainment-us.png"]
 ];
 
 function slugify(str) {
@@ -337,7 +337,7 @@ function resolveDeepLogo(title) {
     return TV_LOGOS_MAP["fox-sports-cricket-501-au"];
   }
   if (slug.includes("rally-tv") || slug.includes("rallytv")) {
-    return TV_LOGOS_MAP["wrc-plus"] || "countries/international/wrc-plus.png";
+    return TV_LOGOS_MAP["wrc-plus"] || "countries/australia/fox-sports-theme-motorsport-au.png";
   }
   if (slug.includes("wwe")) {
     return TV_LOGOS_MAP["supersport-wwe-za"] || "countries/south-africa/supersport-wwe-za.png";
@@ -345,7 +345,7 @@ function resolveDeepLogo(title) {
 
   // 11. Specific feeds
   if (slug.startsWith("18-plus") || slug.startsWith("18-player")) {
-    return "countries/international/playboy-tv.png";
+    return null; // no verified asset
   }
   if (slug.startsWith("big-brother")) {
     return TV_LOGOS_MAP["big-brother-al"] || "countries/united-states/cbs-logo-white-us.png";
@@ -354,10 +354,10 @@ function resolveDeepLogo(title) {
     return "countries/united-arab-emirates/dubai-sports-tv-ae.png";
   }
   if (slug.includes("israel") && (slug.includes("sport") || slug.includes("one"))) {
-    return "countries/international/dazn-hz.png";
+    return "countries/international/dazn-int.png";
   }
   if (slug.startsWith("cytavision")) {
-    return "countries/cyprus/rik-1-cy.png";
+    return null; // no verified asset
   }
   if (slug.startsWith("voyo")) {
     return TV_LOGOS_MAP["markiza-dajto-sk"] || "countries/slovakia/markiza-dajto-sk.png";
@@ -483,8 +483,8 @@ function resolveDeepLogo(title) {
   if (slug.includes("weather-channel")) return TV_LOGOS_MAP["weather-channel-us"];
   if (slug.includes("root-sports")) return TV_LOGOS_MAP["root-sports-us"];
   if (slug.includes("mediaset")) return TV_LOGOS_MAP["mediaset-extra-it"];
-  if (slug.includes("trutv")) return "countries/united-states/trutv-us.png";
-  if (slug.includes("italia-1")) return TV_LOGOS_MAP["canale-italia-161-it"] || "countries/italy/italia-1.png";
+  if (slug.includes("trutv")) return "countries/united-states/tru-tv-us.png";
+  if (slug.includes("italia-1")) return TV_LOGOS_MAP["canale-italia-161-it"] || "countries/italy/hd/italia1-hd-it.png";
 
   // 24. Brand prefix defaults fallback
   for (const [prefix, logoPath] of BRAND_DEFAULTS) {

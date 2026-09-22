@@ -155,6 +155,45 @@ app.get('/api/server-info', (req, res) => {
   });
 });
 
+// ── Configure-page options ───────────────────────────────────────────────────
+// Registered here, NOT in routes/health.js: everything under /api is proxied to
+// the stream resolver further down, so a router mounted after that proxy never
+// sees these paths (this is why /api/server-info above works).
+//
+// The add-on config UI has to offer a language list, but nothing in the
+// manifest says which languages occur on streams. They are exactly what
+// ChannelCountryService can detect, so derive them from the detector itself
+// instead of hand-maintaining a copy that would drift. Non-sensitive: language
+// names only, no host, IP or provider detail.
+app.get('/api/options', (req, res) => {
+  let languages = [];
+  try {
+    const rules = require('./services/ChannelCountryService').getRules() || [];
+    const seen = new Set();
+    for (const rule of rules) {
+      if (rule && typeof rule.language === 'string' && rule.language.trim()) {
+        seen.add(rule.language.trim());
+      }
+    }
+    // English is always ranked first by the add-on, so it is not something the
+    // user needs to list; drop it from the selectable set.
+    languages = [...seen].filter((l) => l.toLowerCase() !== 'english').sort();
+  } catch (_) {
+    languages = [];
+  }
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.json({
+    languages,
+    englishAlwaysFirst: true,
+    replayFilters: [
+      { value: 'all', label: 'All replays' },
+      { value: 'mainstream', label: 'Mainstream only' }
+    ]
+  });
+});
+
 app.get('/api/matches', (req, res) => {
   // Internal/debug surface: the configure page does not use it, but local helper
   // scripts do. Restrict to a direct local caller instead of removing it.
@@ -265,7 +304,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+  res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600');
 
   const memoKey = [
     qs(query.cat), qs(query.title), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
@@ -367,7 +406,7 @@ app.get('/img', async (req, res) => {
 
   const entry = await imageService.getImage(req.query.url);
   if (entry) {
-    res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
+    res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600');
     if (embed && !entry.contentType.includes('svg') && embedBase) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
       // Reference the crest through the cached binary endpoint instead of

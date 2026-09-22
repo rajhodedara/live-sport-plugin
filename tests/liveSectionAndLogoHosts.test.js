@@ -158,6 +158,86 @@ describe('resolveEmbedBase: embedded crest URLs follow the client host', () => {
   });
 });
 
+describe('24/7 channel logos resolve to live assets', () => {
+  const { getChannelLogo } = require('../src/services/ChannelLogoService');
+
+  // Every path here returned HTTP 404 from the jsDelivr CDN, so
+  // getChannelLogo() handed the card a dead URL, /img/badge 404'd through the
+  // proxy, and the channel rendered with no logo on a gradient background.
+  const DEAD_CHANNEL_PATHS = [
+    'countries/international/motogp.png',
+    'countries/international/wrc-plus.png',
+    'countries/germany/magenta-sport-de.png',
+    'countries/switzerland/blue-sport-ch.png',
+    'countries/australia/fox-footy-504-au.png',
+    'countries/international/dazn-hz.png',
+    'countries/united-states/e-entertainment-television-us.png',
+    'countries/united-states/trutv-us.png',
+    'countries/italy/italia-1.png'
+  ];
+
+  test('no dead channel-logo path remains in the service', () => {
+    const source = fs.readFileSync(require.resolve('../src/services/ChannelLogoService'), 'utf8');
+    const stale = DEAD_CHANNEL_PATHS.filter((p) => source.includes(p));
+    expect(stale).toEqual([]);
+  });
+
+  test('the reported channel titles now resolve to a live CDN asset', () => {
+    // Titles taken from the production 24/7 catalog that previously had no logo.
+    for (const title of ['Canal+ MotoGP France', 'Sky Sport MotoGP Italy', 'Rally TV', 'DAZN Ligue 1 France']) {
+      const url = getChannelLogo(title);
+      expect(url).toBeTruthy();
+      expect(url.startsWith('https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/')).toBe(true);
+      expect(url).not.toContain('motogp.png');
+      expect(url).not.toContain('wrc-plus.png');
+      expect(url).not.toContain('dazn-hz.png');
+    }
+  });
+
+  test('German hockey broadcaster resolves to a live Austrian feed', () => {
+    expect(getChannelLogo('Magenta Sport')).toContain('magenta-sport-1-at.png');
+  });
+
+  test('previously-dead brand aliases now map to a live asset', () => {
+    // The curated map may resolve these to a different regional feed, so assert
+    // the resolved URL is a real asset path rather than one exact file name.
+    const expectations = [
+      ['E! Entertainment', /e-entertainment/],
+      ['truTV', /tru-?tv/],
+      ['Italia 1', /italia1|italia-1/]
+    ];
+    for (const [title, re] of expectations) {
+      const url = getChannelLogo(title);
+      expect(url).toBeTruthy();
+      expect(url).toMatch(re);
+      expect(url).not.toBe('countries/united-states/e-entertainment-television-us.png');
+      expect(url).not.toBe('countries/united-states/trutv-us.png');
+      expect(url).not.toBe('countries/italy/italia-1.png');
+    }
+  });
+
+  test('channels with no verified asset return null rather than a 404 URL', () => {
+    // Returning null lets the card simply omit the logo instead of emitting a
+    // guaranteed-404 reference (and avoids shipping adult artwork).
+    const source = fs.readFileSync(require.resolve('../src/services/ChannelLogoService'), 'utf8');
+    expect(source).not.toContain('playboy-tv.png');
+    expect(source).not.toContain('rik-1-cy.png');
+  });
+});
+
+describe('generated cards do not pin stale artwork for 24h', () => {
+  test('match and embed SVGs use a short client TTL', () => {
+    // These cards encode live state (status/score/kickoff) and embed badge URLs,
+    // so a 24h cache kept serving pre-fix broken renders long after a deploy.
+    const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
+    const matchCards = source.match(/res\.setHeader\('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600'\);/g) || [];
+    expect(matchCards.length).toBeGreaterThanOrEqual(2);
+    // The generated-card handlers must no longer pin a 24h TTL.
+    const indexHandlers = source.slice(source.indexOf("app.get(['/img/match'"), source.indexOf("app.get(['/img/badge'"));
+    expect(indexHandlers).not.toContain('max-age=86400');
+  });
+});
+
 describe('24/7 channels are not re-tagged into sport rows', () => {
   test('StreamedPk keeps every 24/7 channel under "networks"', () => {
     // Re-tagging 24/7 channels with a sport (e.g. "Tennis Channel" -> tennis,
