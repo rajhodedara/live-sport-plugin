@@ -21,7 +21,7 @@ const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 
 const IMAGE_TTL_MS = 10 * 60 * 1000;   // 10 minutes
 const CACHE_MAX_ENTRIES = 120;
-const IMAGE_MAX_BYTES = 1.5 * 1024 * 1024;
+const IMAGE_MAX_BYTES = 5 * 1024 * 1024;
 // Total per-request cap (headers + body). This was 3000 ms, which is tight for a
 // CDN logo: jsDelivr routinely exceeds it under load, so a perfectly good logo
 // failed, went into the 60 s negative cache, and the card fell back to the
@@ -309,52 +309,56 @@ async function getImage(rawUrl) {
 
   const p = (async () => {
     let result = null;
-    try {
-      // AbortSignal caps the TOTAL request (headers + body): a slow-loris upstream
-      // that trickles bytes can otherwise hang past headersTimeout/bodyTimeout.
-      const res = await request(url, {
-        headers: { 'User-Agent': UA, 'Accept': 'image/*,*/*;q=0.8' },
-        headersTimeout: FETCH_TIMEOUT_MS,
-        bodyTimeout: FETCH_TIMEOUT_MS,
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 1000)
-      });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        // AbortSignal caps the TOTAL request (headers + body): a slow-loris upstream
+        // that trickles bytes can otherwise hang past headersTimeout/bodyTimeout.
+        const res = await request(url, {
+          headers: { 'User-Agent': UA, 'Accept': 'image/*,*/*;q=0.8' },
+          headersTimeout: FETCH_TIMEOUT_MS,
+          bodyTimeout: FETCH_TIMEOUT_MS,
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS + 1000)
+        });
 
-      const contentType = String(res.headers['content-type'] || '').split(';')[0].trim();
-      // Intentional destroys below (non-image body / size cap) make the undici
-      // body emit an 'error' event; without a listener that crashes the process.
-      res.body.on('error', () => {});
-      if (res.statusCode === 200 && contentType.startsWith('image/')) {
-        // Read with a hard size cap so a huge file can never blow the heap.
-        const chunks = [];
-        let total = 0;
-        let tooBig = false;
-        for await (const chunk of res.body) {
-          total += chunk.length;
-          if (total > IMAGE_MAX_BYTES) { tooBig = true; res.body.destroy(); break; }
-          chunks.push(chunk);
+        const contentType = String(res.headers['content-type'] || '').split(';')[0].trim();
+        // Intentional destroys below (non-image body / size cap) make the undici
+        // body emit an 'error' event; without a listener that crashes the process.
+        res.body.on('error', () => {});
+        if (res.statusCode === 200 && contentType.startsWith('image/')) {
+          // Read with a hard size cap so a huge file can never blow the heap.
+          const chunks = [];
+          let total = 0;
+          let tooBig = false;
+          for await (const chunk of res.body) {
+            total += chunk.length;
+            if (total > IMAGE_MAX_BYTES) { tooBig = true; res.body.destroy(); break; }
+            chunks.push(chunk);
+          }
+          if (!tooBig && total >= 32) {
+            const buf = Buffer.concat(chunks);
+            const dims = parseImageDimensions(buf);
+            result = {
+              buffer: buf,
+              contentType,
+              // Intrinsic dimensions let the catalog tell real landscape artwork
+              // apart from a square/portrait crest without guessing from the URL.
+              width: dims.width,
+              height: dims.height,
+              expiresAt: Date.now() + IMAGE_TTL_MS,
+              lastAccess: Date.now()
+            };
+            cache.set(url, result);
+            evictIfNeeded();
+            break; // Success, exit retry loop
+          }
         }
-        if (!tooBig && total >= 32) {
-          const buf = Buffer.concat(chunks);
-          const dims = parseImageDimensions(buf);
-          result = {
-            buffer: buf,
-            contentType,
-            // Intrinsic dimensions let the catalog tell real landscape artwork
-            // apart from a square/portrait crest without guessing from the URL.
-            width: dims.width,
-            height: dims.height,
-            expiresAt: Date.now() + IMAGE_TTL_MS,
-            lastAccess: Date.now()
-          };
-          cache.set(url, result);
-          evictIfNeeded();
-        }
+        res.body.destroy(); // Cleanup on failure
+      } catch (_) {
+        // retry
       }
-    } catch (_) {
-      result = null;
-    } finally {
-      inFlight.delete(url);
     }
+    
+    inFlight.delete(url);
     if (result) negatives.delete(url);
     else {
       negatives.set(url, Date.now() + NEG_TTL_MS);
