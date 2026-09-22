@@ -111,18 +111,12 @@ class StreamedPkProvider extends BaseProvider {
           const homeBadge = item.teams && item.teams.home && item.teams.home.badge ? `https://streamed.pk/api/images/proxy/${item.teams.home.badge}` : '';
           const awayBadge = item.teams && item.teams.away && item.teams.away.badge ? `https://streamed.pk/api/images/proxy/${item.teams.away.badge}` : '';
 
-          let finalCategory = this.normalizeCategory(item.category);
-          if (is247Channel) {
-            const titleLower = item.title.toLowerCase();
-            const idLower = item.id.toLowerCase();
-            if (titleLower.includes('nfl') || idLower.includes('nfl')) finalCategory = 'american_football';
-            else if (titleLower.includes('cricket') || idLower.includes('cricket')) finalCategory = 'cricket';
-            else if (titleLower.includes('tennis') || idLower.includes('tennis')) finalCategory = 'tennis';
-            else if (titleLower.includes('rally') || titleLower.includes('f1') || titleLower.includes('motor')) finalCategory = 'motorsport';
-            else if (titleLower.includes('premier league') || titleLower.includes('champions league') || titleLower.includes('europa league') || titleLower.includes('la liga') || titleLower.includes('serie a') || titleLower.includes('bundesliga') || titleLower.includes('football') || titleLower.includes('soccer')) finalCategory = 'football';
-            else if (titleLower.includes('rugby') || titleLower.includes('nrl') || titleLower.includes('super league') || titleLower.includes('six nations') || titleLower.includes('fox league')) finalCategory = 'rugby';
-            else finalCategory = 'networks';
-          }
+          // 24/7 channels are dedicated network streams, not fixtures. They are
+          // always live, so if they were re-tagged with a sport they would flood
+          // that sport's Live row with channel entries that are not events.
+          // Keep them all under 'networks' (the Live/Upcoming rows already
+          // separate real fixtures from network channels).
+          const finalCategory = is247Channel ? 'networks' : this.normalizeCategory(item.category);
 
           matches.push(new MatchEntity({
             id: `spk_${item.id}`,

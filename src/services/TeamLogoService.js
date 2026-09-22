@@ -27,9 +27,9 @@ const LEAGUE_EMBLEMS = {
   'english premier league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/23.png',
   'uefa champions league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2.png',
   'champions league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2.png',
-  'uefa europa league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2054.png',
-  'europa league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2054.png',
-  'uefa conference league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/20700.png',
+  'uefa europa league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2310.png',
+  'europa league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/2310.png',
+  'uefa conference league': 'https://a.espncdn.com/i/leaguelogos/soccer/500/20296.png',
   'la liga': 'https://a.espncdn.com/i/leaguelogos/soccer/500/15.png',
   'laliga': 'https://a.espncdn.com/i/leaguelogos/soccer/500/15.png',
   'serie a': 'https://a.espncdn.com/i/leaguelogos/soccer/500/12.png',
@@ -43,19 +43,18 @@ const LEAGUE_EMBLEMS = {
   // Motorsport
   'formula 1': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/united-kingdom/sky-sports-f1-uk.png',
   'f1': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/united-kingdom/sky-sports-f1-uk.png',
-  'motogp': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/international/motogp.png',
-  'nascar': 'https://a.espncdn.com/i/teamlogos/leagues/500/racing.png',
-  'indycar': 'https://a.espncdn.com/i/teamlogos/leagues/500/racing.png',
+  'motogp': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/italy/sky-sport-motogp-it.png',
+  'nascar': 'https://a.espncdn.com/combiner/i?img=/redesign/assets/img/icons/ESPN-icon-NASCAR.png',
+  'indycar': 'https://a.espncdn.com/combiner/i?img=/i/espn/teamlogos/500/indycar_series.png',
 
   // Basketball
   'nba': 'https://a.espncdn.com/i/teamlogos/leagues/500/nba.png',
-  'euroleague': 'https://a.espncdn.com/i/leaguelogos/basketball/500/euroleague.png',
   'wnba': 'https://a.espncdn.com/i/teamlogos/leagues/500/wnba.png',
 
   // American Football
   'nfl': 'https://a.espncdn.com/i/teamlogos/leagues/500/nfl.png',
-  'ncaa football': 'https://a.espncdn.com/i/teamlogos/leagues/500/ncaa.png',
-  'college football': 'https://a.espncdn.com/i/teamlogos/leagues/500/ncaa.png',
+  'ncaa football': 'https://a.espncdn.com/redesign/assets/img/icons/ESPN-icon-football-college.png',
+  'college football': 'https://a.espncdn.com/redesign/assets/img/icons/ESPN-icon-football-college.png',
 
   // Baseball
   'mlb': 'https://a.espncdn.com/i/teamlogos/leagues/500/mlb.png',
@@ -69,10 +68,6 @@ const LEAGUE_EMBLEMS = {
   'boxing': 'https://r2.thesportsdb.com/images/media/team/badge/f8fdbx1725179456.png',
 
   // Tennis
-  'wimbledon': 'https://r2.thesportsdb.com/images/media/league/badge/28p86h1568285559.png',
-  'us open': 'https://r2.thesportsdb.com/images/media/league/badge/7a7nfs1568285642.png',
-  'roland garros': 'https://r2.thesportsdb.com/images/media/league/badge/french-open.png',
-  'australian open': 'https://r2.thesportsdb.com/images/media/league/badge/australian-open.png',
   'atp': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/united-states/tennis-channel-us.png',
   'wta': 'https://cdn.jsdelivr.net/gh/tv-logo/tv-logos@main/countries/united-states/tennis-channel-us.png',
 
@@ -145,27 +140,27 @@ const TEAM_ALIASES = {
 const CURATED_BADGES = {
   'arsenal': 'https://r2.thesportsdb.com/images/media/team/badge/uyhbfe1612467038.png',
   'chelsea': 'https://r2.thesportsdb.com/images/media/team/badge/yvwvtu1448813215.png',
-  'liverpool': 'https://r2.thesportsdb.com/images/media/team/badge/c8srrm1679948011.png',
+  'liverpool': 'https://r2.thesportsdb.com/images/media/team/badge/kfaher1737969724.png',
   'manchester city': 'https://r2.thesportsdb.com/images/media/team/badge/vwpvry1467462651.png',
-  'manchester united': 'https://r2.thesportsdb.com/images/media/team/badge/xzqdr11517660295.png',
-  'tottenham hotspur': 'https://r2.thesportsdb.com/images/media/team/badge/df27491689791404.png',
+  'manchester united': 'https://r2.thesportsdb.com/images/media/team/badge/xzqdr11517660252.png',
+  'tottenham hotspur': 'https://r2.thesportsdb.com/images/media/team/badge/dfyfhl1604094109.png',
   'barcelona': 'https://r2.thesportsdb.com/images/media/team/badge/wq9sir1639406443.png',
   'real madrid': 'https://r2.thesportsdb.com/images/media/team/badge/vwvwrw1473502969.png',
-  'atletico madrid': 'https://r2.thesportsdb.com/images/media/team/badge/3lffk81716960309.png',
+  'atletico madrid': 'https://r2.thesportsdb.com/images/media/team/badge/0ulh3q1719984315.png',
   'bayern munich': 'https://r2.thesportsdb.com/images/media/team/badge/01ogkh1716960412.png',
-  'borussia dortmund': 'https://r2.thesportsdb.com/images/media/team/badge/1kewfe1679948281.png',
+  'borussia dortmund': 'https://r2.thesportsdb.com/images/media/team/badge/tqo8ge1716960353.png',
   'paris saint germain': 'https://r2.thesportsdb.com/images/media/team/badge/rwqrrq1473504808.png',
-  'juventus': 'https://r2.thesportsdb.com/images/media/team/badge/7v9o0w1597161680.png',
-  'inter milan': 'https://r2.thesportsdb.com/images/media/team/badge/c9m0u21625754854.png',
-  'ac milan': 'https://r2.thesportsdb.com/images/media/team/badge/usupty1473502931.png',
+  'juventus': 'https://r2.thesportsdb.com/images/media/team/badge/uxf0gr1742983727.png',
+  'inter milan': 'https://r2.thesportsdb.com/images/media/team/badge/ryhu6d1617113103.png',
+  'ac milan': 'https://r2.thesportsdb.com/images/media/team/badge/wvspur1448806617.png',
   'los angeles lakers': 'https://r2.thesportsdb.com/images/media/team/badge/d8uoxw1714254511.png',
-  'golden state warriors': 'https://r2.thesportsdb.com/images/media/team/badge/5ih8f51597161580.png',
-  'boston celtics': 'https://r2.thesportsdb.com/images/media/team/badge/0532291597161528.png',
+  'golden state warriors': 'https://r2.thesportsdb.com/images/media/team/badge/xokycb1778197905.png',
+  'boston celtics': 'https://r2.thesportsdb.com/images/media/team/badge/4j85bn1667936589.png',
   'kansas city chiefs': 'https://r2.thesportsdb.com/images/media/team/badge/n58gp51784720929.png',
   'ferrari': 'https://r2.thesportsdb.com/images/media/team/badge/fk5myv1561490584.png',
   'red bull racing': 'https://r2.thesportsdb.com/images/media/team/badge/si5qxc1733228232.png',
-  'mercedes amg': 'https://r2.thesportsdb.com/images/media/team/badge/w76s721561490635.png',
-  'mclaren': 'https://r2.thesportsdb.com/images/media/team/badge/8s3bcf1561490610.png',
+  'mercedes amg': 'https://r2.thesportsdb.com/images/media/team/badge/96kai71734120813.png',
+  'mclaren': 'https://r2.thesportsdb.com/images/media/team/badge/5k3mwe1749225165.png',
   'radomlje': 'https://r2.thesportsdb.com/images/media/team/badge/gh0sjd1625755749.png',
   'bravo': 'https://r2.thesportsdb.com/images/media/team/badge/szjnx81579812986.png'
 };

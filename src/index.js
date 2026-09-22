@@ -172,6 +172,8 @@ app.get('/api/matches', (req, res) => {
 // /img/placeholder?...  → generated poster card. Replaces the external
 //                         placehold.co dependency.
 const imageService = require('./services/ImageService');
+const { resolveEmbedBase } = require('./services/EmbedBase');
+
 
 // Memoized composed match cards: an identical query set skips both the badge
 // fetch and the base64 re-encode. Bounded so a hostile query space cannot grow
@@ -277,6 +279,8 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     return res.send(cached);
   }
 
+  const embedBase = resolveEmbedBase(req);
+
   // Resolve each badge reference. We still fetch through the shared cache so a
   // dead crest is omitted (rather than drawn as an empty plate), but the card
   // only ever references it as a URL — never a base64 data URI — to stay inside
@@ -286,7 +290,10 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     if (!v) return null;
     const entry = await imageService.getImage(v);
     if (!entry) return null;
-    return `${BASE_URL}/img/badge?url=${encodeURIComponent(v)}`;
+    // No client-reachable base -> omit the badge so the crest plate / monogram
+    // is drawn instead of an image the client cannot resolve.
+    if (!embedBase) return null;
+    return `${embedBase}/img/badge?url=${encodeURIComponent(v)}`;
   };
 
   const [badge1, badge2, leagueBadge, channelBadge] = await Promise.all([
@@ -354,18 +361,19 @@ app.get('/img', async (req, res) => {
   const text = req.query.text || 'Live Sports';
   const color = req.query.color || '333333';
   const embed = req.query.embed === '1' || req.query.embed === 'true';
+  const embedBase = resolveEmbedBase(req);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
 
   const entry = await imageService.getImage(req.query.url);
   if (entry) {
     res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
-    if (embed && !entry.contentType.includes('svg')) {
+    if (embed && !entry.contentType.includes('svg') && embedBase) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
       // Reference the crest through the cached binary endpoint instead of
       // base64-embedding it. Embedding a 326 kb asset inflates the SVG past
       // 400 kb; Stremio's poster budget is 100 kb (50 kb recommended).
-      const imgUrl = `${BASE_URL}/img/badge?url=${encodeURIComponent(String(req.query.url || '').trim())}`;
+      const imgUrl = `${embedBase}/img/badge?url=${encodeURIComponent(String(req.query.url || '').trim())}`;
       const cleanTitle = String(text || '').replace(/\b(24\/7|live|stream|raw|hd)\b/gi, '').trim();
       const showTitle = cleanTitle.length > 0 && cleanTitle.length <= 36;
       const svg = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="800" height="450" viewBox="0 0 800 450">
