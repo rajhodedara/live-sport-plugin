@@ -425,7 +425,11 @@ class MatchAggregator {
 
       if (this.teamLogoService) {
         // Asynchronously enrich live & upcoming matches with team badges without delaying sync
-        const enrichable = activeMatches.filter(m => (m.team1 && m.team1.name && !m.team1.logo) || !m.logo).slice(0, 50);
+        // Previously capped at 50, so on a ~600-match catalog most fixtures never had
+// their crest warmed and rendered crest-less. enrichMatch is I/O bound but runs
+// concurrently and is fire-and-forget, and TeamLogoService negative-caches
+// misses, so a much larger window is safe.
+        const enrichable = activeMatches.filter(m => (m.team1 && m.team1.name && !m.team1.logo) || !m.logo).slice(0, 600);
         Promise.allSettled(enrichable.map(m => this.teamLogoService.enrichMatch(m))).catch(() => {});
       }
 

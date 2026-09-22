@@ -97,6 +97,79 @@ function svgPlaceholder(text, color, w = 800, h = 450, shape = 'landscape') {
 }
 
 /**
+ * Does this source resolve to a real image, and how large is it?
+ *
+ * Unlike getImage() this has no negative cache and retries once, because the
+ * callers use it to make a rendering decision: a throttle blip must not be
+ * reported the same way as a genuinely dead URL.
+ *
+ * @returns {Promise<{ok:boolean, bytes:number}>}
+ */
+async function fetchImage(rawUrl, attempts = 2) {
+  const url = normalizeUrl(rawUrl);
+  if (!url) return { ok: false, bytes: 0 };
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      const res = await request(url, {
+        headers: { 'User-Agent': UA, Accept: 'image/*,*/*;q=0.8' },
+        headersTimeout: FETCH_TIMEOUT_MS * 2,
+        bodyTimeout: FETCH_TIMEOUT_MS * 2,
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS * 2 + 2000)
+      });
+      res.body.on('error', () => {});
+      const contentType = String(res.headers['content-type'] || '').split(';')[0].trim();
+      if (res.statusCode === 200 && contentType.startsWith('image/')) {
+        let total = 0, cap = 4 * 1024 * 1024;
+        for await (const chunk of res.body) { total += chunk.length; if (total > cap) { res.body.destroy(); break; } }
+        return { ok: true, bytes: total };
+      }
+      res.body.destroy();
+      if (res.statusCode < 500 && res.statusCode !== 429) return { ok: false, bytes: 0 };
+    } catch (_) { /* retry */ }
+  }
+  return { ok: false, bytes: 0 };
+}
+
+/** In-flight dedupe for resized crests so concurrent requests share one fetch. */
+const resizeInFlight = new Map();
+
+/**
+ * Shrink an oversize crest for the badge endpoint.
+ *
+ * The crest sources are full-size PNGs (some NHL badges are 60-70 kb). Embedding
+ * those in a card pushes the poster payload past what clients accept, so instead
+ * of dropping the crest we serve a width-capped JPEG and let the client fetch it.
+ * Returns null when the toolchain or image is unavailable, in which case the
+ * caller falls back to sending the original bytes.
+ *
+ * @returns {Promise<{buffer:Buffer, contentType:string}|null>}
+ */
+async function getResizedImage(rawUrl, width) {
+  const url = normalizeUrl(rawUrl);
+  if (!url) return null;
+  const key = url + '|' + width;
+  if (resizeInFlight.has(key)) return resizeInFlight.get(key);
+
+  const p = (async () => {
+    const entry = await getImage(url);
+    if (!entry) return null;
+    try {
+      const sharp = require('sharp');
+      const out = await sharp(entry.buffer)
+        .resize({ width, withoutEnlargement: true })
+        .jpeg({ quality: 82 })
+        .toBuffer();
+      return { buffer: out, contentType: 'image/jpeg' };
+    } catch (_) {
+      return null;
+    }
+  })();
+
+  resizeInFlight.set(key, p);
+  try { return await p; } finally { resizeInFlight.delete(key); }
+}
+
+/**
  * Read intrinsic pixel dimensions straight from the encoded bytes.
  *
  * Deliberately dependency-free and total: any malformed, truncated or
@@ -359,6 +432,8 @@ function matchCardUrl(baseUrl, spec = {}) {
 module.exports = {
   svgPlaceholder,
   getImage,
+  fetchImage,
+  getResizedImage,
   getCachedMeta,
   parseImageDimensions,
   proxyUrl,

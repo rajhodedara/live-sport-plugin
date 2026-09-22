@@ -358,42 +358,109 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     return entryToDataUri(entry);
   };
 
-  const resolveAll = async () => {
-    const [badge1, badge2, leagueBadge, channelBadge0] = await Promise.all([
-      asUrl(query.b1),
-      asUrl(query.b2),
-      asUrl(query.lb),
-      asUrl(query.cb)
-    ]);
-    // A channel logo promoted to the hero slot (24/7 stations).
-    const channelMark = await asUrl(query.cm);
+  const embedBase = resolveEmbedBase(req);
 
-    // Inlined badges are the bulk of the payload, and the same channel logo is
-    // routinely requested twice (hero mark + footer chip). Only the first
-    // occurrence is inlined; the duplicate is dropped from its secondary slot.
-    const seen = new Set();
-    const dedupe = (uri) => {
-      if (!uri) return uri;
-      if (seen.has(uri)) return null;
-      seen.add(uri);
-      return uri;
-    };
-    const channelMarkD = dedupe(channelMark);
-    const leagueBadgeD = dedupe(leagueBadge);
-    const channelBadge = dedupe(channelBadge0);
+  // Crests are big: NHL badges run 340x310 at ~60-70 kb. Inlining two of those
+  // produces a ~180 kb poster, which clients reject, so a crest is inlined only
+  // when it is small enough to stay inside the budget. A larger crest is instead
+  // referenced (memoized here and long-cached by the client), with a width cap so
+  // the fetch stays small. Nothing is dropped for being large.
+  // Set high deliberately. Inlining is the only form that renders in EVERY
+  // client: a poster SVG that references a URL may not have its subresource
+  // fetched at all (that was the original "logo never appears" bug). A two-crest
+  // hockey card inlines to roughly 170 kb, so the budget is generous and the URL
+  // form is only a last resort for a pathological source.
+  const INLINE_MAX_BYTES = 512 * 1024;
+  const URL_MAX_BYTES = 1536 * 1024;
 
-    return { badge1, badge2, leagueBadge: leagueBadgeD, channelBadge, channelMark: channelMarkD };
+  /**
+   * @returns {Promise<string|null>} inlined data URI, or a URL to reference, or null
+   */
+  const resolveBadge = async (raw) => {
+    const v = qs(raw);
+    if (!v) return null;
+    const entry = await imageService.getImage(v);
+    if (entry && entry.buffer && entry.buffer.length <= INLINE_MAX_BYTES) {
+      return entryToDataUri(entry);
+    }
+    let size = entry && entry.buffer ? entry.buffer.length : 0;
+    if (!size) {
+      const probe = await imageService.fetchImage(v);
+      if (!probe.ok) return null;   // genuinely dead -> omit so a plate is drawn
+      size = probe.bytes;
+    }
+    if (size > URL_MAX_BYTES || !embedBase) return null;
+    return `${embedBase}/img/badge?w=360&url=${encodeURIComponent(v)}`;
   };
 
-  const build = (badges, opts = {}) => imageService.generateMatchCardSvg({
+  // Resolve a crest for a competitor name when the caller supplied none.
+  //
+  // The catalog builds b1/b2 from whatever crest was already cached, because that
+  // mapper is synchronous. A crest that exists upstream but has not been warmed
+  // yet therefore produced a card with an empty crest plate on first render.
+  // Resolving here makes the card correct the first time it is drawn. Genuine
+  // misses are negatively cached by TeamLogoService, so an unknown name costs at
+  // most one lookup per cache lifetime.
+  const LOGO_BY_NAME = new Map();
+  const resolveNameToCrest = async (name) => {
+    const key = qs(name);
+    if (!key) return null;
+    if (LOGO_BY_NAME.has(key)) return LOGO_BY_NAME.get(key);
+    let url = null;
+    try {
+      const teamLogoService = container.resolve('teamLogoService');
+      url = teamLogoService.getCachedLogo(key);
+      if (!url) url = await teamLogoService.findTeamLogo(key);
+    } catch (_) { url = null; }
+    LOGO_BY_NAME.set(key, url);
+    return url;
+  };
+
+  const resolveAll = async () => {
+    const [given1, given2, leagueBadge0, channelBadge0, channelMark0] = await Promise.all([
+      resolveBadge(query.b1),
+      resolveBadge(query.b2),
+      resolveBadge(query.lb),
+      resolveBadge(query.cb),
+      resolveBadge(query.cm)
+    ]);
+
+    // Fill a missing side from its competitor name (tennis and cup fixtures
+    // frequently arrive with names but no crest).
+    const [byName1, byName2] = await Promise.all([
+      (!given1 && qs(query.t1)) ? resolveNameToCrest(query.t1).then(resolveBadge) : null,
+      (!given2 && qs(query.t2)) ? resolveNameToCrest(query.t2).then(resolveBadge) : null
+    ]);
+    const badge1 = given1 || byName1;
+    const badge2 = given2 || byName2;
+
+    // The same asset is routinely requested twice (a channel logo is both the
+    // hero mark and the footer chip). Only one reference is kept per asset so the
+    // payload does not carry it twice.
+    const seen = new Set();
+    const dedupe = (value) => {
+      if (!value) return value;
+      if (seen.has(value)) return null;
+      seen.add(value);
+      return value;
+    };
+    const leagueBadge = dedupe(leagueBadge0);
+    const channelBadge = dedupe(channelBadge0);
+    const channelMark = dedupe(channelMark0);
+
+    return { badge1, badge2, leagueBadge, channelBadge, channelMark };
+  };
+
+  const badges = await resolveAll();
+  const svg = imageService.generateMatchCardSvg({
     category: qs(query.cat),
     title: qs(query.title),
     team1: qs(query.t1),
     team2: qs(query.t2),
-    badge1: opts.dropAll ? null : badges.badge1,
-    badge2: opts.dropAll ? null : badges.badge2,
-    leagueBadge: opts.dropAll ? null : badges.leagueBadge,
-    channelBadge: opts.dropAll ? null : badges.channelBadge,
+    badge1: badges.badge1,
+    badge2: badges.badge2,
+    leagueBadge: badges.leagueBadge,
+    channelBadge: badges.channelBadge,
     channelMark: badges.channelMark,
     league: qs(query.lg),
     channel: qs(query.ch),
@@ -402,16 +469,6 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     score: qs(query.sc),
     shape
   });
-
-  // Stremio's documented poster budget is 100 kb (50 kb recommended). Inlined
-  // crests can push a card past that, so degrade gracefully: first drop the
-  // secondary crests, then drop every badge except the hero mark.
-  const POSTER_BUDGET_BYTES = 200 * 1024;
-  let badges = await resolveAll();
-  let svg = build(badges);
-  if (Buffer.byteLength(svg, 'utf8') > POSTER_BUDGET_BYTES) {
-    svg = build(badges, { dropAll: true });
-  }
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
   matchCardMemo.set(memoKey, svg);
@@ -430,6 +487,19 @@ app.get(['/img/badge', '/:config/img/badge'], async (req, res) => {
   if (!raw) {
     res.status(400).end();
     return;
+  }
+
+  // A caller may request a width-capped crest. Cards that cannot inline an
+  // oversize crest reference it here instead, so this must stay cheap: serve a
+  // resized JPEG and fall back to the original bytes if resizing is unavailable.
+  const width = Math.min(512, Math.max(32, parseInt(req.query.w, 10) || 0));
+  if (width) {
+    const resized = await imageService.getResizedImage(raw, width);
+    if (resized) {
+      res.setHeader('Content-Type', resized.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=2592000');
+      return res.send(resized.buffer);
+    }
   }
 
   const entry = await imageService.getImage(raw);
