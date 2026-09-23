@@ -55,12 +55,15 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
+// Artwork under /posters is large (the replay hero JPEGs are ~100-200 KB) and
+// rarely changes, but it used to be sent with no-store. That made Cloudflare
+// report BYPASS, so every view pulled the bytes from origin - the largest
+// bandwidth cost on the host. Serve it as a long-lived public asset instead.
+// References carry a ?v= cache-buster whenever the artwork is replaced.
 const posterStaticOptions = {
-  maxAge: 0,
+  maxAge: '30d',
   setHeaders: (res) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
+    res.setHeader('Cache-Control', 'public, max-age=2592000, stale-while-revalidate=604800');
   }
 };
 app.use('/posters', express.static(path.join(__dirname, '..', 'public', 'posters'), posterStaticOptions));
