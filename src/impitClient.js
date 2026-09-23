@@ -83,6 +83,30 @@ async function safeFetch(url, opts = {}) {
         if (res.status === 400 && url.includes('ok.ru')) {
            throw new Error('ok.ru blocked impit');
         }
+        // Some CDNs intermittently refuse impit's browser TLS fingerprint
+        // with a 403 while accepting undici on the SAME token (observed on
+        // messi.damitv.st: impit 8/30 403, undici 0/30, interleaved in one
+        // process). A 403 is a real answer, but which client asked is part
+        // of the question. Break out of the impit loop (retrying the same
+        // fingerprint cannot change the answer) and let the undici path try
+        // the identical request once; if undici throws, the original 403 is
+        // returned so "both engines agree it is blocked" still surfaces.
+        if (res.status === 403) {
+          const impit403 = {
+            ok: false,
+            status: res.status,
+            headers: res.headers,
+            text: async () => Buffer.from(buf).toString('utf8'),
+            json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
+            arrayBuffer: async () => buf,
+          };
+          console.warn(`[impitClient] impit got 403, trying undici once for: ${url.slice(0, 90)}`);
+          try {
+            return await undiciPath(method, headers, body, url, signal, timeoutMs);
+          } catch (_) {
+            return impit403;
+          }
+        }
         return {
           ok: res.status >= 200 && res.status < 300,
           status: res.status,
@@ -104,6 +128,14 @@ async function safeFetch(url, opts = {}) {
     }
     console.warn(`[impitClient] impit fetch failed after ${maxAttempts} attempt(s) (${lastErr.message}), falling back to undici for: ${url}`);
   }
+
+  // The undici path, callable directly from the impit 403 branch so the same
+  // request can be retried with a different TLS fingerprint.
+  // Declared as a function (hoisted) so the impit 403 branch above can call it
+  // before this line is reached. A `const` arrow would sit in the temporal
+  // dead zone there, and the ReferenceError would be swallowed by that
+  // branch's catch, silently disabling the fallback.
+  async function undiciPath(method, headers, body, url, signal, timeoutMs) {
 
   // -- Path B: undici --------------------------------------------------------
   // undici.request() does NOT follow redirects the way fetch/impit do. Several
@@ -174,6 +206,9 @@ async function safeFetch(url, opts = {}) {
     json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
     arrayBuffer: async () => buf,
   };
+  };
+
+  return undiciPath(method, headers, body, url, signal, timeoutMs);
 }
 
 /**

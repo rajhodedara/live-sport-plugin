@@ -17,6 +17,7 @@ const EmbedStProvider = require('./providers/EmbedStProvider');
 const StreamedPkProvider = require('./providers/StreamedPkProvider');
 const DaddyLiveProvider = require('./providers/DaddyLiveProvider');
 const LiveTVProvider = require('./providers/LiveTVProvider');
+const DamiTvProvider = require('./providers/DamiTvProvider');
 
 const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
@@ -59,6 +60,7 @@ container.register({
   streamedPkProvider: asClass(StreamedPkProvider).singleton(),
   daddyLiveProvider: asClass(DaddyLiveProvider).singleton(),
   liveTvProvider: asClass(LiveTVProvider).singleton(),
+  damiTvProvider: asClass(DamiTvProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 
