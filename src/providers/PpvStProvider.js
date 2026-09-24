@@ -33,6 +33,27 @@ class PpvStProvider extends BaseProvider {
         for (const stream of cat.streams) {
           if (!stream.iframe) continue;
           const slug = stream.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '');
+          const sources = [{
+            source: 'ppvst',
+            id: stream.id,
+            channelName: stream.source_tag || stream.name,
+            embedUrl: stream.iframe
+          }];
+
+          if (Array.isArray(stream.substreams)) {
+            stream.substreams.forEach(sub => {
+              if (sub.iframe) {
+                sources.push({
+                  source: 'ppvst',
+                  id: sub.id,
+                  channelName: sub.source_tag || sub.name || stream.name,
+                  embedUrl: sub.iframe,
+                  language: sub.locale
+                });
+              }
+            });
+          }
+
           matches.push(new MatchEntity({
             id: `ppv_${stream.id}_${slug}`,
             title: stream.name,
@@ -43,12 +64,7 @@ class PpvStProvider extends BaseProvider {
             league: cat.category,
             logo: stream.poster || undefined,
             thumbnail_url: stream.poster || undefined,
-            sources: [{
-              source: 'ppvst',
-              id: stream.id,
-              channelName: stream.name,
-              embedUrl: stream.iframe
-            }]
+            sources: sources
           }));
         }
       }
@@ -86,9 +102,12 @@ class PpvStProvider extends BaseProvider {
         const m3u8Url = m[1];
         const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
         
-        streams.push(new StreamEntity({
-          name: 'PpvSt',
-          title: `PpvSt (${matchTitle || channelId})`,
+          const langStr = src.language ? ` [${src.language.toUpperCase()}]` : '';
+          const chanStr = src.channelName && src.channelName !== matchTitle ? ` - ${src.channelName}` : '';
+          
+          streams.push(new StreamEntity({
+            name: 'PpvSt',
+            title: `PpvSt${langStr}${chanStr} (${matchTitle || channelId})`,
           url: proxyUrl,
           behaviorHints: { 
             notWebReady: true,
