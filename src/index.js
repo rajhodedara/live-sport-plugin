@@ -848,6 +848,9 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   if (typeof req.query.lg === 'string' && req.query.lg.trim()) {
     parsedConfig.languages = req.query.lg.trim();
   }
+  if (typeof req.query.ws === 'string' && req.query.ws.trim()) {
+    parsedConfig.webStreams = req.query.ws.trim();
+  }
 
   // ── Replay collection rows, injected here to stay under the 8kb manifest cap ──
   // The Stremio SDK rejects a manifest > 8192 bytes at build time, and the base
@@ -942,7 +945,7 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   res.send(newManifest);
 });
 
-// Compact personalization params (rf = replayFilter, lg = languages).
+// Compact personalization params (rf = replayFilter, lg = languages, ws = webStreams).
 // generateCollections appends these to the manifestUrl it embeds in the Nuvio
 // Collections export, so every catalog/meta/stream request a collection makes
 // carries them. A full base64 config segment per row pushed that export past
@@ -951,6 +954,7 @@ function applyCompactParams(target, query) {
   const out = target && typeof target === 'object' ? target : {};
   if (query && typeof query.rf === 'string' && query.rf.trim()) out.replayFilter = query.rf.trim();
   if (query && typeof query.lg === 'string' && query.lg.trim()) out.languages = query.lg.trim();
+  if (query && typeof query.ws === 'string' && query.ws.trim()) out.webStreams = query.ws.trim();
   return out;
 }
 
@@ -960,9 +964,9 @@ app.use((req, res, next) => {
   const m = req.url.match(/^\/([A-Za-z0-9_-]+)(\/(?:catalog|meta|stream)\/.+)$/);
   const rest = m ? m[2] : null;
 
-  // Fold the compact personalization params (rf/lg) into whatever config this
+  // Fold the compact personalization params (rf/lg/ws) into whatever config this
   // request carries, then hand the SDK router a URL-encoded config segment.
-  const hasCompact = typeof req.query.rf === 'string' || typeof req.query.lg === 'string';
+  const hasCompact = typeof req.query.rf === 'string' || typeof req.query.lg === 'string' || typeof req.query.ws === 'string';
   if (rest && (m[1] && !m[1].startsWith('%7B') || hasCompact)) {
     const parsed = m[1] ? decodeConfigSegment(m[1]) : {};
     if (parsed !== null) {

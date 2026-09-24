@@ -781,6 +781,15 @@
             </div>
           </details>
         </div>
+
+        <div class="field">
+          <label for="webStreams">Web Streams</label>
+          <select id="webStreams">
+            <option value="enabled">Include web streams</option>
+            <option value="disabled">Hide web streams</option>
+          </select>
+          <p class="hint">Web streams open an external browser window. Hide them to only see native streams.</p>
+        </div>
       </section>
 
             <!-- 5 · Nuvio Sports Replay Connection -->
@@ -911,6 +920,7 @@
     const timezoneSelect = document.getElementById('timezone');
     const languagesInput = document.getElementById('languages');
     const replayFilterSelect = document.getElementById('replayFilter');
+    const webStreamsSelect = document.getElementById('webStreams');
 
     const configSummary = document.getElementById('configSummary');
     const installStatus = document.getElementById('installStatus');
@@ -1005,7 +1015,9 @@
       replayFilterSelect.value = existingConfig.replayFilter === 'mainstream' ? 'mainstream' : 'all';
     }
 
-
+    if (webStreamsSelect) {
+      webStreamsSelect.value = existingConfig.webStreams === 'disabled' ? 'disabled' : 'enabled';
+    }
 
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
@@ -1038,7 +1050,7 @@
     let effectiveOrigin = window.location.origin;
 
     // Renders the live summary chips from the current selections.
-    function renderSummary(selectedSports, selectedSources, tz, languages, replayFilter) {
+    function renderSummary(selectedSports, selectedSources, tz, languages, replayFilter, webStreams) {
       if (!configSummary) return;
       // Values come straight from user input, so escape before interpolating
       // into innerHTML.
@@ -1049,7 +1061,8 @@
         { k: 'Sources', v: selectedSources.length === sourceCheckboxes.length ? 'All' : String(selectedSources.length) },
         { k: 'Timezone', v: tz || 'n/a' },
         { k: 'Languages', v: languages || 'English only' },
-        { k: 'Replays', v: replayFilter === 'mainstream' ? 'Mainstream' : 'All' }
+        { k: 'Replays', v: replayFilter === 'mainstream' ? 'Mainstream' : 'All' },
+        { k: 'Web Streams', v: webStreams === 'disabled' ? 'Hidden' : 'Included' }
       ];
       configSummary.innerHTML = items
         .map(i => '<li><span>' + esc(i.k) + '</span> <b>' + esc(i.v) + '</b></li>')
@@ -1060,6 +1073,7 @@
       const teams = input.value.trim();
       const languages = languagesInput ? languagesInput.value.trim() : '';
       const replayFilter = replayFilterSelect ? replayFilterSelect.value : 'all';
+      const webStreams = webStreamsSelect ? webStreamsSelect.value : 'enabled';
       const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
       const selectedSources = Array.from(sourceCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
       let tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1080,6 +1094,7 @@
       // only when narrowed. English-first and 'all' are baked in server-side.
       if (languages) config.languages = languages;
       if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
+      if (webStreams === 'disabled') config.webStreams = 'disabled';
 
 
       if (selectedSports.length < checkboxes.length) {
@@ -1108,6 +1123,7 @@
         const colParams = new URLSearchParams();
         if (config.languages) colParams.set('languages', config.languages);
         if (config.replayFilter) colParams.set('replayFilter', config.replayFilter);
+        if (config.webStreams) colParams.set('webStreams', config.webStreams);
         const colQuery = colParams.toString();
         if (colQuery) collectionsUrl += (collectionsUrl.includes('?') ? '&' : '?') + colQuery;
       }
@@ -1122,7 +1138,7 @@
       if (manualUrl) manualUrl.value = manifestUrl;
       if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
 
-      renderSummary(selectedSports, selectedSources, tz, languages, replayFilter);
+      renderSummary(selectedSports, selectedSources, tz, languages, replayFilter, webStreams);
 
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
@@ -1228,6 +1244,7 @@
     // changing the replay scope left the copied link on its previous config.
     if (languagesInput) languagesInput.addEventListener('input', updateLink);
     if (replayFilterSelect) replayFilterSelect.addEventListener('change', updateLink);
+    if (webStreamsSelect) webStreamsSelect.addEventListener('change', updateLink);
 
     [...checkboxes, ...sourceCheckboxes].forEach(cb => {
       cb.addEventListener('change', (e) => {

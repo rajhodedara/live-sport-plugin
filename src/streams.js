@@ -891,6 +891,20 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Hid ${hidden} non-RZ web fallback(s) — ${directOnly.length} stream(s) kept`);
   }
 
+  if (config && config.webStreams === 'disabled') {
+    const nonWeb = streams.filter(s => {
+      if (s.name === '⚡ Direct Stream' || s.name === '▶️ YouTube') return true;
+      if (s.name === '🌐 Web Stream') return false;
+      if (s.externalUrl && !s.ytId && !s.url) return false;
+      return true;
+    });
+    if (nonWeb.length < streams.length) {
+      console.log(`[streams.js] Hid ${streams.length - nonWeb.length} web stream(s) due to config for ${matchId}`);
+      streams.length = 0;
+      streams.push(...nonWeb);
+    }
+  }
+
   // Ordering is: direct stream, then language rank, then rankScore.
   // Language rank is English (always first) -> the languages the user listed in
   // config.languages, in order -> unknown -> other known languages. With no
