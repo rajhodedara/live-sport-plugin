@@ -261,10 +261,12 @@ class DamiTvProvider extends BaseProvider {
       if (!matchId) return streams;
 
       let extractData = null;
-      const { safeFetch } = require('../impitClient');
       try {
-        const extractRes = await safeFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
-          timeoutMs: 8000
+        const extractRes = await this.proxyFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
+          headers: {
+            'Referer': embedUrl
+          },
+          signal: AbortSignal.timeout(8000)
         });
 
         if (extractRes.ok) {

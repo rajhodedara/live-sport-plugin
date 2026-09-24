@@ -301,7 +301,7 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
         bytes = buf.byteLength;
       }
       const end = performance.now();
-      const segmentBytes = getContentRangeTotal(response.headers) || bytes;
+      const segmentBytes = getContentRangeTotal(response.headers);
       if (!segmentBytes || bytes === 0) return;
       // Exclude TTFB from the rate denominator: with a small ranged read the
       // body lands almost instantly, so including connect+first-byte latency
@@ -400,7 +400,7 @@ function repairRefererFor(targetUrl) {
   return `https://${host}/`;
 }
 
-async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
+async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
