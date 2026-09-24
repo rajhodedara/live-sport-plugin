@@ -51,6 +51,12 @@ function _parseEventDate(raw) {
  */
 function _compoundify(t) {
   const aliases = [
+    // Motorsport — Formula 1 / F1 must come FIRST so the "1" never becomes a
+    // stray digit that blocks e.g. "Formula 1 Azerbaijan GP" from merging with
+    // "Azerbaijan Grand Prix". "GP" also normalised to "grandprix" to help
+    // track-event titles collapse regardless of whether GP is spelled out.
+    [/\bformula\s*(?:one|1)\b|\bf[- ]?1\b/g, 'formulaone'],
+    [/\bgrand\s*prix\b|\bgp\b/g, 'grandprix'],
     // Football (Soccer)
     [/\bman(chester)?\s*utd\b|\bmanchester\s*united\b/g, 'manchesterunited'],
     [/\bman\.?\s+united\b/g, 'manchesterunited'], // "Man United" / "Man. United" (gap found by A/B testing)
@@ -89,7 +95,18 @@ function _compoundify(t) {
     [/\bgreen\s*bay\s*packers\b|\bpackers\b/g, 'greenbaypacker'],
     [/\bcincinatti\s*bengals\b|\bbengals\b/g, 'cincinnatibengals'],
     [/\bpittsburgh\s*steelers\b|\bsteelers\b/g, 'pittsburghsteelers'],
-    // Basketball
+    // Basketball — NBL (Australia) teams
+    [/\bperth\s*wildcats\b/g, 'perthwildcat'],
+    [/\badelaide\s*36ers\b/g, 'adelaide36er'],
+    [/\bmelbourne\s*united\b/g, 'melbourneunited'],
+    [/\bsydney\s*kings\b/g, 'sydneyking'],
+    [/\bbrisbane\s*bullets?\b/g, 'brisbanebullet'],
+    [/\bnz\s*breakers?\b|\bnew\s*zealand\s*breakers?\b/g, 'nzbreaker'],
+    [/\bsouth\s*east\s*melbourne\s*phoenix\b|\bse\s*melbourne\b/g, 'semelbournephoenix'],
+    [/\btasmania\s*jackjumpers?\b/g, 'tasmaniajackjumper'],
+    [/\bcairns\s*taipans?\b/g, 'cairnstaispan'],
+    [/\bilawarra\s*hawks?\b/g, 'ilawarrahawk'],
+    // NBA teams
     [/\bny\s*knicks\b|\bnew\s*york\s*knicks\b|\bknicks\b/g, 'nyknicks'],
     [/\bboston\s*celtics\b|\bceltics\b/g, 'bostonceltics'],
     [/\bla\s*lakers\b|\blakers\b|\blos\s*angeles\s*lakers\b/g, 'lalakers'],
@@ -167,14 +184,22 @@ class MatchAggregator {
   _precompute(e) {
     const title = e && e.title ? String(e.title) : '';
     const id = e && e.id != null ? String(e.id) : '';
+    const normalized = _compoundify(_stripNoise(title));
     return {
       id,
       category: e && e.category ? String(e.category) : '',
       date: _parseEventDate(e && e.date),
       teams: _tryExtractTeams(title),
-      tokens: new Set(_tokenize(_compoundify(_stripNoise(title)))),
-      norm: _compoundify(_stripNoise(title)).replace(/\s+/g, ' ').trim(),
-      digits: (title.match(/\d+/g) || []).sort().join(',')
+      tokens: new Set(_tokenize(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
+      norm: normalized.replace(/\s+/g, ' ').trim(),
+      // Extract digits from the NORMALIZED form so compound tokens like
+      // "formulaone" don't leave a stray "1". Also strip 4-digit calendar
+      // years (2020–2099) since providers sometimes brand titles with the
+      // season year and it must not block merging with un-branded twins.
+      digits: (normalized.match(/\d+/g) || [])
+        .filter(d => { const n = Number(d); return !(n >= 2000 && n <= 2100); })
+        .sort()
+        .join(',')
     };
   }
 
@@ -188,8 +213,25 @@ class MatchAggregator {
    */
   _sameEventPre(p1, p2) {
     // 1. Category mismatch guard
-    const c1 = p1.category;
-    const c2 = p2.category;
+    // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
+    // while others use the parent sport name (basketball, american_football,
+    // football, rugby). Normalise both to the parent before comparing so the
+    // same fixture from two different providers isn't blocked by the guard.
+    const _normalizeCategory = (c) => {
+      if (!c) return c;
+      const lc = c.toLowerCase();
+      if (['nbl', 'nba', 'wnba', 'euroleague', 'ncaa_basketball'].includes(lc)) return 'basketball';
+      if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
+      if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
+      if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel'].includes(lc)) return 'football';
+      if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
+      if (['mlb', 'npb'].includes(lc)) return 'baseball';
+      if (['nhl', 'khl'].includes(lc)) return 'hockey';
+      if (['sports', 'sport'].includes(lc)) return 'other';
+      return lc;
+    };
+    const c1 = _normalizeCategory(p1.category);
+    const c2 = _normalizeCategory(p2.category);
     const isCollegeFootball = (c1 === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
                              (c2 === 'college' && (c1 === 'american_football' || c1 === 'football'));
     if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeFootball) {
@@ -229,6 +271,21 @@ class MatchAggregator {
     // 6b. Both channel-like: strict identity only. Distinct channels with shared
     //     branding must never merge.
     if (p1.norm === p2.norm) return true;
+
+    // Subset check: if one token set is entirely contained in the other (minimum
+    // 2 content tokens), the narrower title is a refinement of the broader one.
+    // e.g. {"azerbaijan","grandprix"} ⊂ {"formulaone","azerbaijan","grandprix"}
+    // This handles "Azerbaijan Grand Prix" vs "Formula 1 Azerbaijan Grand Prix".
+    // Safety: Monaco GP and Azerbaijan GP share only "grandprix" (1 token) so
+    // the minimum-2 guard keeps them separate.
+    const smaller = p1.tokens.size <= p2.tokens.size ? p1 : p2;
+    const larger  = p1.tokens.size <= p2.tokens.size ? p2 : p1;
+    if (smaller.tokens.size >= 2) {
+      let allIn = true;
+      for (const w of smaller.tokens) { if (!larger.tokens.has(w)) { allIn = false; break; } }
+      if (allIn) return true;
+    }
+
     let common = 0;
     for (const w of p1.tokens) if (p2.tokens.has(w)) common++;
     const union = p1.tokens.size + p2.tokens.size - common;
