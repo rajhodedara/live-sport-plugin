@@ -25,7 +25,7 @@ const script = (() => {
   return m[1];
 })();
 
-describe('configure page exposes both personalization controls', () => {
+describe('configure page exposes personalization controls', () => {
   test('the languages text input exists', () => {
     expect(html).toMatch(/<input[^>]*id="languages"/);
   });
@@ -36,16 +36,21 @@ describe('configure page exposes both personalization controls', () => {
     expect(options).toEqual(expect.arrayContaining(['all', 'mainstream']));
   });
 
-  test('both controls live inside the Personalization panel', () => {
+  test('the disableWebStreams checkbox exists', () => {
+    expect(html).toMatch(/<input[^>]*id="disableWebStreams"/);
+  });
+
+  test('controls live inside the Personalization panel', () => {
     const panel = html.slice(html.indexOf('aria-labelledby="prefs-h"'));
     const end = panel.indexOf('</section>');
     const body = panel.slice(0, end);
     expect(body).toMatch(/id="languages"/);
     expect(body).toMatch(/id="replayFilter"/);
+    expect(body).toMatch(/id="disableWebStreams"/);
   });
 });
 
-describe('configure page wires both controls to updateLink', () => {
+describe('configure page wires controls to updateLink', () => {
   // The exact regression: a control with no listener never re-derives the URL.
   test('languages has an input listener calling updateLink', () => {
     expect(script).toMatch(/languagesInput\.addEventListener\(\s*'input'\s*,\s*updateLink\s*\)/);
@@ -55,19 +60,26 @@ describe('configure page wires both controls to updateLink', () => {
     expect(script).toMatch(/replayFilterSelect\.addEventListener\(\s*'change'\s*,\s*updateLink\s*\)/);
   });
 
-  test('both DOM references are resolved from the document', () => {
+  test('disableWebStreamsCheckbox has a change listener calling updateLink', () => {
+    expect(script).toMatch(/disableWebStreamsCheckbox\.addEventListener\(\s*'change'[\s\S]*?updateLink\(\)/);
+  });
+
+  test('DOM references are resolved from the document', () => {
     expect(script).toMatch(/getElementById\(\s*'languages'\s*\)/);
     expect(script).toMatch(/getElementById\(\s*'replayFilter'\s*\)/);
+    expect(script).toMatch(/getElementById\(\s*'disableWebStreams'\s*\)/);
   });
 
-  test('both values are read in updateLink', () => {
+  test('values are read in updateLink', () => {
     expect(script).toMatch(/languagesInput\.value/);
     expect(script).toMatch(/replayFilterSelect\.value/);
+    expect(script).toMatch(/disableWebStreamsCheckbox\.checked/);
   });
 
-  test('both values reach the encoded config with the documented keys', () => {
+  test('values reach the encoded config with the documented keys', () => {
     expect(script).toMatch(/config\.languages\s*=/);
     expect(script).toMatch(/config\.replayFilter\s*=/);
+    expect(script).toMatch(/config\.disableWebStreams\s*=\s*'true'/);
   });
 
   test('replayFilter is omitted when left at the default', () => {
@@ -78,9 +90,10 @@ describe('configure page wires both controls to updateLink', () => {
 });
 
 describe('configure page still restores existing config', () => {
-  test('languages and replayFilter are restored from existingConfig', () => {
+  test('languages, replayFilter and disableWebStreams are restored from existingConfig', () => {
     expect(script).toMatch(/existingConfig\.languages/);
     expect(script).toMatch(/existingConfig\.replayFilter/);
+    expect(script).toMatch(/existingConfig\.disableWebStreams/);
   });
 
   test('the replay scope restore defaults to all', () => {

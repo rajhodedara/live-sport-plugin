@@ -21,6 +21,11 @@
 
 process.env.NODE_ENV = 'test';
 
+jest.mock('../src/impitClient', () => ({
+  safeFetch: jest.fn()
+}));
+const { safeFetch } = require('../src/impitClient');
+
 const DamiTvProvider = require('../src/providers/DamiTvProvider');
 const CircuitBreakerService = require('../src/services/CircuitBreakerService');
 

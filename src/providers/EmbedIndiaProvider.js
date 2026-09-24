@@ -79,7 +79,7 @@ class EmbedIndiaProvider extends BaseProvider {
     try {
       if (!embedUrl.includes('embedindia')) return null;
       
-      const match = embedUrl.match(/embed(?:-noads)?\/(?:admin\/)?([^\/?]+)/);
+      const match = embedUrl.match(/embed(?:-noads)?\/(?:admin\/)?([^?#]+)/);
       if (!match) return null;
       const channelId = match[1];
 
@@ -87,7 +87,7 @@ class EmbedIndiaProvider extends BaseProvider {
       const origin = new URL(embedUrl).origin;
 
       const stdout = await new Promise((resolve) => {
-        execFile('node', [scriptPath, channelId, referer], { timeout: 15000 }, (err, stdout, stderr) => {
+        execFile('node', [scriptPath, channelId, referer, 'EMPTY', embedUrl], { timeout: 15000 }, (err, stdout, stderr) => {
           resolve(stdout + '\n' + stderr);
         });
       });

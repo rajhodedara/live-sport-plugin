@@ -75,7 +75,7 @@ class PpvStProvider extends BaseProvider {
       const scriptPath = path.join(__dirname, 'run_gasm_india.js');
 
       const stdout = await new Promise((resolve, reject) => {
-        execFile('node', [scriptPath, channelId, referer], { timeout: 15000 }, (err, stdout, stderr) => {
+        execFile('node', [scriptPath, channelId, referer, 'EMPTY', embedUrl], { timeout: 15000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error(stderr || err.message));
           resolve(stdout);
         });

@@ -15,6 +15,8 @@ jest.mock('../src/impitClient', () => ({
   getImpit: () => null,
 }));
 
+process.env.ENABLE_SPEED_PROBE = 'true';
+
 const { safeFetch } = require('../src/impitClient');
 const { verifyStreams } = require('../src/streams');
 const M3U8ParserService = require('../src/services/M3U8ParserService');
