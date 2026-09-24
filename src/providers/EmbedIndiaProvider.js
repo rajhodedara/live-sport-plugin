@@ -83,12 +83,11 @@ class EmbedIndiaProvider extends BaseProvider {
       if (!match) return null;
       const channelId = match[1];
 
-      const scriptPath = path.join(__dirname, 'run_puppeteer_extractor.js');
+      const scriptPath = path.join(__dirname, 'run_gasm_india.js');
       const origin = new URL(embedUrl).origin;
-      const targetUrl = `https://embedindia.st/embed/${channelId}`;
 
       const stdout = await new Promise((resolve) => {
-        execFile('node', [scriptPath, targetUrl, referer], { timeout: 45000 }, (err, stdout, stderr) => {
+        execFile('node', [scriptPath, channelId, referer], { timeout: 15000 }, (err, stdout, stderr) => {
           resolve(stdout + '\n' + stderr);
         });
       });

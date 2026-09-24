@@ -72,11 +72,10 @@ class PpvStProvider extends BaseProvider {
       if (!match) return streams;
       const channelId = match[1];
 
-      const scriptPath = path.join(__dirname, 'run_puppeteer_extractor.js');
-      const targetUrl = `https://embedindia.st/embed/${channelId}`;
+      const scriptPath = path.join(__dirname, 'run_gasm_india.js');
 
       const stdout = await new Promise((resolve, reject) => {
-        execFile('node', [scriptPath, targetUrl, referer], { timeout: 45000 }, (err, stdout, stderr) => {
+        execFile('node', [scriptPath, channelId, referer], { timeout: 15000 }, (err, stdout, stderr) => {
           if (err) return reject(new Error(stderr || err.message));
           resolve(stdout);
         });

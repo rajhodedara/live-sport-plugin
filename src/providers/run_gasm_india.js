@@ -100,12 +100,49 @@ global.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: ()
 global.btoa = (str) => Buffer.from(str).toString('base64');
 global.atob = (b64Encoded) => Buffer.from(b64Encoded, 'base64').toString();
 
+const { safeFetch: gasmSafeFetch } = require('../impitClient.js');
 const OriginalRequest = global.Request;
 global.Request = function(input, init) {
   if (typeof input === 'string' && input.startsWith('/')) {
     input = targetOrigin + input;
   }
   return new OriginalRequest(input, init);
+};
+
+global.fetch = async function(input, init) {
+  let url = input;
+  if (input instanceof Request) {
+    url = input.url;
+    init = {
+      method: input.method,
+      headers: Object.fromEntries(input.headers.entries()),
+      body: input.body
+    };
+  } else if (typeof input === 'string' && input.startsWith('/')) {
+    url = targetOrigin + input;
+  }
+  
+  if (!init) init = {};
+  if (!init.headers) init.headers = {};
+  init.headers['User-Agent'] = global.navigator.userAgent;
+  init.headers['Referer'] = global.document.referrer;
+  
+  try {
+    const res = await gasmSafeFetch(url, init);
+    // Wrap to match standard Response API for WASM code
+    return {
+        ok: res.ok,
+        status: res.status,
+        headers: {
+            get: (name) => res.headers[name.toLowerCase()]
+        },
+        text: () => res.text(),
+        json: () => res.json(),
+        arrayBuffer: () => res.arrayBuffer()
+    };
+  } catch (e) {
+    throw e;
+  }
 };
 
 let capturedGoat = null;

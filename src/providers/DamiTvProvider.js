@@ -260,17 +260,11 @@ class DamiTvProvider extends BaseProvider {
 
       if (!matchId) return streams;
 
-      // 1. DamiTV's extraction API returns signed HLS URLs directly.
-      //    (Verified unauthenticated: identical responses with no Referer,
-      //    a valid one, and a wrong one.)
       let extractData = null;
+      const { safeFetch } = require('../impitClient');
       try {
-        const extractRes = await this.proxyFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-            'Referer': embedUrl
-          },
-          signal: AbortSignal.timeout(8000)
+        const extractRes = await safeFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
+          timeoutMs: 8000
         });
 
         if (extractRes.ok) {
@@ -280,17 +274,11 @@ class DamiTvProvider extends BaseProvider {
         console.warn(`[${this.name}] API extraction failed for ${matchId}, falling back to embed chain...`);
       }
 
-      // 2. Wrap direct URLs through our manifest proxy (same convention as
-      //    EmbedStProvider): the proxy fetches the playlist with the CDN
-      //    Referer, and HlsRewriteService maps the TikTok .image segments to
-      //    the CF workers, which strip the fake 42-byte RIFF/WEBP header.
-      //    Handing the raw upstream URL to the player skips that repair and
-      //    the verification step drops the stream (observed 403-at-mint).
-      if (extractData && extractData.success) {
-        const referer = 'https://damitv.st/';
-        const origin = 'https://damitv.st';
-        const proxy = (upstream) => `${BASE_URL}/api/manifest?url=${encodeURIComponent(upstream)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+      const referer = 'https://damitv.st/';
+      const origin = 'https://damitv.st';
+      const proxy = (upstream) => `${BASE_URL}/api/manifest?url=${encodeURIComponent(upstream)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
 
+      if (extractData && extractData.success) {
         if (extractData.hlsUrl) {
           streams.push(new StreamEntity({
             name: this.name,
@@ -311,37 +299,34 @@ class DamiTvProvider extends BaseProvider {
         }
       }
 
+      // Check manual sources if API failed or returned "no sources"
       if (streams.length === 0) {
-        console.log(`[${this.name}] API extraction failed for ${matchId}, using Puppeteer directly on live page`);
-        const scriptPath = require('path').join(__dirname, 'run_puppeteer_extractor.js');
-        const targetUrl = `https://damitv.st/live/${matchId}`;
-        const referer = 'https://damitv.st/';
-        
         try {
-            const stdout = await new Promise((resolve) => {
-              require('child_process').execFile('node', [scriptPath, targetUrl, referer], { timeout: 45000 }, (err, stdout, stderr) => {
-                resolve(stdout + '\n' + stderr);
-              });
-            });
-            
-            const m = stdout.match(/"file":\s*"(https?:\/\/[^"]+\.m3u8.*?)"/);
-            if (m) {
-                console.log(`[${this.name}] Puppeteer Extracted M3U8: ${m[1]}`);
-                const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m[1])}&referer=${encodeURIComponent('https://damitv.st/')}&origin=${encodeURIComponent('https://damitv.st')}`;
-                streams.push(new StreamEntity({
-                  name: this.name,
-                  title: matchTitle,
-                  url: proxyUrl,
-                  behaviorHints: { notWebReady: true },
-                  resolution: 'HD'
-                }));
-            }
-        } catch (err) {
-            console.warn(`[${this.name}] Puppeteer extraction failed for ${targetUrl}: ${err.message}`);
+          const msRes = await safeFetch('https://damitv.st/data/manual-sources.json?t=' + Date.now(), {
+             timeoutMs: 5000
+          });
+          if (msRes.ok) {
+             const msData = await msRes.json();
+             if (msData && msData[matchId]) {
+                for (const st of msData[matchId]) {
+                   if (st.url && st.url.includes('.m3u8')) {
+                      streams.push(new StreamEntity({
+                        name: this.name,
+                        title: matchTitle,
+                        url: proxy(st.url),
+                        behaviorHints: { notWebReady: true },
+                        resolution: 'HD'
+                      }));
+                   }
+                }
+             }
+          }
+        } catch (e) {
+          console.warn(`[${this.name}] Manual sources fetch failed:`, e.message);
         }
       }
       
-      // 4. Absolute fallback to web player
+      // Absolute fallback to web player
 
       if (streams.length === 0) {
         streams.push(new StreamEntity({
