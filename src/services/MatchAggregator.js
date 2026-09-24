@@ -232,8 +232,8 @@ class MatchAggregator {
     };
     const c1 = _normalizeCategory(p1.category);
     const c2 = _normalizeCategory(p2.category);
-    const isCollegeFootball = (c1 === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
-                             (c2 === 'college' && (c1 === 'american_football' || c1 === 'football'));
+    const isCollegeFootball = ((p1.category || '').toLowerCase() === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
+                              ((p2.category || '').toLowerCase() === 'college' && (c1 === 'american_football' || c1 === 'football'));
     if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeFootball) {
       return false;
     }

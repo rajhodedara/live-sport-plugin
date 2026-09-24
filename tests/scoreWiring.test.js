@@ -105,7 +105,7 @@ describe('score reaches the description status line', () => {
       {}
     );
     expect(statusLine(meta)).toContain('Kickoff');
-    expect(statusLine(meta)).not.toContain('2:3');
+    expect(statusLine(meta)).not.toContain('Score');
   });
 });
 

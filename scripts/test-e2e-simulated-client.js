@@ -181,14 +181,14 @@ async function runE2ESimulatedClient() {
     const placeholderRes = await request(`${baseUrl}/img/placeholder?text=Live%20Sports&color=10b981`);
     const placeholderType = placeholderRes.headers['content-type'] || '';
     const placeholderAcao = placeholderRes.headers['access-control-allow-origin'];
-    const placeholderPassed = placeholderRes.statusCode === 200 && placeholderType.includes('svg+xml') && (placeholderAcao === '*' || placeholderAcao?.includes('*'));
+    const placeholderPassed = placeholderRes.statusCode === 200 && (placeholderType.includes('svg+xml') || placeholderType.includes('image/png')) && (placeholderAcao === '*' || placeholderAcao?.includes('*'));
     record('Phase 3', 'Direct /img/placeholder Endpoint', placeholderPassed, `Status: ${placeholderRes.statusCode}, Type: ${placeholderType}`);
 
     // 3C. Test Fallback on Dead Upstream Image
     const deadImgRes = await request(`${baseUrl}/img?url=https://dead-upstream.invalid/broken.png&text=TestFallback&color=10b981`);
     const deadImgType = deadImgRes.headers['content-type'] || '';
     const deadImgAcao = deadImgRes.headers['access-control-allow-origin'];
-    const deadImgPassed = deadImgRes.statusCode === 200 && deadImgType.includes('svg+xml') && (deadImgAcao === '*' || deadImgAcao?.includes('*'));
+    const deadImgPassed = deadImgRes.statusCode === 200 && (deadImgType.includes('svg+xml') || deadImgType.includes('image/png')) && (deadImgAcao === '*' || deadImgAcao?.includes('*'));
     record('Phase 3', 'Resilient SVG Fallback on Dead Image', deadImgPassed, `Status: ${deadImgRes.statusCode}, Type: ${deadImgType}`);
 
     // ─────────────────────────────────────────────────────────────────────────

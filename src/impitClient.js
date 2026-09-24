@@ -117,6 +117,10 @@ async function safeFetch(url, opts = {}) {
         };
       } catch (impitErr) {
         lastErr = impitErr;
+        const errMsg = String(impitErr);
+        if (errMsg.includes('InvalidCertificate') || errMsg.includes('UnknownIssuer') || errMsg.includes('certificate has expired')) {
+           break;
+        }
         if (attempt < maxAttempts) {
            await new Promise(r => setTimeout(r, 800 * attempt));
         }

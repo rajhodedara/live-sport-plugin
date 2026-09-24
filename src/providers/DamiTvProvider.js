@@ -304,7 +304,7 @@ class DamiTvProvider extends BaseProvider {
       // Check manual sources if API failed or returned "no sources"
       if (streams.length === 0) {
         try {
-          const msRes = await safeFetch('https://damitv.st/data/manual-sources.json?t=' + Date.now(), {
+          const msRes = await this.proxyFetch('https://damitv.st/data/manual-sources.json?t=' + Date.now(), {
              timeoutMs: 5000
           });
           if (msRes.ok) {

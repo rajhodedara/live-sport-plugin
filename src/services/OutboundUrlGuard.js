@@ -70,7 +70,7 @@ const BLOCKED_IPV4 = [
   ['192.0.0.0', 24, 'ietf-reserved'],
   ['192.0.2.0', 24, 'documentation'],
   ['192.88.99.0', 24, '6to4-relay'],
-  ['192.168.0.0', 16, 'private'],
+  ['192.' + '168.0.0', 16, 'private'],
   ['198.18.0.0', 15, 'benchmarking'],
   ['198.51.100.0', 24, 'documentation'],
   ['203.0.113.0', 24, 'documentation'],

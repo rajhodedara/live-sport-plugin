@@ -71,7 +71,7 @@ async function runE2ETests() {
       date: String(Date.now() - 1000 * 60 * 30),
       popular: '1',
       sources: [
-        { source: 'iptv-org', id: 'sky_sports_pl', quality: '1080p', url: validStreamUrl }
+        { source: 'daddylive', id: 'sky_sports_pl', quality: '1080p', url: validStreamUrl }
       ]
     };
 
@@ -98,7 +98,7 @@ async function runE2ETests() {
     // Allow fire-and-forget prewarm promise to complete
     await sleep(100);
 
-    const prewarmedKey = 'iptv-org:' + testMatch1.id + ':sky_sports_pl';
+    const prewarmedKey = 'daddylive:' + testMatch1.id + ':sky_sports_pl';
     const cachedStreams = cache.get(prewarmedKey);
     assert('prewarmMatch successfully minted tokens in background', cachedStreams !== null && cachedStreams.length > 0);
 
