@@ -721,13 +721,6 @@
           <p class="hint">Comma separated. These fixtures are surfaced first.</p>
         </div>
 
-        <div class="field">
-          <label for="disableWebStreams" class="checkbox-label" style="justify-content: flex-start; padding-left: 12px; min-height: 46px;">
-            <input type="checkbox" id="disableWebStreams" value="true">
-            Disable web streams
-          </label>
-          <p class="hint" style="margin-top: 7px;">Completely hide streams that open in a browser.</p>
-        </div>
 
         <div class="field">
           <label for="languages">Preferred languages</label>
@@ -918,7 +911,7 @@
     const timezoneSelect = document.getElementById('timezone');
     const languagesInput = document.getElementById('languages');
     const replayFilterSelect = document.getElementById('replayFilter');
-    const disableWebStreamsCheckbox = document.getElementById('disableWebStreams');
+
     const configSummary = document.getElementById('configSummary');
     const installStatus = document.getElementById('installStatus');
 
@@ -1012,10 +1005,7 @@
       replayFilterSelect.value = existingConfig.replayFilter === 'mainstream' ? 'mainstream' : 'all';
     }
 
-    if (disableWebStreamsCheckbox && existingConfig.disableWebStreams === 'true') {
-      disableWebStreamsCheckbox.checked = true;
-      disableWebStreamsCheckbox.closest('.checkbox-label').classList.add('active');
-    }
+
 
     if (existingConfig.sports) {
       if (existingConfig.sports === 'none') {
@@ -1090,9 +1080,7 @@
       // only when narrowed. English-first and 'all' are baked in server-side.
       if (languages) config.languages = languages;
       if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
-      if (disableWebStreamsCheckbox && disableWebStreamsCheckbox.checked) {
-        config.disableWebStreams = 'true';
-      }
+
 
       if (selectedSports.length < checkboxes.length) {
         config.sports = selectedSports.join(',');
@@ -1240,14 +1228,7 @@
     // changing the replay scope left the copied link on its previous config.
     if (languagesInput) languagesInput.addEventListener('input', updateLink);
     if (replayFilterSelect) replayFilterSelect.addEventListener('change', updateLink);
-    if (disableWebStreamsCheckbox) {
-      disableWebStreamsCheckbox.addEventListener('change', (e) => {
-        const label = e.target.closest('.checkbox-label');
-        if (e.target.checked) label.classList.add('active');
-        else label.classList.remove('active');
-        updateLink();
-      });
-    }
+
     [...checkboxes, ...sourceCheckboxes].forEach(cb => {
       cb.addEventListener('change', (e) => {
         const label = e.target.closest('.checkbox-label');

@@ -903,21 +903,6 @@ async function handleStream(type, id, config) {
   // Verification now happens once per mint (mintVerifiedSources), not per request.
   // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
 
-  if (config && config.disableWebStreams === 'true') {
-    const originalCount = streams.length;
-    const filtered = streams.filter(s => {
-      const isYouTube = !!s.ytId || (s.externalUrl && /youtube\.com|youtu\.be/i.test(s.externalUrl));
-      if (isYouTube) return true;
-      const isWebFallback = !!s.externalUrl || s.name === '🌐 Web Stream' || s.name === 'Nuvio Web Player' || !!s._rzWeb || !!s._livetvReplay;
-      const requiresBrowser = s.behaviorHints && s.behaviorHints.notWebReady === true;
-      return !isWebFallback && !requiresBrowser;
-    });
-    if (filtered.length !== originalCount) {
-      console.log(`[streams.js] Disabled ${originalCount - filtered.length} web stream(s) for ${matchId}`);
-      streams.length = 0;
-      streams.push(...filtered);
-    }
-  }
 
   return {
     streams,
