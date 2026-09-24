@@ -126,7 +126,10 @@ async function safeFetch(url, opts = {}) {
         if (timer) clearTimeout(timer);
       }
     }
-    console.warn(`[impitClient] impit fetch failed after ${maxAttempts} attempt(s) (${lastErr.message}), falling back to undici for: ${url}`);
+    const cleanErr = lastErr && lastErr.message 
+      ? lastErr.message.replace(/\s+/g, ' ').trim() 
+      : String(lastErr);
+    console.warn(`[impitClient] impit fetch failed after ${maxAttempts} attempt(s) (${cleanErr}), falling back to undici for: ${url.slice(0, 90)}`);
   }
 
   // The undici path, callable directly from the impit 403 branch so the same
