@@ -249,7 +249,7 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
   return global.WebAssembly.instantiate(buffer, importObject);
 };
 
-const { safeFetch } = require('../impitClient');
+
 
 global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
@@ -290,7 +290,7 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       reqHeaders.set('Content-Type', 'application/octet-stream');
       console.log('HEADERS:', Array.from(reqHeaders.entries()));
       
-      const response = await safeFetch(proxyUrl, {
+      const response = await gasmSafeFetch(proxyUrl, {
           method: fetchOpts.method || 'POST',
           headers: Object.fromEntries(reqHeaders.entries()),
           body: reqBody ? Buffer.from(reqBody) : undefined
