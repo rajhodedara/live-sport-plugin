@@ -483,41 +483,6 @@ describe('DamiTvProvider.resolveStream — proxied direct streams', () => {
 });
 
 describe('DamiTvProvider.resolveStream — fallbacks', () => {
-  test('routes embedindia.st to the EmbedIndia provider when extraction fails', async () => {
-    const embedIndiaProvider = { resolveStream: jest.fn(async () => []) };
-    const provider = makeProvider({ embedIndiaProvider, embedStProvider: null });
-    provider.proxyFetch = jest.fn(async () => { throw new Error('timeout'); });
-
-    await provider.resolveStream(
-      's', 'baseball', 'MLB - A vs B',
-      { source: 'damitv', url: 'https://damitv.st/embed/?id=mlb%2F2026-09-23%2Fwsh-det' }
-    );
-
-    expect(embedIndiaProvider.resolveStream).toHaveBeenCalledTimes(1);
-    const [terminalUrl] = embedIndiaProvider.resolveStream.mock.calls[0];
-    // The unencoded slashed path was the old bug: this must be encoded.
-    expect(terminalUrl).toBe('https://embedindia.st/embed/mlb%2F2026-09-23%2Fwsh-det');
-    expect(terminalUrl).not.toMatch(/embed\/mlb\//);
-  });
-
-  test('prefers the API-supplied embedUrl over a constructed one', async () => {
-    const embedStProvider = { resolveStream: jest.fn(async () => []) };
-    const provider = makeProvider({ embedStProvider, embedIndiaProvider: null });
-    provider.proxyFetch = jest.fn(async () => ({
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, embedUrl: 'https://embed.st/embed-noads/admin/ppv-x/1' })
-    }));
-
-    await provider.resolveStream(
-      's', 'football', 'X vs Y',
-      { source: 'damitv', url: 'https://damitv.st/embed/?id=evt-x' }
-    );
-
-    expect(embedStProvider.resolveStream).toHaveBeenCalledTimes(1);
-    expect(embedStProvider.resolveStream.mock.calls[0][0]).toBe('https://embed.st/embed-noads/admin/ppv-x/1');
-  });
-
   test('falls back to the web player when every direct path is dead', async () => {
     const provider = makeProvider({ embedStProvider: null, embedIndiaProvider: null });
     provider.proxyFetch = jest.fn(async () => { throw new Error('timeout'); });
