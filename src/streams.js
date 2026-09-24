@@ -178,7 +178,7 @@ const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
 // the measured rate just reflects latency instead of throughput.
 const SPEED_PROBE_TIMEOUT_MS = Number(process.env.SPEED_PROBE_TIMEOUT_MS || 5000);
 const SPEED_PROBE_RANGE_BYTES = Number(process.env.SPEED_PROBE_RANGE_BYTES || 524288);
-const ENABLE_SPEED_PROBE = process.env.ENABLE_SPEED_PROBE === 'true';
+const ENABLE_SPEED_PROBE = process.env.ENABLE_SPEED_PROBE !== 'false';
 
 // Proxied /api/manifest URLs wrap an upstream token that expires on its own
 // schedule. Tag the URL with the resolve-cache key that produced it so the
@@ -554,7 +554,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
       }
 
-      if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
+      if (ENABLE_SPEED_PROBE) {
         await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
       }
 
