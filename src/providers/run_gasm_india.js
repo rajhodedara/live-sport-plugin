@@ -100,7 +100,48 @@ global.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: ()
 global.btoa = (str) => Buffer.from(str).toString('base64');
 global.atob = (b64Encoded) => Buffer.from(b64Encoded, 'base64').toString();
 
-const { safeFetch: gasmSafeFetch } = require('../impitClient.js');
+let impit = null;
+try {
+  const { Impit } = require('impit');
+  impit = new Impit();
+} catch (e) {}
+const { request: undiciRequest } = require('undici');
+
+async function gasmSafeFetch(url, opts) {
+  if (impit) {
+    try {
+      const res = await impit.fetch(url, opts);
+      const buf = await res.arrayBuffer();
+      if (res.status === 403) {
+         return await doUndici(url, opts);
+      }
+      return {
+        ok: res.status >= 200 && res.status < 300,
+        status: res.status,
+        headers: res.headers,
+        text: async () => Buffer.from(buf).toString('utf8'),
+        json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
+        arrayBuffer: async () => buf,
+      };
+    } catch(e) {
+      return await doUndici(url, opts);
+    }
+  }
+  return await doUndici(url, opts);
+}
+
+async function doUndici(url, opts) {
+  const res = await undiciRequest(url, opts);
+  const buf = await res.body.arrayBuffer();
+  return {
+        ok: res.statusCode >= 200 && res.statusCode < 300,
+        status: res.statusCode,
+        headers: res.headers,
+        text: async () => Buffer.from(buf).toString('utf8'),
+        json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
+        arrayBuffer: async () => buf,
+  };
+}
 const OriginalRequest = global.Request;
 global.Request = function(input, init) {
   if (typeof input === 'string' && input.startsWith('/')) {
