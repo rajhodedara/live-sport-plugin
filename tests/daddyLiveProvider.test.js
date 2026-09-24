@@ -527,6 +527,9 @@ describe('DaddyLiveProvider', () => {
     test('handleCatalog excludes matches with 0 sources', async () => {
       const { handleCatalog } = require('../src/catalog');
       const cacheService = container.resolve('cacheService');
+      
+      container.resolve('matchAggregator').syncMatches = async () => [];
+      container.resolve('cronService').isSyncing = true;
 
       const originalMatches = cacheService.getMatches();
       cacheService.setMatches([

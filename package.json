@@ -38,7 +38,10 @@
     "opossum": "^10.0.0",
     "sharp": "^0.35.4",
     "stremio-addon-sdk": "^1.6.10",
-    "undici": "^8.10.0"
+    "ts-node": "^10.9.2",
+    "typescript": "^7.0.2",
+    "undici": "^8.10.0",
+    "youtubei.js": "^18.1.0"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -55,7 +58,8 @@
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/test-scripts/",
-      "/scratch/"
+      "/scratch/",
+      "/nuvio-proxy-2/"
     ]
   },
   "overrides": {

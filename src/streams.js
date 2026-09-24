@@ -24,7 +24,7 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 2, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 2, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
@@ -39,7 +39,7 @@ function selectSources(matchSources, config) {
     const enabled = config.sources.split(',');
     // embedindia / embedst / streamedpk are the same embed chain — all three are
     // controlled by the single 'streamedpk' toggle on the configure page.
-    const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
+    const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
     return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
@@ -51,7 +51,7 @@ function selectSources(matchSources, config) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  const KNOWN_FALLBACKS = ['daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
+  const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv'];
   return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
@@ -95,6 +95,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'daddylive') {
     const provider = container.resolve('daddyLiveProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'ppvst') {
+    const provider = container.resolve('ppvStProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -175,6 +178,7 @@ const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
 // the measured rate just reflects latency instead of throughput.
 const SPEED_PROBE_TIMEOUT_MS = Number(process.env.SPEED_PROBE_TIMEOUT_MS || 5000);
 const SPEED_PROBE_RANGE_BYTES = Number(process.env.SPEED_PROBE_RANGE_BYTES || 524288);
+const ENABLE_SPEED_PROBE = process.env.ENABLE_SPEED_PROBE === 'true';
 
 // Proxied /api/manifest URLs wrap an upstream token that expires on its own
 // schedule. Tag the URL with the resolve-cache key that produced it so the
@@ -282,10 +286,23 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
       );
       const headersAt = performance.now();
       if (!response || !response.ok) return;
-      const bytes = Buffer.byteLength(Buffer.from(await response.arrayBuffer()));
+      let bytes = 0;
+      if (response.body && typeof response.body.getReader === 'function') {
+        const reader = response.body.getReader();
+        try {
+          const { value } = await reader.read();
+          if (value) bytes = value.byteLength;
+        } finally {
+          reader.cancel().catch(() => {});
+          controller.abort();
+        }
+      } else {
+        const buf = await response.arrayBuffer();
+        bytes = buf.byteLength;
+      }
       const end = performance.now();
-      const segmentBytes = getContentRangeTotal(response.headers);
-      if (!segmentBytes) return;
+      const segmentBytes = getContentRangeTotal(response.headers) || bytes;
+      if (!segmentBytes || bytes === 0) return;
       // Exclude TTFB from the rate denominator: with a small ranged read the
       // body lands almost instantly, so including connect+first-byte latency
       // would make the "rate" a latency measurement and understate fast links.
@@ -537,7 +554,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
         if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
       }
 
-      await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
+      if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
+        await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
+      }
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
@@ -552,11 +571,11 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache) {
 
 // Mint streams for a single source and health-verify them before they enter the
 // cache, so verification runs once per mint instead of on every request.
-async function mintVerifiedSources(src, match, config, cacheKey) {
+async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
   const minted = await resolveSource(src, match, config);
-  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache);
+  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, opts);
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -565,7 +584,7 @@ async function mintVerifiedSources(src, match, config, cacheKey) {
 // 4th in priority order) were minted while the user was already waiting on the
 // click. Callers can still pass an explicit smaller number if they ever want to
 // cap it, but the safe default is "everything".
-async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER) {
+async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
     const resolveCache = container.resolve('streamResolveCache');
@@ -576,7 +595,7 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER) {
     await Promise.allSettled(targets.map(src => {
       const key = `${src.source}:${match.id}:${src.id}`;
       if (resolveCache.get(key)) return Promise.resolve(null);
-      return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key));
+      return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, opts));
     }));
   } catch (err) {
     console.warn('[Prewarm] failed:', err.message);
@@ -733,7 +752,8 @@ async function handleStream(type, id, config) {
     'embedindia': 'Streamed.pk', 'embedst': 'Streamed.pk', 'streamedpk': 'Streamed.pk',
     'replayzone': 'ReplayZone',
     'livetv': 'LiveTV',
-    'damitv': 'DamiTV'
+    'damitv': 'DamiTV',
+    'ppvst': 'PPV.st'
   };
 
   streams.forEach(s => {

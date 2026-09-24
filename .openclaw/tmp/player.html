@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>ABC channel 17 KMIZ Jefferson City/Columbia US</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#001e28;height:100vh;overflow:hidden;font-family:Arial,sans-serif}
+#player{width:100%;height:100%}
+.loading{position:fixed;top:0;left:0;width:100%;height:100%;background:#000;color:#ff0046;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:999;transition:opacity .5s}
+.loading.hidden{opacity:0;pointer-events:none}
+.loader{border:4px solid rgba(255,0,70,.2);border-top:4px solid #ff0046;border-radius:50%;
+  width:40px;height:40px;animation:spin 1s linear infinite;margin-bottom:15px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.css-f4aimg,.css-49myqb{display:none}
+</style>
+<!-- Player ads — free plan only -->
+<script data-cfasync="false" async type="text/javascript" src="//fw.hubeamily.com/rZ7w5yj1RZdV9t/139241"></script>
+<script data-cfasync="false" async type="text/javascript" src="//zq.trovesleepit.com/s82c4sLERPMk/139242"></script>
+<!-- Histats.com START (async) -->
+<script type="text/javascript">var _Hasync=_Hasync||[];_Hasync.push(['Histats.start','1,5019782,4,0,0,0,00010000']);_Hasync.push(['Histats.fasi','1']);_Hasync.push(['Histats.track_hits','']);(function(){var hs=document.createElement('script');hs.type='text/javascript';hs.async=true;hs.src='//s10.histats.com/js15_as.js';(document.getElementsByTagName('head')[0]||document.getElementsByTagName('body')[0]).appendChild(hs);})();</script><noscript><img src="//sstatic1.histats.com/0.gif?5019782&101" alt="" border="0"></noscript>
+<!-- Histats.com END -->
+</head>
+<body>
+<div class="loading" id="loading"><div class="loader"></div><p>Loading stream...</p></div>
+<div id="player"></div>
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/p2p-media-loader-hlsjs@3.0.1/dist/p2p-media-loader-hlsjs.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@oplayer/core@1.2.38-beta.2/dist/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@oplayer/ui@1.3.4-beta.10/dist/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@oplayer/hls@1.2.28-beta.1/dist/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@oplayer/plugins@1.0.15-beta.4/dist/index.min.js"></script>
+<script>
+// Sandbox iframe detection
+(function(){
+  if(window.top===window.self)return;
+  try{document.domain=document.domain}catch(e){
+    window.location.replace('data:text/html,<html><body style="background:#000;color:#fff;text-align:center;padding-top:20%"><h2>Embedding Not Allowed</h2><p>Remove sandbox attribute.</p></body></html>');
+  }
+})();
+function RMmyfxCaBH(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';try{return decodeURIComponent(escape(atob(s)))}catch(e){return atob(s)}};var gdQYycQg='aHR0cHM';var OCERnswk='Og';var jKxdAzqA='Ly8';var bprvNpLC='Y2RubGl2ZXR2';var ZJZZUzlP='LnR2';var AVokOLKW='L3NlY3VyZS9hcGkvdjEv';var iShbzaLd='NmEyODhkMjc4MWQ4MTkyYmI3NmNiMWY1';var tVGuppEE='L3BsYXlsaXN0';var xvJsjjfq='Lm0zdTg';var HYJkkUmA='P3Rva2VuPU5tRXlPRGhrTWpjNE1XUTRNVGt5WW1JM05tTmlNV1kxT2pFM09UQXlOakU0TVRRek9URTZZMlJ1YkdsMlpYUjJMblIyT2poaFpHUTBOamsxTW1ZeVpqaGxNMkl1TnpFek5ERXlaalk1WmpZMVlqQm1NemxqTVRRNU16VXdPREJrTldKa05XUmhPRFEyTXpCaU5qWTBaalF4WkdVNE1UZzFOV0U1TVRVNFltWmtaVGs0T1E';var MNZAOfBWlMuj=RMmyfxCaBH(gdQYycQg)+RMmyfxCaBH(OCERnswk)+RMmyfxCaBH(jKxdAzqA)+RMmyfxCaBH(bprvNpLC)+RMmyfxCaBH(ZJZZUzlP)+RMmyfxCaBH(AVokOLKW)+RMmyfxCaBH(iShbzaLd)+RMmyfxCaBH(tVGuppEE)+RMmyfxCaBH(xvJsjjfq)+RMmyfxCaBH(HYJkkUmA);
+var _p2pMode="all";
+var _p2pList=[];
+var _CH="6a288d2781d8192bb76cb1f5";
+var _qp=new URLSearchParams(location.search).get('p2p');
+var _p2p=(_qp==='0')?false:(_qp==='1')?true:(_p2pMode==='all'||(_p2pMode==='allowlist'&&_p2pList.indexOf(_CH)!==-1));
+var _rt='5ade90c9153504e8cd0a605299978de7';
+var _ppv=false;
+var _cn='CDN Live TV';
+function _head(u){
+  var c=new AbortController(),id=setTimeout(function(){c.abort()},_ppv?5000:10000);
+  return fetch(u,{method:'HEAD',signal:c.signal})
+    .then(function(r){clearTimeout(id);return r.ok?200:r.status})
+    .catch(function(){clearTimeout(id);return 0});
+}
+function _err(msg,isReady){
+  var el=document.getElementById('loading');
+  var btn=isReady?'onclick="_refresh()"':'onclick="location.reload()"';
+  el.innerHTML='<div style="text-align:center;max-width:90%">'
+    +'<h2 style="color:#ff0046;margin-bottom:20px">'+(isReady?'Ready':'Stream Error')+'</h2>'
+    +'<p style="font-size:18px;margin:20px 0;color:#fff;line-height:1.5">'+msg+'</p>'
+    +'<button '+btn+' style="background:#ff0046;color:#fff;border:none;padding:12px 28px;'
+    +'border-radius:5px;font-size:16px;cursor:pointer;font-weight:bold">Refresh Page</button></div>';
+  el.style.display='';
+  el.classList.remove('hidden');
+}
+function _refresh(){
+  var u=new URL(location.href);
+  u.searchParams.set('first','0');
+  u.searchParams.set('ref_token',_rt);
+  location.href=u.toString();
+}
+function _wireP2P(hls){
+  try{ window._sap=hls; }catch(e){}
+  var eng=hls&&hls.p2pEngine; if(!eng)return;
+  try{ window._p2p=eng; }catch(e){}
+  var _s={http:0,p2p:0,peers:0,ch:_CH};
+  try{ eng.addEventListener('onSegmentLoaded',function(d){ var n=(d&&d.bytesLength)||0; if(d&&d.downloadSource==='p2p')_s.p2p+=n; else _s.http+=n; }); }catch(e){}
+  try{ eng.addEventListener('onPeerConnect',function(){_s.peers++;}); }catch(e){}
+  try{ eng.addEventListener('onPeerClose',function(){ if(_s.peers>0)_s.peers--; }); }catch(e){}
+  function _flush(){ if(_s.http+_s.p2p===0)return; try{ navigator.sendBeacon('https://api.cdnlivetv.tv/p2p-stats', JSON.stringify(_s)); }catch(e){} _s={http:0,p2p:0,peers:_s.peers,ch:_CH}; }
+  try{ setInterval(_flush,15000); }catch(e){}
+  try{ document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')_flush(); }); }catch(e){}
+  try{ window.addEventListener('pagehide',_flush); }catch(e){}
+}
+function _initPlayer(){
+  if(!window.OHls)return;
+  var player=OPlayer.make('#player',{
+    isLive:true,autoplay:true,muted:false,
+    source:{src:MNZAOfBWlMuj,format:'hls'}
+  }).use([
+    OUI({
+      pictureInPicture:true,
+      theme:{
+        primaryColor:'#ff0046',
+        progress:{position:'top',mini:true},
+        controller:{
+          slideToSeek:'never',
+          setting:{items:[{
+            name:'Quality',default:'Max',values:[],
+            onChange:function(v){
+              var hi=player.plugins.hls,hls=hi&&(hi.instance||hi.hls);if(!hls)return;var lvls=hls.levels;
+              var s=lvls.find(function(x){return(x.height+'p')===v});
+              if(s)hls.currentLevel=lvls.indexOf(s);
+            }
+          }]},
+          display:'always',coverButton:true,displayBehavior:'hover',time:false,
+          buttons:{live:{text:_cn,position:'right'}}
+        }
+      }
+    }),
+    (function(){
+      var _hlsConf={maxBufferLength:30,maxMaxBufferLength:60,backBufferLength:0,liveSyncDurationCount:3};
+      try{
+        if(_p2p && window.p2pml && window.p2pml.hlsjs && window.p2pml.hlsjs.HlsJsP2PEngine && window.Hls && window.Hls.isSupported && window.Hls.isSupported()){
+          if(!window.__p2pMixed){ window.Hls=window.p2pml.hlsjs.HlsJsP2PEngine.injectMixin(window.Hls); window.__p2pMixed=true; }
+          _hlsConf={maxBufferLength:30,maxMaxBufferLength:60,backBufferLength:30,liveSyncDurationCount:3};
+          _hlsConf.p2p={ core:{ swarmId:'ch-'+_CH, announceTrackers:['wss://api.cdnlivetv.tv/tracker'], highDemandTimeWindow:4, httpDownloadTimeWindow:6, p2pDownloadTimeWindow:30, httpDownloadInitialTimeoutMs:1500, rtcConfig:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:global.stun.twilio.com:3478'}]} }, onHlsJsCreated:function(hls){ try{ _wireP2P(hls); }catch(e){} } };
+        }
+      }catch(e){ _hlsConf={maxBufferLength:30,maxMaxBufferLength:60,backBufferLength:0,liveSyncDurationCount:3}; }
+      return window.OHls({config:_hlsConf});
+    })(),
+    new OPlugin.AirPlay(),
+    new OPlugin.Chromecast()
+  ]).create();
+  player.on('loadeddata',function(){
+    var t=document.querySelector('.css-17dq96f[aria-label="time"]');
+    if(t){
+      t.textContent=_cn;
+      new MutationObserver(function(){if(t.textContent!==_cn)t.textContent=_cn}).observe(t,{childList:true,subtree:true});
+    }
+    player.play().catch(function(){player.muted=true;player.play();});
+  });
+  try{
+    var hi=player.plugins.hls;
+    var _h=hi&&(hi.instance||hi.hls);
+    if(_h){
+      var _netT=0,_net=0,_mediaT=0;
+      var _resume=function(){try{_h.startLoad();}catch(e){}};
+      try{document.addEventListener('visibilitychange',function(){try{if(document.hidden)_h.stopLoad();else _h.startLoad(-1);}catch(e){}});}catch(e){}
+      _h.on(Hls.Events.FRAG_LOADED,function(){if(_net>0)_net=0;try{sessionStorage.removeItem('_authReload');}catch(e){}});
+      _h.on(Hls.Events.ERROR,function(ev,d){
+        if(!d||!d.fatal)return;
+        if(d.type===Hls.ErrorTypes.MEDIA_ERROR){
+          var n=Date.now();if(n-_mediaT>3000){_mediaT=n;try{_h.recoverMediaError();}catch(e){}}
+          return;
+        }
+        if(d.type===Hls.ErrorTypes.NETWORK_ERROR){
+          var _code=(d.response&&d.response.code)||0;
+          if(_code===403||_code===401){
+            var _n=0;try{_n=parseInt(sessionStorage.getItem('_authReload')||'0',10)||0;}catch(e){}
+            if(_n<3){try{sessionStorage.setItem('_authReload',String(_n+1));}catch(e){}
+              setTimeout(function(){try{location.reload();}catch(e){}},1500);return;}
+            try{_h.stopLoad();}catch(e){}
+            return;
+          }
+          var n2=Date.now();if(n2-_netT<2000)return;_netT=n2;_net++;
+          if(_net<=10){setTimeout(_resume,1200);}else{_net=0;setTimeout(function(){try{_h.stopLoad();_h.startLoad();}catch(e){}},4000);}
+          return;
+        }
+        setTimeout(_resume,1500);
+      });
+      var _lt=-1,_la=Date.now();
+      setInterval(function(){try{
+        var v=document.querySelector('video');if(!v||v.paused||v.ended){_la=Date.now();return;}
+        if(v.currentTime>_lt+0.05){_lt=v.currentTime;_la=Date.now();}
+        else if(Date.now()-_la>12000){_la=Date.now();_resume();}
+      }catch(e){}},5000);
+    }
+  }catch(e){}
+}
+(function _start(){
+  var isFirst=location.search.indexOf('first=0')===-1;
+  _head(MNZAOfBWlMuj).then(function(st){
+    if(st===200){
+      _initPlayer();
+      setTimeout(function(){
+        var l=document.getElementById('loading');
+        l.classList.add('hidden');
+        setTimeout(function(){l.style.display='none';},500);
+      },2000);
+    } else {
+      var msg='Stream loading failed. Please refresh.',isReady=false;
+      if(st===404){
+        msg=_ppv
+          ?'This is a pay-per-view event. It will only be available once the event starts.'
+          :'This channel is currently unavailable.';
+      } else if(st===403){
+        msg='Refresh the page and try again.';
+      } else if(st===0){
+        if(_ppv){
+          msg='This is a pay-per-view event. It will only be available once the event starts.';
+        } else if(isFirst){
+          msg='Channel ready to watch. Refresh the page.';isReady=true;
+        } else {
+          msg='Unable to connect to the stream server. Please try again later.';
+        }
+      }
+      _err(msg,isReady);
+    }
+  });
+})();
+</script>
+</body>
+</html>

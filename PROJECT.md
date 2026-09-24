@@ -49,4 +49,4 @@ Nuvio Live Sports Plugin is a Stremio v1 protocol addon built with Node.js/Expre
 ## Reference Documentation
 - `docs/DEPLOYMENT_GUIDE.md`: VPS deployment topology (Cloudflare -> Caddy -> PM2), DNS/TLS setup, and operational checks.
 - `docs/DADDYLIVE_IFRAME_DOMAINS.md`: How DaddyLive-family streams resolve, which embed domains exist, and their decoder strategies.
-- `docs/BANDWIDTH_AND_CACHING.md`: Where egress actually goes, why Cloudflare caches by file extension, the applied `/posters` + artwork fixes, and the still-pending `/img` Cache Rule. **Read this before touching `public/posters/`, the `/posters` static mounts, or the `/img*` routes.**
+- `docs/BANDWIDTH_AND_CACHING.md`: Where egress actually goes, why Cloudflare caches by file extension, the applied `/posters` + artwork fixes, and the `/img` Cache Rule (deployed 2026-09-24). **Read this before touching `public/posters/`, the `/posters` static mounts, or the `/img*` routes.**

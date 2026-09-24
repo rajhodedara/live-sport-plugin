@@ -68,7 +68,7 @@ class DaddyLiveProvider extends BaseProvider {
     super(opts);
     this.name = 'DaddyLive';
     this.baseDomains = ['https://dlstreams.st', 'https://dlive.sx'];
-    this.folders = ['stream', 'cast', 'watch', 'player', 'plus', 'casting'];
+    this.folders = ['casting', 'stream', 'cast', 'watch', 'player', 'plus'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`

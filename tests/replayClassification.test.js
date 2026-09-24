@@ -193,7 +193,7 @@ describe('mapMatchToMetaPreview replay labelling', () => {
   });
 
   test('the nuvio_sport_ id prefix is preserved for replays', () => {
-    const meta = mapMatchToMetaPreview(finishedMatch());
+    const meta = mapMatchToMetaPreview(finishedMatch(), {}, 'series');
     expect(meta.id).toBe('nuvio_sport_rz_test-fixture-1');
     expect(meta.type).toBe('series');
     expect(meta.behaviorHints.defaultVideoId).toBe('nuvio_sport_rz_test-fixture-1:1:1');

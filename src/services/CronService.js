@@ -12,6 +12,9 @@ class CronService {
     this.syncing = false;
   }
 
+  get isSyncing() { return this.syncing; }
+  set isSyncing(v) { this.syncing = v; }
+
   async runSync() {
     if (this.syncing) return;
     this.syncing = true;
@@ -61,7 +64,7 @@ class CronService {
     //   - capped at PREWARM_MAX matches per tick;
     //   - this tick also skips any match whose sources are already cached, so a
     //     warm instance does no work at all.
-    cron.schedule('*/3 * * * *', async () => {
+    cron.schedule(process.env.PREWARM_CRON_SCHEDULE || '*/10 * * * *', async () => {
       try {
         await this.prewarmPopular();
       } catch (err) {
@@ -115,7 +118,7 @@ class CronService {
    */
   async prewarmPopular() {
     try {
-      const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 12);
+      const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 6);
       const { isMatchLive, isReplayMatch } = require('../catalog');
       const { prewarmMatch } = require('../streams');
       const resolveCache = this.streamResolveCache;
@@ -152,7 +155,7 @@ class CronService {
       console.log(`[CronService] Prewarming ${todo.length} live match(es) (of ${live.length} live)`);
       // Sequential: never bursts upstream. Low priority, so slow is fine.
       for (const m of todo) {
-        await prewarmMatch(m, null, Number.MAX_SAFE_INTEGER).catch(() => {});
+        await prewarmMatch(m, null, Number.MAX_SAFE_INTEGER, { skipSpeedProbe: true }).catch(() => {});
       }
     } catch (err) {
       console.error('[CronService] Prewarm failed:', err.message);

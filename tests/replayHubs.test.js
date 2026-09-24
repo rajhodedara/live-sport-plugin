@@ -37,6 +37,8 @@ describe('Replay Hubs & Clean Catalog Architecture', () => {
   ];
 
   beforeAll(() => {
+    container.resolve('matchAggregator').syncMatches = async () => [];
+    container.resolve('cronService').syncing = true; // block ensureFresh
     container.resolve('cacheService').setMatches(sampleMatches);
   });
 

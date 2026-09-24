@@ -97,11 +97,19 @@ Cloudflare rule was needed for this endpoint.
 `dist/public/posters/replays/` and `dist/collections/`.
 
 Originals preserved at `scratch/posters-backup-2026-09-23T15-52-22-686Z/`
+
+Durable across deploys: `npm run build` only copies `public/**/*` into
+`dist/public/` (via `copyfiles`). Nothing re-encodes, regenerates, or writes into
+`public/posters/`, and no npm script post-processes these images, so the
+recompressed bytes survive a redeploy unchanged.
+
 (git-ignored, 1851 KB).
 
-## Required Cloudflare step (not in the repo)
+## Cloudflare Cache Rule for `/img`
 
-`/img*` cannot be fixed by code. Add one Cache Rule:
+`/img*` cannot be fixed by code. One Cache Rule was required; it was
+**deployed and verified on 2026-09-24**. The settings are kept here so the rule
+can be recreated if the zone is ever rebuilt:
 
 - **If** `URI Path` **starts with** `/img`
 - **Then** Cache eligibility: **Eligible for cache**
@@ -119,10 +127,12 @@ Purge the zone cache after deploying so old `BYPASS`/`no-store` responses clear.
 The template named **"Cache default file extensions"** in the Cache Rules UI
 describes the default precisely: *"making only default extensions eligible for
 cache"*. That is the whole reason `/img*` needs an explicit rule while
-`/posters/*.jpg` does not. Until the rule above exists, `/img/collection`,
-`/img/match`, `/img/sport` and `/img?url=` will all keep reporting `DYNAMIC`
-**even though their `Cache-Control` headers are already correct** — there is no
-code or header change that can fix an extensionless path.
+`/posters/*.jpg` does not. Before the rule existed, `/img/collection`, `/img/match`, `/img/sport` and
+`/img?url=` all reported `DYNAMIC` **even though their `Cache-Control` headers
+were already correct** — no code or header change can fix an extensionless path.
+After deployment all four report `MISS` on a cold edge and `HIT` with an `Age`
+header thereafter. If any of them ever regresses to `DYNAMIC`, this rule has been
+lost or placed on the wrong zone — check the rule before touching any code.
 
 ## Do NOT do these
 

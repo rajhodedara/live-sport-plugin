@@ -23,6 +23,7 @@ const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
 const IframeDomainRegistry = require('./services/IframeDomainRegistry');
+const PpvStProvider = require('./providers/PpvStProvider');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -61,6 +62,7 @@ container.register({
   daddyLiveProvider: asClass(DaddyLiveProvider).singleton(),
   liveTvProvider: asClass(LiveTVProvider).singleton(),
   damiTvProvider: asClass(DamiTvProvider).singleton(),
+  ppvStProvider: asClass(PpvStProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 

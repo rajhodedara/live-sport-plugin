@@ -113,6 +113,10 @@ describe('generated date posters replace the repeated sport JPEG', () => {
   test('the date list uses distinct generated cards for consecutive dates', async () => {
     const container = require('../src/container');
     const { handleCatalog } = require('../src/catalog');
+    
+    // Prevent background syncs from overwriting the cache during this test
+    container.resolve('matchAggregator').syncMatches = async () => [];
+    container.resolve('cronService').isSyncing = true; // block ensureFresh
 
     const day = (offset) => new Date(Date.now() - offset * 24 * 60 * MINUTE).toISOString().slice(0, 10);
     const matches = [0, 1, 2].map((i) => ({

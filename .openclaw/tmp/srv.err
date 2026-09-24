@@ -1,0 +1,312 @@
+[impitClient] impit got 403, trying undici once for: https://messi.damitv.st/live-sd/streamed/admin/ppv-fox-league/2/playlist.m3u8?tk=ni7BkVxRN
+[impitClient] impit got 403, trying undici once for: https://messi.damitv.st/live-hls/channel/247-fox-league/playlist.m3u8?tk=ni7BkVxRN3iwhiqBN
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb4.wfty.st/secure/oAHj3dk0M1teslDj17B_eg/deluxe/qatar-airways-azerbaijan-grand-prix/1/401839108/1790269752/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb3.wfty.st/secure/dQ0iPAH0fS648rosqsXnYQ/easy/formula-2/1/8311/1790269752/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb1.wfty.st/secure/kCtBB27wGwxGmoAz2SzBqg/easy/formula-2/2/8311/1790269753/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb5.wfty.st/secure/9HX5x8pgrI6ui_pJtPgMdA/easy/formula-2/3/8311/1790269753/playlist.m3u8
+[impitClient] impit got 403, trying undici once for: https://messi.damitv.st/live-hls/channel/nbl/2026-09-24/pnx-mel/playlist.m3u8?tk=KcalafFcL
+[impitClient] impit got 403, trying undici once for: https://messi.damitv.st/live-sd/streamed/admin/ppv-south-east-melbourne-phoenix-vs-melbour
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb5.wfty.st/secure/mrRI7eB6A8dC5NxpBpNGsg/sigma/japan-uruguay/2/401905330/1790269771/playlist.m3u8
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=232
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=58
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://lovecdn.ru/FSL.php?stream=ElevenSports1PL
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=101
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=774
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=273
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=824
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=929
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=272
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=809
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=450
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb1.wfty.st/secure/HodXscEUPb9Xr5Ix4Vt74g/deluxe/qatar-airways-azerbaijan-grand-prix/1/401839108/1790269931/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb6.wfty.st/secure/lXcyYKx8Vqi4WBnGTewAsQ/easy/formula-2/1/8311/1790269932/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb2.wfty.st/secure/tzCGta7ThjieYKNimgF8rg/easy/formula-2/2/8311/1790269932/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb6.wfty.st/secure/e-U4Flsoqhpo1emJ3NovOg/easy/formula-2/3/8311/1790269932/playlist.m3u8
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11001,
+            kind: Uncategorized,
+            message: "No such host is known.",
+        },
+    ),
+)), falling back to undici for: https://hux-giants.shop/embed/sporttv4-pt
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=919
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=147
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=109
+[impitClient] impit fetch failed after 3 attempt(s) (The URL (stream=foxsports) couldn't be parsed.), falling back to undici for: stream=foxsports
+[impitClient] impit fetch failed after 3 attempt(s) (The URL (stream=espndeportes) couldn't be parsed.), falling back to undici for: stream=espndeportes
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11002,
+            kind: Uncategorized,
+            message: "This is usually a temporary error during hostname resolution and means that the local server did not receive a response from an authoritative server.",
+        },
+    ),
+)), falling back to undici for: https://www.ksohls.ru/premiumtv/daddyhd.php?id=260
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    Custom {
+        kind: Other,
+        error: Custom {
+            kind: InvalidData,
+            error: InvalidCertificate(
+                NotValidForName,
+            ),
+        },
+    },
+)), falling back to undici for: https://wikisport.wiki/court/wik25.php
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11001,
+            kind: Uncategorized,
+            message: "No such host is known.",
+        },
+    ),
+)), falling back to undici for: https:///wiki.php?id=ten25
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    Custom {
+        kind: Other,
+        error: Custom {
+            kind: InvalidData,
+            error: InvalidCertificate(
+                NotValidForName,
+            ),
+        },
+    },
+)), falling back to undici for: https://wikisport.wiki/court/wik25.php
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11001,
+            kind: Uncategorized,
+            message: "No such host is known.",
+        },
+    ),
+)), falling back to undici for: https:///wiki.php?id=ten25
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb6.wfty.st/secure/-3BZuIEhFE0GQcZEcaLqEw/deluxe/qatar-airways-azerbaijan-grand-prix/1/401839108/1790270112/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb3.wfty.st/secure/3sa6OD0sTnMdeibURqQRZQ/easy/formula-2/1/8311/1790270112/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb4.wfty.st/secure/2660wQQf-PM2omrJTahMUA/easy/formula-2/2/8311/1790270112/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb5.wfty.st/secure/pmWMPF6rMJBrJ51S3D9W6g/easy/formula-2/3/8311/1790270113/playlist.m3u8
+[impitClient] impit fetch failed after 1 attempt(s) (impit timeout 5000ms), falling back to undici for: https://lb4.wfty.st/secure/9TtAvRtFooH-_JKC1p7C5Q/sigma/japan-uruguay/2/401905330/1790270122/playlist.m3u8
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    Custom {
+        kind: Other,
+        error: Custom {
+            kind: InvalidData,
+            error: InvalidCertificate(
+                NotValidForName,
+            ),
+        },
+    },
+)), falling back to undici for: https://wikisport.wiki/court/wik26.php
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11001,
+            kind: Uncategorized,
+            message: "No such host is known.",
+        },
+    ),
+)), falling back to undici for: https:///wiki.php?id=ten26
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    Custom {
+        kind: Other,
+        error: Custom {
+            kind: InvalidData,
+            error: InvalidCertificate(
+                NotValidForName,
+            ),
+        },
+    },
+)), falling back to undici for: https://wikisport.wiki/court/wik26.php
+[impitClient] impit fetch failed after 3 attempt(s) (Failed to connect to the server.
+Reason: hyper_util::client::legacy::Error(
+    Connect,
+    ConnectError(
+        "dns error",
+        Os {
+            code: 11001,
+            kind: Uncategorized,
+            message: "No such host is known.",
+        },
+    ),
+)), falling back to undici for: https:///wiki.php?id=ten26

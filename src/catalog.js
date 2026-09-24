@@ -1259,7 +1259,7 @@ async function handleMeta(type, id, config) {
   //     user was already waiting - which is exactly where the delay came from.
   try {
     if (isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
-      prewarmMatch(match, config || {}, Number.MAX_SAFE_INTEGER).catch(() => {});
+      prewarmMatch(match, config || {}, Number.MAX_SAFE_INTEGER, { skipSpeedProbe: true }).catch(() => {});
     }
   } catch (_) {}
 

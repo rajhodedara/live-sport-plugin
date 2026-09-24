@@ -311,36 +311,38 @@ class DamiTvProvider extends BaseProvider {
         }
       }
 
-      // 3. No direct URLs from the API: hand the embed page to the WASM
-      //    chain. embedindia.st hosts the plain channel/event ids; use the
-      //    extract response's own embedUrl when it supplied one.
       if (streams.length === 0) {
-        let terminalUrl = extractData && extractData.embedUrl;
-        if (!terminalUrl || !terminalUrl.startsWith('http')) {
-          terminalUrl = `https://embedindia.st/embed/${encodeURIComponent(matchId)}`;
+        console.log(`[${this.name}] API extraction failed for ${matchId}, using Puppeteer directly on live page`);
+        const scriptPath = require('path').join(__dirname, 'run_puppeteer_extractor.js');
+        const targetUrl = `https://damitv.st/live/${matchId}`;
+        const referer = 'https://damitv.st/';
+        
+        try {
+            const stdout = await new Promise((resolve) => {
+              require('child_process').execFile('node', [scriptPath, targetUrl, referer], { timeout: 45000 }, (err, stdout, stderr) => {
+                resolve(stdout + '\n' + stderr);
+              });
+            });
+            
+            const m = stdout.match(/"file":\s*"(https?:\/\/[^"]+\.m3u8.*?)"/);
+            if (m) {
+                console.log(`[${this.name}] Puppeteer Extracted M3U8: ${m[1]}`);
+                const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m[1])}&referer=${encodeURIComponent('https://damitv.st/')}&origin=${encodeURIComponent('https://damitv.st')}`;
+                streams.push(new StreamEntity({
+                  name: this.name,
+                  title: matchTitle,
+                  url: proxyUrl,
+                  behaviorHints: { notWebReady: true },
+                  resolution: 'HD'
+                }));
+            }
+        } catch (err) {
+            console.warn(`[${this.name}] Puppeteer extraction failed for ${targetUrl}: ${err.message}`);
         }
-
-        const handled = [];
-        if (terminalUrl.includes('embedindia.st') && this.embedIndiaProvider) {
-          console.log(`[${this.name}] Handing off ${terminalUrl} to EmbedIndia WASM Decryptor`);
-          const indiaStreams = await this.embedIndiaProvider.resolveStream(terminalUrl, matchCategory, matchTitle, { embedUrl: terminalUrl, referer: 'https://embedindia.st/' });
-          handled.push(...indiaStreams);
-        } else if (this.embedStProvider) {
-          console.log(`[${this.name}] Handing off ${terminalUrl} to EmbedSt WASM Decryptor`);
-          const embedStreams = await this.embedStProvider.resolveStream(terminalUrl, matchCategory, matchTitle, { embedUrl: terminalUrl, referer: embedUrl });
-          handled.push(...embedStreams);
-        }
-
-        handled.forEach(s => {
-          s.name = this.name;
-          if (s.title && /Embed(?:St|India)/.test(s.title)) {
-            s.title = s.title.replace(/Embed(?:St|India)/g, this.name);
-          }
-          streams.push(s);
-        });
       }
-
+      
       // 4. Absolute fallback to web player
+
       if (streams.length === 0) {
         streams.push(new StreamEntity({
           name: this.name,
