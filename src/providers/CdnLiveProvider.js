@@ -258,7 +258,7 @@ class CdnLiveProvider extends BaseProvider {
               // Shuffle and pick up to 3 workers to try in case some are exhausted
               const workersToTry = [...CF_IMAGE_WORKER_POOL].sort(() => Math.random() - 0.5).slice(0, 3);
               for (const cfProxy of workersToTry) {
-                const edgeUrl = `${cfProxy}/?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(origin + '/')}`;
+                const edgeUrl = `${cfProxy}/?action=cdnlive&playerUrl=${encodeURIComponent(url)}`;
                 playerRes = await safeFetch(edgeUrl, {
                   headersTimeout: 10000,
                   bodyTimeout: 10000,
@@ -271,7 +271,17 @@ class CdnLiveProvider extends BaseProvider {
 
           if (!playerRes.ok) continue;
 
-          const html = await playerRes.text();
+          const textResponse = await playerRes.text();
+          
+          try {
+            const edgeData = JSON.parse(textResponse);
+            if (edgeData && edgeData.m3u8) {
+              m3u8Url = edgeData.m3u8;
+              break;
+            }
+          } catch(e) {}
+          
+          const html = textResponse;
 
           // Strategy 1: Direct atob concatenation (e.g. var X = atob("...") + atob("..."))
           const atobConcatRegex = /var\s+[a-zA-Z0-9_]+\s*=\s*(atob\([^;]+;)/;
