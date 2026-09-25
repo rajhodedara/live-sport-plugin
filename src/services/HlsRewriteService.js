@@ -27,8 +27,9 @@ const CF_IMAGE_WORKER_POOL = [
 ];
 
 function getCfImageWorker() {
-  if (!CF_IMAGE_WORKER_POOL.length) return null;
-  return CF_IMAGE_WORKER_POOL[Math.floor(Math.random() * CF_IMAGE_WORKER_POOL.length)];
+  // Disabled to prevent hitting 100k CF worker limit! 
+  // Chunks will fallback to /api/hlschunk on the VPS instead.
+  return null;
 }
 
 /**
