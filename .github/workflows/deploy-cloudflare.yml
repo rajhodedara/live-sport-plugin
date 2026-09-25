@@ -1,11 +1,13 @@
 name: Deploy Multiple Cloudflare Workers
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - 'cloudflare-worker/**'
+      - '.github/workflows/deploy-cloudflare.yml'
 
 jobs:
   deploy:
