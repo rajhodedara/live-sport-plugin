@@ -5,7 +5,6 @@ const { BASE_URL } = require('../config');
 const path = require('path');
 const { execFile } = require('child_process');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
-const OutboundUrlGuard = require('../services/OutboundUrlGuard');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -92,7 +91,6 @@ class PpvStProvider extends BaseProvider {
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
     const embedUrl = src.embedUrl;
-    if (!OutboundUrlGuard.isSafeUrl(embedUrl)) return streams;
     if (!embedUrl || !embedUrl.includes('embedindia')) return streams;
 
     let referer = 'https://embedindia.st/';

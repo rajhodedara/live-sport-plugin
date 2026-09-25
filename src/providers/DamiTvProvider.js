@@ -2,7 +2,6 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
-const OutboundUrlGuard = require('../services/OutboundUrlGuard');
 
 // Rolling-window channels (NFL Network, Sky Sports Golf, ...) republish a
 // starts_at of "roughly now" on every poll: measured within ±90s of the feed
@@ -253,7 +252,6 @@ class DamiTvProvider extends BaseProvider {
     const streams = [];
 
     let embedUrl = src.url || src.embedUrl || sourceId;
-    if (!OutboundUrlGuard.isSafeUrl(embedUrl)) return streams;
     if (!embedUrl || !embedUrl.startsWith('http')) return streams;
 
     try {
