@@ -404,7 +404,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    // CDNLive tokens are freshly decoded by CF worker and upstream CDN blocks datacenter IPs with 429/503.
+    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false) || s._source === 'cdnlive' || (s.url && s.url.includes('cdnlivetv'))) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -881,7 +882,7 @@ async function handleStream(type, id, config) {
   // embeds (Dailymotion, ok.ru page, etc.) that carry content the direct
   // streams may not, so they are always kept alongside direct streams. LiveTV
   // replay clips (_livetvReplay, mostly YouTube ids) are kept for the same reason.
-  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream' || s.name === '▶️ YouTube' || s._rzWeb || s._livetvReplay);
+  const directOnly = streams.filter(s => s.name === '⚡ Direct Stream' || s.name === '▶️ YouTube' || s._rzWeb || s._livetvReplay || s._cdnWeb || (s._source === 'cdnlive' && s.externalUrl));
   if (directOnly.length > 0 && directOnly.length < streams.length) {
     const hidden = streams.length - directOnly.length;
     // filter() returns a NEW array, so it is safe to clear and refill in place

@@ -163,11 +163,32 @@ class CdnLiveProvider extends BaseProvider {
       const data = await this.fetchMain.fire();
       const sportsData = data?.['cdn-live-tv'] || {};
       
-      // CDNLive mostly provides Football/Soccer
-      const soccerEvents = sportsData['Soccer'] || sportsData['Football'] || [];
-      
-      if (Array.isArray(soccerEvents)) {
-        for (const item of soccerEvents) {
+      const sportMapping = {
+        'Soccer': 'football',
+        'Football': 'football',
+        'Basketball': 'basketball',
+        'NBA': 'basketball',
+        'NFL': 'american_football',
+        'NCAA': 'american_football',
+        'Baseball': 'baseball',
+        'MLB': 'baseball',
+        'Hockey': 'hockey',
+        'NHL': 'hockey',
+        'Motorsport': 'motorsport',
+        'Tennis': 'tennis',
+        'Golf': 'golf',
+        'UFC': 'mma',
+        'WWE': 'mma',
+        'MMA': 'mma',
+        'Cricket': 'cricket',
+        'Darts': 'darts',
+        'Rugby': 'rugby'
+      };
+
+      for (const [sportKey, category] of Object.entries(sportMapping)) {
+        const events = sportsData[sportKey];
+        if (!Array.isArray(events)) continue;
+        for (const item of events) {
           if (!item.channels || !Array.isArray(item.channels) || item.channels.length === 0) continue;
           const matchId = item.gameID || `${item.homeTeam}-vs-${item.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           const title = `${item.homeTeam || ''} vs ${item.awayTeam || ''}`;
@@ -180,7 +201,7 @@ class CdnLiveProvider extends BaseProvider {
           matches.push(new MatchEntity({
             id: `cdn_${matchId}`,
             title: title,
-            category: 'football',
+            category: category,
             status: status,
             timestamp: matchTime,
             sources: [{ source: 'cdnlive', id: matchId }]
@@ -346,9 +367,10 @@ class CdnLiveProvider extends BaseProvider {
    * Zero server relay: player plays direct from CDN.
    */
   async resolvePlayer(playerUrl, name) {
+    const streams = [];
     const m3u8Url = await this.decodePlayer(playerUrl);
     if (m3u8Url) {
-      return [new StreamEntity({
+      streams.push(new StreamEntity({
         name: 'CDNLiveTV',
         title: `CDNLiveTV (${name})`,
         url: m3u8Url,
@@ -363,16 +385,20 @@ class CdnLiveProvider extends BaseProvider {
           }
         },
         resolution: 'HD'
-      })];
+      }));
     }
 
-    // Web player fallback
-    return [new StreamEntity({
+    // Always provide web player fallback so both direct stream and webstream are available
+    const webFallback = new StreamEntity({
       name: 'CDNLiveTV',
       title: `CDNLiveTV (${name}) (Web Player)`,
       externalUrl: playerUrl,
       resolution: 'HD'
-    })];
+    });
+    webFallback._cdnWeb = true;
+    streams.push(webFallback);
+
+    return streams;
   }
 
   async resolveStream(sourceId, matchCategory, matchTitle) {
@@ -387,12 +413,17 @@ class CdnLiveProvider extends BaseProvider {
     try {
       const data = await this.fetchMain.fire();
       const sportsData = data?.['cdn-live-tv'] || {};
-      const soccerEvents = sportsData['Soccer'] || sportsData['Football'] || [];
       
-      const item = soccerEvents.find(e => 
-        (e.gameID === sourceId) || 
-        (`${e.homeTeam}-vs-${e.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-') === sourceId)
-      );
+      let item = null;
+      for (const [key, events] of Object.entries(sportsData)) {
+        if (Array.isArray(events)) {
+          item = events.find(e => 
+            (e.gameID === sourceId) || 
+            (`${e.homeTeam}-vs-${e.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-') === sourceId)
+          );
+          if (item) break;
+        }
+      }
 
       if (item && item.channels && Array.isArray(item.channels)) {
         for (const [idx, ch] of item.channels.entries()) {
