@@ -96,13 +96,20 @@ export default {
     if (referer) newHeaders.set('Referer', referer);
     if (origin) newHeaders.set('Origin', origin);
 
-    // SCRUB ALL CLIENT-IDENTIFYING IP HEADERS!
+    // SCRUB ALL CLIENT-IDENTIFYING AND CLOUDFLARE-INTERNAL HEADERS!
     const scrubHeaders = [
+      // VPS IP leak headers
       'x-forwarded-for',
       'x-real-ip',
       'cf-connecting-ip',
       'true-client-ip',
-      'forwarded'
+      'forwarded',
+      // Cloudflare Worker fingerprint headers (tells upstream it's a CF Worker)
+      'cf-ray',
+      'cf-visitor',
+      'cf-worker',
+      'cf-ew-via',
+      'cdn-loop'
     ];
     for (const h of scrubHeaders) {
       newHeaders.delete(h);
