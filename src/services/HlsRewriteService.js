@@ -88,7 +88,7 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   // pool relays them reliably (verified 5/5 workers, valid 0x47 sync byte), so
   // plain .ts goes through the workers too. /api/hlschunk stays as the
   // server-side fallback when no worker is configured.
-  if (/\.ts(\?|$)/.test(absoluteUrl)) {
+  if (/\.ts(\?|$)/.test(absoluteUrl) && absoluteUrl.includes('strmd.st')) {
     const cfWorker = getCfImageWorker();
     if (cfWorker) {
       let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
