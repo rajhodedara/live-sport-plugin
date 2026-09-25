@@ -240,7 +240,7 @@ class CdnLiveProvider extends BaseProvider {
       for (const url of urlsToTry) {
         try {
           const origin = new URL(url).origin;
-          const playerRes = await safeFetch(url, {
+          const fetchOpts = {
             headersTimeout: 10000,
             bodyTimeout: 10000,
             headers: {
@@ -248,7 +248,22 @@ class CdnLiveProvider extends BaseProvider {
               'Referer': `${origin}/`
             },
             signal: AbortSignal.timeout(8000)
-          });
+          };
+          
+          let playerRes = await safeFetch(url, fetchOpts);
+
+          if (playerRes.status === 429 || playerRes.status === 403) {
+            const { getCfImageWorker } = require('../services/HlsRewriteService');
+            const cfProxy = getCfImageWorker();
+            if (cfProxy) {
+              const edgeUrl = `${cfProxy}/?url=${encodeURIComponent(url)}&referer=${encodeURIComponent(origin + '/')}`;
+              playerRes = await safeFetch(edgeUrl, {
+                headersTimeout: 10000,
+                bodyTimeout: 10000,
+                signal: AbortSignal.timeout(8000)
+              });
+            }
+          }
 
           if (!playerRes.ok) continue;
 
