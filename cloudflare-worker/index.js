@@ -118,33 +118,49 @@ export default {
         const playerRes = await fetch(playerUrl, { headers: cdnHeaders });
         const html = await playerRes.text();
         
-        const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
-        if (!decoderMatch) return new Response(JSON.stringify({ error: "No decoder function found", m3u8: "" }), { status: 502, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }});
-        
-        const decoderName = decoderMatch[1];
-        
-        const concatRegex = new RegExp('var\\s+([a-zA-Z0-9_]+)\\s*=\\s*' + decoderName + '\\([^;]+;');
-        const concatMatch = html.match(concatRegex);
-        if (!concatMatch) return new Response(JSON.stringify({ error: "No concat line found", m3u8: "" }), { status: 502, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }});
-        
-        const varRegex = new RegExp(decoderName + '\\(([a-zA-Z0-9_]+)\\)', 'g');
-        let varMatch;
-        const vars = [];
-        while ((varMatch = varRegex.exec(concatMatch[0])) !== null) {
-          vars.push(varMatch[1]);
-        }
-        
         let m3u8Url = '';
-        for (const v of vars) {
-          const valMatch = html.match(new RegExp("var\\s+" + v + "\\s*=\\s*'([^']+)'"));
-          if (valMatch && valMatch[1]) {
-            let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+        
+        // Strategy 1: Look for direct atob concatenation: var X = atob("...") + atob("...");
+        const atobConcatRegex = /var\s+[a-zA-Z0-9_]+\s*=\s*(atob\([^;]+;)/;
+        const atobConcatMatch = html.match(atobConcatRegex);
+        if (atobConcatMatch) {
+          const partsRegex = /atob\s*\(\s*["']([^"']+)["']\s*\)/g;
+          let pMatch;
+          while ((pMatch = partsRegex.exec(atobConcatMatch[1])) !== null) {
+            let b64 = pMatch[1].replace(/-/g, '+').replace(/_/g, '/');
             while (b64.length % 4) b64 += '=';
             try { m3u8Url += atob(b64); } catch(e) {}
           }
         }
         
+        // Strategy 2: Old decoder function
+        if (!m3u8Url) {
+          const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
+          if (decoderMatch) {
+            const decoderName = decoderMatch[1];
+            const concatRegex = new RegExp('var\\s+([a-zA-Z0-9_]+)\\s*=\\s*' + decoderName + '\\([^;]+;');
+            const concatMatch = html.match(concatRegex);
+            if (concatMatch) {
+              const varRegex = new RegExp(decoderName + '\\(([a-zA-Z0-9_]+)\\)', 'g');
+              let varMatch;
+              const vars = [];
+              while ((varMatch = varRegex.exec(concatMatch[0])) !== null) {
+                vars.push(varMatch[1]);
+              }
+              for (const v of vars) {
+                const valMatch = html.match(new RegExp("var\\s+" + v + "\\s*=\\s*'([^']+)'"));
+                if (valMatch && valMatch[1]) {
+                  let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+                  while (b64.length % 4) b64 += '=';
+                  try { m3u8Url += atob(b64); } catch(e) {}
+                }
+              }
+            }
+          }
+        }
+        
         if (!m3u8Url) return new Response(JSON.stringify({ error: "Could not decode m3u8 URL", m3u8: "" }), { status: 502, headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }});
+
         
         return new Response(JSON.stringify({ m3u8: m3u8Url }), {
           status: 200,
