@@ -51,6 +51,12 @@ jobs:
             api_token: CF_API_TOKEN_6
             worker_name: falling-violet-3301
 
+          # 7th Cloudflare account
+          - proxy_num: 7
+            account_id: CF_ACCOUNT_ID_7
+            api_token: CF_API_TOKEN_7
+            worker_name: nameless-dawn-2ab8
+
     steps:
       - uses: actions/checkout@v4
 

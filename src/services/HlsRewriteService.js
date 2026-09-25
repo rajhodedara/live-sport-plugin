@@ -25,6 +25,7 @@ const CF_IMAGE_WORKER_POOL = [
   'https://spring-brook-5c1e.rajodedara456.workers.dev',
   'https://falling-unit-ffa6.rajcfproxy1.workers.dev',
   'https://falling-violet-3301.hansabenhodedara.workers.dev',
+  'https://nameless-dawn-2ab8.abhi-munot01.workers.dev',
 ];
 
 function getCfImageWorker() {
