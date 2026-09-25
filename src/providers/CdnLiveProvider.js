@@ -205,65 +205,90 @@ class CdnLiveProvider extends BaseProvider {
 
     try {
       const { safeFetch } = require('../impitClient');
-      const { getCfProxyUrl } = require('./BaseProvider');
-      const cfUrl = getCfProxyUrl();
+
+      // Primary URL and automatic mirror fallback (.tv <-> .is)
+      const urlsToTry = [playerUrl];
+      if (playerUrl.includes('cdnlivetv.tv')) {
+        urlsToTry.push(playerUrl.replace('cdnlivetv.tv', 'cdnlivetv.is'));
+      } else if (playerUrl.includes('cdnlivetv.is')) {
+        urlsToTry.push(playerUrl.replace('cdnlivetv.is', 'cdnlivetv.tv'));
+      }
 
       let m3u8Url = '';
 
-      if (cfUrl) {
-        const edgeUrl = new URL(cfUrl);
-        edgeUrl.searchParams.set('action', 'cdnlive');
-        edgeUrl.searchParams.set('playerUrl', playerUrl);
-        
-        const res = await safeFetch(edgeUrl.toString(), {
-          headersTimeout: 15000,
-          bodyTimeout: 15000,
-          signal: AbortSignal.timeout(10000)
-        });
-        
-        if (res.status === 200) {
-          const data = await res.json();
-          m3u8Url = data.m3u8 || '';
-        }
-      } else {
-        const playerRes = await safeFetch(playerUrl, {
-          headersTimeout: 15000,
-          bodyTimeout: 15000,
-          headers: {
-            'User-Agent': UA,
-            'Referer': 'https://cdnlivetv.tv/'
-          },
-          signal: AbortSignal.timeout(10000)
-        });
+      for (const url of urlsToTry) {
+        try {
+          const origin = new URL(url).origin;
+          const playerRes = await safeFetch(url, {
+            headersTimeout: 10000,
+            bodyTimeout: 10000,
+            headers: {
+              'User-Agent': UA,
+              'Referer': `${origin}/`
+            },
+            signal: AbortSignal.timeout(8000)
+          });
 
-        if (playerRes.status >= 200 && playerRes.status < 300) {
+          if (!playerRes.ok) continue;
+
           const html = await playerRes.text();
-          const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
-          if (decoderMatch) {
-            const decoderName = decoderMatch[1];
-            const concatRegex = new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`);
-            const concatMatch = html.match(concatRegex);
-            if (concatMatch) {
-              const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
-              const vars = [];
-              let match;
-              while ((match = varRegex.exec(concatMatch[0])) !== null) {
-                vars.push(match[1]);
-              }
 
-              for (const v of vars) {
-                const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*'([^']+)'`));
-                if (valMatch && valMatch[1]) {
-                  let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
-                  while (b64.length % 4) b64 += '=';
-                  try {
-                    m3u8Url += Buffer.from(b64, 'base64').toString('utf8');
-                  } catch (e) {}
+          // Strategy 1: Direct atob concatenation (e.g. var X = atob("...") + atob("..."))
+          const atobConcatRegex = /var\s+[a-zA-Z0-9_]+\s*=\s*(atob\([^;]+;)/;
+          const atobConcatMatch = html.match(atobConcatRegex);
+          if (atobConcatMatch) {
+            const partsRegex = /atob\s*\(\s*["']([^"']+)["']\s*\)/g;
+            let pMatch;
+            while ((pMatch = partsRegex.exec(atobConcatMatch[1])) !== null) {
+              let b64 = pMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+              while (b64.length % 4) b64 += '=';
+              try {
+                m3u8Url += Buffer.from(b64, 'base64').toString('utf8');
+              } catch (_) {}
+            }
+          }
+
+          // Strategy 2: Decoder function with base64 variable lookups
+          if (!m3u8Url) {
+            const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{[\s\S]*?atob/);
+            if (decoderMatch) {
+              const decoderName = decoderMatch[1];
+              const concatRegex = new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`);
+              const concatMatch = html.match(concatRegex);
+              if (concatMatch) {
+                const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
+                const vars = [];
+                let match;
+                while ((match = varRegex.exec(concatMatch[0])) !== null) {
+                  vars.push(match[1]);
+                }
+
+                for (const v of vars) {
+                  const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*['"]([^'"]+)['"]`));
+                  if (valMatch && valMatch[1]) {
+                    let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+                    while (b64.length % 4) b64 += '=';
+                    try {
+                      m3u8Url += Buffer.from(b64, 'base64').toString('utf8');
+                    } catch (_) {}
+                  }
                 }
               }
             }
           }
-        }
+
+          // Strategy 3: Plain text .m3u8 URL in page
+          if (!m3u8Url) {
+            const m3u8Match = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+            if (m3u8Match && m3u8Match[1]) {
+              m3u8Url = m3u8Match[1];
+            }
+          }
+
+          if (m3u8Url && m3u8Url.includes('.m3u8')) {
+            break;
+          }
+        } catch (_) {}
       }
 
       if (m3u8Url) {
