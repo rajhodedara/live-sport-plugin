@@ -43,6 +43,12 @@ jobs:
             api_token: CF_API_TOKEN_5
             worker_name: falling-unit-ffa6
 
+          # 6th Cloudflare account
+          - proxy_num: 6
+            account_id: CF_ACCOUNT_ID_6
+            api_token: CF_API_TOKEN_6
+            worker_name: falling-violet-3301
+
     steps:
       - uses: actions/checkout@v4
 
