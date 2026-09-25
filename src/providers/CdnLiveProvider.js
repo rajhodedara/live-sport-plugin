@@ -225,20 +225,35 @@ class CdnLiveProvider extends BaseProvider {
     try {
       // NOTE: CDNLive endpoints (cdnlivetv.tv / cdnlivetv.is) run on standard Nginx servers
       // with open CORS (*). They do NOT need impit, Cloudflare bypass, or browser TLS fingerprinting.
-      // DO NOT use impit/safeFetch here! impit introduces native Rust addon stalls, threadpool
-      // bottlenecks, and AbortSignal timeout collisions that cause decodePlayer to fail and
-      // mistakenly drop to the Web Player fallback. Native fetch / undici works 100% reliably.
-      const playerRes = await fetch(playerUrl, {
-        headers: {
-          'User-Agent': UA,
-          'Referer': 'https://cdnlivetv.tv/'
-        },
-        signal: AbortSignal.timeout(10000)
-      });
+      // DO NOT use impit/safeFetch here as the primary method! impit introduces native Rust addon stalls,
+      // threadpool bottlenecks, and AbortSignal timeout collisions. Native fetch / undici works 100% reliably
+      // on residential IPs. We only fallback to proxyFetch if native fetch gets blocked (e.g. on a VPS).
+      let playerRes;
+      try {
+        playerRes = await fetch(playerUrl, {
+          headers: {
+            'User-Agent': UA,
+            'Referer': 'https://cdnlivetv.tv/'
+          },
+          signal: AbortSignal.timeout(8000)
+        });
+      } catch (e) {}
 
-      if (playerRes.status >= 200 && playerRes.status < 300) {
-        const html = await playerRes.text();
-        const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
+      if (!playerRes || !playerRes.ok) {
+        try {
+          playerRes = await this.proxyFetch(playerUrl, {
+            headers: {
+              'User-Agent': UA,
+              'Referer': 'https://cdnlivetv.tv/'
+            },
+            signal: AbortSignal.timeout(15000)
+          });
+        } catch (e) {}
+      }
+
+      if (playerRes && playerRes.status >= 200 && playerRes.status < 300) {
+        const html = await (typeof playerRes.text === 'function' ? playerRes.text() : playerRes.text);
+        const decoderMatch = typeof html === 'string' ? html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/) : null;
         if (!decoderMatch) return '';
 
         const decoderName = decoderMatch[1];
