@@ -102,6 +102,8 @@ const container = require('../src/container');
 
   // ── 4. Run verifyStreams and watch what gets dropped ────────────────────────
   console.log('\n[4] Running verifyStreams on raw streams...');
+  // Set _source exactly as resolveSource does in production — verifyStreams reads this to skip preflight
+  rawStreams.forEach(s => { s._source = 'daddylive'; });
   const { verifyStreams } = require('../src/streams');
   const m3u8Parser = container.resolve('m3u8Parser');
   const resolveCache = container.resolve('streamResolveCache');
