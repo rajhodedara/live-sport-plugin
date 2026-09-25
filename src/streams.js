@@ -404,7 +404,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    if (!s.url || s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
 
     let targetUrl = s.url;
     let referer = '';
