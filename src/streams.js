@@ -589,7 +589,8 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts 
     if (!match || !match.sources || !match.sources.length) return;
     const resolveCache = container.resolve('streamResolveCache');
     const activeSources = selectSources(match.sources, config || null);
-    const targets = activeSources.slice(0, topN);
+    // Skip cdnlive during prewarm to protect Cloudflare Worker limits
+    const targets = activeSources.filter(src => (src.source || '').toLowerCase() !== 'cdnlive').slice(0, topN);
     if (targets.length === 0) return;
     console.log(`[Prewarm] minting ${targets.length} sources for ${match.id}`);
     await Promise.allSettled(targets.map(src => {
