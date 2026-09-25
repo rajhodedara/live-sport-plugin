@@ -1,3 +1,13 @@
+/**
+ * ARCHITECTURAL NOTE:
+ * CDNLive (api.cdnlivetv.tv, api.cdnlivetv.is, cdnlivetv.tv) operates standard Nginx servers
+ * with open CORS (Access-Control-Allow-Origin: *).
+ * CDNLive does NOT require impit, Cloudflare bypass, or browser TLS fingerprinting!
+ * DO NOT route CDNLive requests through impit or impitClient's safeFetch:
+ * Doing so introduces native Rust addon stalls, threadpool bottlenecks, and AbortSignal timeout
+ * collisions that cause decodePlayer to fail and fall back to the Web Player.
+ * Always use standard native fetch or undici here.
+ */
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -66,7 +76,13 @@ class CdnLiveProvider extends BaseProvider {
     
     this.fetchMain = this.circuitBreaker.wrap(`${this.name}_fetchMain`, async () => {
       const headers = { 'User-Agent': UA };
-      const res = await this.proxyFetch(this.apiUrl, { headers, signal: AbortSignal.timeout(20000) });
+      // CDNLive does not need impit; native fetch is fast and reliable (~150ms)
+      let res;
+      try {
+        res = await fetch(this.apiUrl, { headers, signal: AbortSignal.timeout(10000) });
+      } catch (_) {
+        res = await this.proxyFetch(this.apiUrl, { headers, signal: AbortSignal.timeout(20000) });
+      }
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       return await res.json();
     });
@@ -75,10 +91,13 @@ class CdnLiveProvider extends BaseProvider {
       let lastErr = null;
       for (const url of CHANNEL_LIST_URLS) {
         try {
-          const res = await this.proxyFetch(url, {
-            headers: { 'User-Agent': UA },
-            signal: AbortSignal.timeout(20000)
-          });
+          const headers = { 'User-Agent': UA };
+          let res;
+          try {
+            res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+          } catch (_) {
+            res = await this.proxyFetch(url, { headers, signal: AbortSignal.timeout(20000) });
+          }
           if (!res.ok) throw new Error(`channel list responded ${res.status}`);
           return await res.json();
         } catch (e) {
@@ -204,10 +223,12 @@ class CdnLiveProvider extends BaseProvider {
     }
 
     try {
-      const { safeFetch } = require('../impitClient');
-      const playerRes = await safeFetch(playerUrl, {
-        headersTimeout: 15000,
-        bodyTimeout: 15000,
+      // NOTE: CDNLive endpoints (cdnlivetv.tv / cdnlivetv.is) run on standard Nginx servers
+      // with open CORS (*). They do NOT need impit, Cloudflare bypass, or browser TLS fingerprinting.
+      // DO NOT use impit/safeFetch here! impit introduces native Rust addon stalls, threadpool
+      // bottlenecks, and AbortSignal timeout collisions that cause decodePlayer to fail and
+      // mistakenly drop to the Web Player fallback. Native fetch / undici works 100% reliably.
+      const playerRes = await fetch(playerUrl, {
         headers: {
           'User-Agent': UA,
           'Referer': 'https://cdnlivetv.tv/'
