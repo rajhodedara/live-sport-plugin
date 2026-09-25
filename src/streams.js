@@ -655,7 +655,7 @@ async function handleStream(type, id, config) {
   // next request. Previously every source had to settle before anything was
   // returned, so one slow provider (WatchFooty's embed chain: ~56s/variant)
   // stalled the whole response.
-  const SOFT_DEADLINE_MS = Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000);
+  const SOFT_DEADLINE_MS = Number(process.env.STREAM_SOFT_DEADLINE_MS || 10000);
   const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
 
   const inFlight = [];        // { key, promise } for the fallback wait
