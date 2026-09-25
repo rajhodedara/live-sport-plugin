@@ -11,8 +11,15 @@ const { safeFetch: _safeFetch } = require('../impitClient');
 // Pick a random proxy from the pool
 function getCfProxyUrl() {
   if (process.env.NODE_ENV === 'test') return null;
-  if (CF_PROXY_POOL.length === 0) return null;
-  return CF_PROXY_POOL[Math.floor(Math.random() * CF_PROXY_POOL.length)];
+  if (CF_PROXY_POOL.length > 0) {
+    return CF_PROXY_POOL[Math.floor(Math.random() * CF_PROXY_POOL.length)];
+  }
+  try {
+    const { getCfImageWorker } = require('../services/HlsRewriteService');
+    return getCfImageWorker();
+  } catch (e) {
+    return null;
+  }
 }
 
 class BaseProvider {
