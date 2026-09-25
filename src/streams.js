@@ -404,8 +404,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     // We only pre-flight check direct streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    // CDNLive tokens are freshly decoded by CF worker and upstream CDN blocks datacenter IPs with 429/503.
-    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false) || s._source === 'cdnlive' || (s.url && s.url.includes('cdnlivetv'))) return s;
+    // CDNLive + DaddyLive route through the /api/manifest proxy: the CDN is IP-locked to the proxy server
+    // and will 403 any direct ping from this host. Skip preflight — the proxy handles auth at playback time.
+    if (!s.url || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || (s.behaviorHints && s.behaviorHints.notWebReady === false) || s._source === 'cdnlive' || (s.url && s.url.includes('cdnlivetv')) || s._source === 'daddylive') return s;
 
     let targetUrl = s.url;
     let referer = '';
