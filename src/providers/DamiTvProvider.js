@@ -165,7 +165,6 @@ class DamiTvProvider extends BaseProvider {
           const popular = (isLive || (s.viewers || 0) > 1000) ? '1' : '0';
 
           let title = s.name;
-          if (s.league) title = `${s.league} - ${title}`;
 
           const sanitized = this._sanitizeId(s.id);
           if (seenSanitizedIds.has(sanitized)) {
@@ -182,6 +181,7 @@ class DamiTvProvider extends BaseProvider {
             status: isLive ? 'live' : (isUpcoming ? 'upcoming' : ''),
             popular: popular,
             sources: sources,
+            league: s.league || '',
             thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
             poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
             team1: s.teams && s.teams.home && s.teams.home.name ? { name: s.teams.home.name, logo: s.teams.home.badge || null } : null,
