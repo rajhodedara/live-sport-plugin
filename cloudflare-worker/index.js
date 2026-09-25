@@ -95,6 +95,18 @@ export default {
     const newHeaders = new Headers(request.headers);
     if (referer) newHeaders.set('Referer', referer);
     if (origin) newHeaders.set('Origin', origin);
+
+    // SCRUB ALL CLIENT-IDENTIFYING IP HEADERS!
+    const scrubHeaders = [
+      'x-forwarded-for',
+      'x-real-ip',
+      'cf-connecting-ip',
+      'true-client-ip',
+      'forwarded'
+    ];
+    for (const h of scrubHeaders) {
+      newHeaders.delete(h);
+    }
     
     // OVERWRITE User-Agent to ensure scraper and player exactly match for token binding
     newHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
