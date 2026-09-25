@@ -17,6 +17,56 @@
  * no longer leaked. The body is no longer piped unawaited.
  */
 
+import { connect } from 'cloudflare:sockets';
+
+// Raw HTTPS GET over TLS socket to prevent Cloudflare from injecting
+// cf-worker, cf-ray, and cf-connecting-ip headers that trigger 403 on cdnlivetv.
+async function rawHttpsGet(urlStr, customHeaders = {}) {
+  const u = new URL(urlStr);
+  const hostname = u.hostname;
+  const port = u.port ? parseInt(u.port, 10) : 443;
+  const path = u.pathname + u.search;
+
+  const socket = connect({ hostname, port }, { secureTransport: 'on' });
+  const writer = socket.writable.getWriter();
+  const reader = socket.readable.getReader();
+
+  const reqLines = [
+    `GET ${path} HTTP/1.1`,
+    `Host: ${hostname}`,
+    `Connection: close`,
+    `User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36`,
+    `Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8`,
+    `Accept-Language: en-US,en;q=0.9`,
+  ];
+  for (const [k, v] of Object.entries(customHeaders)) {
+    reqLines.push(`${k}: ${v}`);
+  }
+  reqLines.push('', '');
+
+  const encoder = new TextEncoder();
+  await writer.write(encoder.encode(reqLines.join('\r\n')));
+
+  const decoder = new TextDecoder();
+  let responseText = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    responseText += decoder.decode(value, { stream: true });
+  }
+  responseText += decoder.decode();
+
+  const headerEnd = responseText.indexOf('\r\n\r\n');
+  if (headerEnd === -1) return { status: 500, body: responseText };
+
+  const rawHeaders = responseText.slice(0, headerEnd);
+  const body = responseText.slice(headerEnd + 4);
+  const statusLine = rawHeaders.split('\r\n')[0];
+  const statusCode = parseInt(statusLine.split(' ')[1], 10) || 200;
+
+  return { status: statusCode, body, rawHeaders };
+}
+
 // Bytes of fake WebP/RIFF header the Streamed.pk / TikTok CDN prepends to
 // .image segments. Everything after it is the real MPEG-TS payload.
 const CLOAK_PREFIX_BYTES = 42;
@@ -111,12 +161,25 @@ export default {
       try {
         const playerUrl = reqUrl.searchParams.get('playerUrl');
         
-        const cdnHeaders = new Headers();
-        cdnHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
-        cdnHeaders.set('Referer', 'https://cdnlivetv.tv/');
-        
-        const playerRes = await fetch(playerUrl, { headers: cdnHeaders });
-        const html = await playerRes.text();
+        // Use raw TLS socket so Cloudflare does NOT inject cf-worker / cf-ray headers
+        let html = '';
+        try {
+          const rawRes = await rawHttpsGet(playerUrl, {
+            'Referer': 'https://cdnlivetv.tv/'
+          });
+          if (rawRes.status === 200) {
+            html = rawRes.body;
+          }
+        } catch (_) {}
+
+        // Fallback to fetch if raw socket fails
+        if (!html) {
+          const cdnHeaders = new Headers();
+          cdnHeaders.set('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
+          cdnHeaders.set('Referer', 'https://cdnlivetv.tv/');
+          const playerRes = await fetch(playerUrl, { headers: cdnHeaders });
+          html = await playerRes.text();
+        }
         
         let m3u8Url = '';
         
@@ -135,7 +198,7 @@ export default {
         
         // Strategy 2: Old decoder function
         if (!m3u8Url) {
-          const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
+          const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{[\s\S]*?atob/);
           if (decoderMatch) {
             const decoderName = decoderMatch[1];
             const concatRegex = new RegExp('var\\s+([a-zA-Z0-9_]+)\\s*=\\s*' + decoderName + '\\([^;]+;');
@@ -148,7 +211,7 @@ export default {
                 vars.push(varMatch[1]);
               }
               for (const v of vars) {
-                const valMatch = html.match(new RegExp("var\\s+" + v + "\\s*=\\s*'([^']+)'"));
+                const valMatch = html.match(new RegExp("var\\s+" + v + "\\s*=\\s*['\"]([^'\"]+)['\"]"));
                 if (valMatch && valMatch[1]) {
                   let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
                   while (b64.length % 4) b64 += '=';
@@ -156,6 +219,14 @@ export default {
                 }
               }
             }
+          }
+        }
+
+        // Strategy 3: Plain text .m3u8
+        if (!m3u8Url) {
+          const m3u8Match = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
+          if (m3u8Match && m3u8Match[1]) {
+            m3u8Url = m3u8Match[1];
           }
         }
         
