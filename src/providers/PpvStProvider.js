@@ -4,6 +4,8 @@ const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
 const path = require('path');
 const { execFile } = require('child_process');
+const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
+const OutboundUrlGuard = require('../services/OutboundUrlGuard');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -30,6 +32,9 @@ class PpvStProvider extends BaseProvider {
 
       for (const cat of data.streams) {
         let category = cat.category.toLowerCase();
+        if (category === 'combat sports') category = 'fighting';
+        if (category === 'australian football') category = 'american_football';
+        if (category === '24/7 streams') category = 'networks';
         for (const stream of cat.streams) {
           if (!stream.iframe) continue;
           const slug = stream.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '');
@@ -54,6 +59,14 @@ class PpvStProvider extends BaseProvider {
             });
           }
 
+          let team1 = null;
+          let team2 = null;
+          const extracted = extractTeamsFromTitle(stream.name);
+          if (extracted) {
+            team1 = { name: extracted[0] };
+            team2 = { name: extracted[1] };
+          }
+
           matches.push(new MatchEntity({
             id: `ppv_${stream.id}_${slug}`,
             title: stream.name,
@@ -64,6 +77,8 @@ class PpvStProvider extends BaseProvider {
             league: cat.category,
             logo: stream.poster || undefined,
             thumbnail_url: stream.poster || undefined,
+            team1: team1,
+            team2: team2,
             sources: sources
           }));
         }
@@ -77,6 +92,7 @@ class PpvStProvider extends BaseProvider {
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
     const embedUrl = src.embedUrl;
+    if (!OutboundUrlGuard.isSafeUrl(embedUrl)) return streams;
     if (!embedUrl || !embedUrl.includes('embedindia')) return streams;
 
     let referer = 'https://embedindia.st/';

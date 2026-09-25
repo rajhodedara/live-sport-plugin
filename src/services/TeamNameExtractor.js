@@ -19,7 +19,7 @@
  */
 'use strict';
 
-const VS_SPLIT = /\s+(?:vs\.?|v|@)\s+/i;
+const VS_SPLIT = /\s+(?:vs\.?|v|@|at)\s+/i;
 
 function extractTeamsFromTitle(title) {
   if (!title || typeof title !== 'string') return null;

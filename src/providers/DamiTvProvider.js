@@ -2,6 +2,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
+const OutboundUrlGuard = require('../services/OutboundUrlGuard');
 
 // Rolling-window channels (NFL Network, Sky Sports Golf, ...) republish a
 // starts_at of "roughly now" on every poll: measured within ±90s of the feed
@@ -144,8 +145,8 @@ class DamiTvProvider extends BaseProvider {
               popular: '1',
               status: '',
               league: 'Live TV',
-              thumbnail_url: s.poster || '',
-              poster: s.poster || '',
+              thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+              poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
               sources: sources
             }));
             return;
@@ -181,8 +182,8 @@ class DamiTvProvider extends BaseProvider {
             status: isLive ? 'live' : (isUpcoming ? 'upcoming' : ''),
             popular: popular,
             sources: sources,
-            thumbnail_url: s.poster || '',
-            poster: s.poster || '',
+            thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+            poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
             team1: s.teams && s.teams.home && s.teams.home.name ? { name: s.teams.home.name, logo: s.teams.home.badge || null } : null,
             team2: s.teams && s.teams.away && s.teams.away.name ? { name: s.teams.away.name, logo: s.teams.away.badge || null } : null
           }));
@@ -234,8 +235,8 @@ class DamiTvProvider extends BaseProvider {
             popular: '1',
             status: '',
             league: 'Live TV',
-            thumbnail_url: item.poster || '',
-            poster: item.poster || '',
+            thumbnail_url: item.poster ? (item.poster.startsWith('//') ? 'https:' + item.poster : item.poster) : '',
+            poster: item.poster ? (item.poster.startsWith('//') ? 'https:' + item.poster : item.poster) : '',
             logo: (item.teams && item.teams.home && item.teams.home.badge) || '',
             sources: sources
           }));
@@ -252,6 +253,7 @@ class DamiTvProvider extends BaseProvider {
     const streams = [];
 
     let embedUrl = src.url || src.embedUrl || sourceId;
+    if (!OutboundUrlGuard.isSafeUrl(embedUrl)) return streams;
     if (!embedUrl || !embedUrl.startsWith('http')) return streams;
 
     try {
