@@ -312,38 +312,6 @@ class CdnLiveProvider extends BaseProvider {
         } catch (_) {}
       }
 
-      // If direct fetch didn't yield an m3u8 (e.g. 429 rate limit on VPS IP), try the Cloudflare Worker pool
-      if (!m3u8Url) {
-        try {
-          const { CF_IMAGE_WORKER_POOL } = require('../services/HlsRewriteService');
-          if (Array.isArray(CF_IMAGE_WORKER_POOL) && CF_IMAGE_WORKER_POOL.length > 0) {
-            // Shuffle worker pool so we distribute across all 5 workers
-            const shuffled = [...CF_IMAGE_WORKER_POOL].sort(() => 0.5 - Math.random());
-            for (const workerBase of shuffled) {
-              try {
-                const edgeUrl = new URL(workerBase);
-                edgeUrl.searchParams.set('action', 'cdnlive');
-                edgeUrl.searchParams.set('playerUrl', playerUrl);
-
-                const res = await safeFetch(edgeUrl.toString(), {
-                  headersTimeout: 10000,
-                  bodyTimeout: 10000,
-                  signal: AbortSignal.timeout(8000)
-                });
-
-                if (res.status === 200) {
-                  const data = await res.json();
-                  if (data.m3u8 && data.m3u8.includes('.m3u8')) {
-                    m3u8Url = data.m3u8;
-                    break;
-                  }
-                }
-              } catch (_) {}
-            }
-          }
-        } catch (_) {}
-      }
-
       if (m3u8Url) {
         const exp = tokenExpiry(m3u8Url);
         const ttlMs = 3 * 60 * 60 * 1000;
