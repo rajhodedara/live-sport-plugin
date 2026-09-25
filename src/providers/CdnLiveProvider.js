@@ -205,57 +205,78 @@ class CdnLiveProvider extends BaseProvider {
 
     try {
       const { safeFetch } = require('../impitClient');
-      const playerRes = await safeFetch(playerUrl, {
-        headersTimeout: 15000,
-        bodyTimeout: 15000,
-        headers: {
-          'User-Agent': UA,
-          'Referer': 'https://cdnlivetv.tv/'
-        },
-        signal: AbortSignal.timeout(10000)
-      });
+      const { getCfProxyUrl } = require('./BaseProvider');
+      const cfUrl = getCfProxyUrl();
 
-      if (playerRes.status >= 200 && playerRes.status < 300) {
-        const html = await playerRes.text();
-        const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
-        if (!decoderMatch) return '';
+      let m3u8Url = '';
 
-        const decoderName = decoderMatch[1];
-        const concatRegex = new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`);
-        const concatMatch = html.match(concatRegex);
-        if (!concatMatch) return '';
-
-        const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
-        const vars = [];
-        let match;
-        while ((match = varRegex.exec(concatMatch[0])) !== null) {
-          vars.push(match[1]);
+      if (cfUrl) {
+        const edgeUrl = new URL(cfUrl);
+        edgeUrl.searchParams.set('action', 'cdnlive');
+        edgeUrl.searchParams.set('playerUrl', playerUrl);
+        
+        const res = await safeFetch(edgeUrl.toString(), {
+          headersTimeout: 15000,
+          bodyTimeout: 15000,
+          signal: AbortSignal.timeout(10000)
+        });
+        
+        if (res.status === 200) {
+          const data = await res.json();
+          m3u8Url = data.m3u8 || '';
         }
+      } else {
+        const playerRes = await safeFetch(playerUrl, {
+          headersTimeout: 15000,
+          bodyTimeout: 15000,
+          headers: {
+            'User-Agent': UA,
+            'Referer': 'https://cdnlivetv.tv/'
+          },
+          signal: AbortSignal.timeout(10000)
+        });
 
-        let m3u8Url = '';
-        for (const v of vars) {
-          const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*'([^']+)'`));
-          if (valMatch && valMatch[1]) {
-            let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
-            while (b64.length % 4) b64 += '=';
-            try {
-              m3u8Url += Buffer.from(b64, 'base64').toString('utf8');
-            } catch (e) {}
+        if (playerRes.status >= 200 && playerRes.status < 300) {
+          const html = await playerRes.text();
+          const decoderMatch = html.match(/function\s+([a-zA-Z0-9_]+)\s*\([a-zA-Z0-9_]+\)\s*\{.+?atob/);
+          if (decoderMatch) {
+            const decoderName = decoderMatch[1];
+            const concatRegex = new RegExp(`var\\s+([a-zA-Z0-9_]+)\\s*=\\s*${decoderName}\\([^;]+;`);
+            const concatMatch = html.match(concatRegex);
+            if (concatMatch) {
+              const varRegex = new RegExp(`${decoderName}\\(([a-zA-Z0-9_]+)\\)`, 'g');
+              const vars = [];
+              let match;
+              while ((match = varRegex.exec(concatMatch[0])) !== null) {
+                vars.push(match[1]);
+              }
+
+              for (const v of vars) {
+                const valMatch = html.match(new RegExp(`var\\s+${v}\\s*=\\s*'([^']+)'`));
+                if (valMatch && valMatch[1]) {
+                  let b64 = valMatch[1].replace(/-/g, '+').replace(/_/g, '/');
+                  while (b64.length % 4) b64 += '=';
+                  try {
+                    m3u8Url += Buffer.from(b64, 'base64').toString('utf8');
+                  } catch (e) {}
+                }
+              }
+            }
           }
         }
+      }
 
-        if (m3u8Url) {
-          const exp = tokenExpiry(m3u8Url);
-          const ttlMs = 3 * 60 * 60 * 1000;
-          const expiresAt = exp ? Math.min(exp - 60000, Date.now() + ttlMs) : Date.now() + ttlMs;
-          if (this._decoded.size >= 500) {
-            this._decoded.delete(this._decoded.keys().next().value);
-          }
-          if (expiresAt > Date.now()) {
-            this._decoded.set(playerUrl, { url: m3u8Url, expiresAt });
-          }
-          return m3u8Url;
+      if (m3u8Url) {
+        const exp = tokenExpiry(m3u8Url);
+        const ttlMs = 3 * 60 * 60 * 1000;
+        const expiresAt = exp ? Math.min(exp - 60000, Date.now() + ttlMs) : Date.now() + ttlMs;
+        if (this._decoded.size >= 500) {
+          this._decoded.delete(this._decoded.keys().next().value);
         }
+        if (expiresAt > Date.now()) {
+          this._decoded.set(playerUrl, { url: m3u8Url, expiresAt });
+        }
+        return m3u8Url;
       }
     } catch (err) {
       console.warn(`[${this.name}] Failed to decode player ${playerUrl}:`, err.message);

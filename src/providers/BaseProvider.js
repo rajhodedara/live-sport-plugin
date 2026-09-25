@@ -1,5 +1,8 @@
 // Hardcoded CF proxy pool — add more URLs to multiply free-tier limits
 const CF_PROXY_POOL = [];
+if (process.env.CF_PROXY_URL) {
+  CF_PROXY_POOL.push(process.env.CF_PROXY_URL);
+}
 
 // Safe impit wrapper — falls back to undici when impit native binary is
 // unavailable (ARM64 VPS, Alpine/musl Linux, certain Windows Server builds).
