@@ -6,13 +6,6 @@ const { parseLanguagePriority, compareStreams } = require('./services/LanguagePr
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 
-// Sources in this set are treated as "priority" throughout the pipeline:
-// (1) they are sorted first by selectSources, (2) the prewarm loop in
-// CronService will not skip a match until ALL priority sources are cached,
-// and (3) handleStream will wait the full hard deadline when any priority
-// source is still in-flight — even if other providers already returned streams.
-const PRIORITY_WAIT_SOURCES = new Set(['daddylive', 'admin', 'echo', 'golf', 'delta']);
-
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
   return ChannelCountryService.detectChannelCountry(channelName);
@@ -31,12 +24,7 @@ function isEventStreamSource(src) {
 
 function selectSources(matchSources, config) {
   const cleanSources = (matchSources || []).filter(src => !isEventStreamSource(src));
-  // Priority 1 = highest (resolved first, waited on longest). DaddyLive is the
-  // primary multi-channel source — treat it as top-tier alongside admin streams.
-  // PPV.st is fast (~900ms) but secondary; DamiTV same tier. Lower tiers are
-  // fallbacks. The race-condition wait logic in handleStream uses this same
-  // constant (PRIORITY_WAIT_SOURCES) to decide which in-flight providers to hold for.
-  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'daddylive': 1, 'ppvst': 2, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
+  const SOURCE_PRIORITY = { admin: 1, echo: 1, golf: 1, delta: 1, 'ppvst': 1, 'daddylive': 2, 'replayzone': 2, 'livetv': 2, 'watchfooty': 2, 'damitv': 3, 'cdnlive': 3, 'streamsports99': 4, 'timstreams': 9, 'streamsports': 13, 'embedindia': 5, 'embedst': 5, 'streamedpk': 5 };
   const sortedSources = [...cleanSources].sort((a, b) => {
     // Unknown sources that are not known fallback providers are likely new
     // Streamed.pk sources - priority 1.5 keeps them near the top.
@@ -667,8 +655,8 @@ async function handleStream(type, id, config) {
   // next request. Previously every source had to settle before anything was
   // returned, so one slow provider (WatchFooty's embed chain: ~56s/variant)
   // stalled the whole response.
-  const SOFT_DEADLINE_MS = Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000);
-  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 12000);
+  const SOFT_DEADLINE_MS = Number(process.env.STREAM_SOFT_DEADLINE_MS || 10000);
+  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
 
   const inFlight = [];        // { key, promise } for the fallback wait
   const races = activeSources.map((src) => {
@@ -688,57 +676,27 @@ async function handleStream(type, id, config) {
   });
 
   const raced = await Promise.allSettled(races);
-  // Collect which sources were late so we only hold if a priority source is actually late.
-  const lateKeys = new Set();
   let lateCount = 0;
-  for (let i = 0; i < raced.length; i++) {
-    const r = raced[i];
+  for (const r of raced) {
     if (r.status !== 'fulfilled') continue;
-    if (r.value.late) {
-      lateCount++;
-      lateKeys.add(inFlight[i].key);
-      continue;
-    }
+    if (r.value.late) { lateCount++; continue; }
     if (Array.isArray(r.value.value)) streams.push(...r.value.value);
   }
 
   // Never return an empty list merely because we were impatient: if nothing
   // usable arrived in time, wait for the remainder up to the hard ceiling.
-  //
-  // ALSO: if any priority source (DaddyLive) was late (still in-flight) — even
-  // when fast providers like DamiTV already returned a stream — wait the remaining
-  // window so DaddyLive is included in the very first response instead of being
-  // cut off by the early return.
-  const latePriorityInFlight = inFlight.filter((f) => {
-    if (!lateKeys.has(f.key)) return false;
-    const src = f.key.split(':')[0];
-    return PRIORITY_WAIT_SOURCES.has(src);
-  });
-  const hasPriorityInFlight = latePriorityInFlight.length > 0;
-
-  if ((streams.length === 0 || hasPriorityInFlight) && lateCount > 0) {
+  if (streams.length === 0 && inFlight.length > 0) {
     const remaining = Math.max(0, HARD_DEADLINE_MS - SOFT_DEADLINE_MS);
-    if (remaining > 0) {
-      if (hasPriorityInFlight && streams.length > 0) {
-        console.log(`[streams.js] Holding up to ${remaining}ms for ${latePriorityInFlight.length} late priority source(s) on ${matchId} (have ${streams.length} fast stream(s) already)`);
-      }
-      const waitTargets = streams.length === 0 ? inFlight : latePriorityInFlight;
-      await Promise.race([
-        Promise.allSettled(waitTargets.map((f) => f.promise)),
-        new Promise((r) => setTimeout(r, remaining)),
-      ]);
-      for (const f of waitTargets) {
-        const v = await f.promise.catch(() => null);
-        if (Array.isArray(v)) {
-          for (const s of v) {
-            if (!streams.some((existing) => existing._cacheKey === f.key && existing.url === s.url)) {
-              streams.push(s);
-            }
-          }
-        }
-      }
+    await Promise.race([
+      Promise.allSettled(inFlight.map((f) => f.promise)),
+      new Promise((r) => setTimeout(r, remaining)),
+    ]);
+    for (const f of inFlight) {
+      // Attach a handler first so a late rejection can never be unhandled.
+      const v = await f.promise.catch(() => null);
+      if (Array.isArray(v)) streams.push(...v);
     }
-    lateCount = inFlight.length - streams.length;
+    lateCount = 0;
   } else if (lateCount > 0) {
     console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
   }
@@ -1016,9 +974,6 @@ module.exports = {
   handleStream,
   prewarmMatch,
   selectSources,
-  // Exported so CronService and any future callers know which sources are
-  // "priority" without duplicating the list.
-  PRIORITY_WAIT_SOURCES,
   // Exported so the manifest proxy can transparently re-mint a single expired
   // source without going through the full stream-list path (see src/index.js).
   resolveSource,
