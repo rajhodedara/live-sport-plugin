@@ -120,7 +120,7 @@ class CronService {
     try {
       const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 12);
       const { isMatchLive, isReplayMatch } = require('../catalog');
-      const { prewarmMatch } = require('../streams');
+      const { prewarmMatch, PRIORITY_WAIT_SOURCES } = require('../streams');
       const resolveCache = this.streamResolveCache;
       const matches = this.cacheService ? this.cacheService.getMatches() : [];
 
@@ -140,13 +140,24 @@ class CronService {
         return (Number(b.date) || 0) - (Number(a.date) || 0);
       });
 
-      // Skip matches whose sources are already cached (nothing to do).
+      // Skip matches whose high-priority sources are already cached.
+      // Previously this used .some() across ALL sources, which meant a match
+      // was considered "warm" the moment DamiTV (~900ms) resolved — leaving
+      // DaddyLive permanently cold and never prewarmed. Now we only skip a
+      // match once every priority source (DaddyLive) is cached.
       const todo = [];
       for (const m of live) {
         if (todo.length >= PREWARM_MAX) break;
         let warm = false;
         if (resolveCache) {
-          warm = m.sources.some((s) => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+          const prioritySrcs = m.sources.filter((s) => PRIORITY_WAIT_SOURCES.has(s.source));
+          if (prioritySrcs.length > 0) {
+            // Match is warm only when ALL of its priority sources are cached.
+            warm = prioritySrcs.every((s) => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+          } else {
+            // No priority sources on this match — fall back to the original any-source check.
+            warm = m.sources.some((s) => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+          }
         }
         if (!warm) todo.push(m);
       }
