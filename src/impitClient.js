@@ -39,6 +39,7 @@ const _undiciAgent = new Agent({
   connect: { timeout: 20000, rejectUnauthorized: false },
   keepAliveTimeout: 15000,
   keepAliveMaxTimeout: 30000,
+  allowH2: false
 });
 
 // Enough for the mirror 301s observed in production, small enough that a rogue
@@ -159,6 +160,8 @@ async function safeFetch(url, opts = {}) {
   //   - the hop count is bounded, and the timeoutMs budget covers the WHOLE
   //     chain (each hop only gets the time left), so a redirect loop cannot
   //     multiply the caller's deadline.
+  // We give the undici fallback its own fresh timeout budget, because if impit
+  // exhausted the budget due to a timeout, undici would instantly fail with 0ms left.
   const deadlineAt = Date.now() + timeoutMs;
   let currentUrl = url;
   let res;
