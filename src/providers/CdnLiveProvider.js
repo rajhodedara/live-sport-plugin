@@ -203,8 +203,11 @@ class CdnLiveProvider extends BaseProvider {
         if (!Array.isArray(events)) continue;
         for (const item of events) {
           if (!item.channels || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+          
+          let title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();
+          if (!title || title === 'vs') continue;
+          
           const matchId = item.gameID || `${item.homeTeam}-vs-${item.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-          const title = `${item.homeTeam || ''} vs ${item.awayTeam || ''}`;
           
           let status = 'upcoming';
           if (item.status === 'live' || item.status === 'in') status = 'live';

@@ -388,7 +388,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
 
   // ─── TIER 1: Provider's Own Artwork (Highest Priority) ───
   const providerPoster = match.poster ? normalizeImageUrl(match.poster) : null;
-  const providerLogo = match.logo ? normalizeImageUrl(match.logo) : null;
+  let providerLogo = match.logo ? normalizeImageUrl(match.logo) : null;
   let providerThumb = match.thumbnail_url ? normalizeImageUrl(match.thumbnail_url) : null;
   const providerTeamLogo = match.team1 && match.team1.logo ? normalizeImageUrl(match.team1.logo) : null;
   const providerTeamLogo2 = match.team2 && match.team2.logo ? normalizeImageUrl(match.team2.logo) : null;
@@ -413,9 +413,17 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     { rx: /\/thumbnails\/cricket_[a-f0-9-]+_sony.?sports/i, channel: 'sony sports' },
   ];
   const matchedChannelThumb = providerThumb ? CHANNEL_THUMBNAIL_MAP.find(m => m.rx.test(providerThumb)) : null;
-  const isChannelThumbnail = !!matchedChannelThumb;
+  let isChannelThumbnail = !!matchedChannelThumb;
   const isMatchup = !!(team1Name && team2Name);
   const isMotorsport = match.category === 'motorsport';
+
+  // Check if we have a locally defined, verified hi-res logo for this specific channel name
+  const customLogo = getChannelLogo(match.title);
+  if (customLogo && !isMatchup) {
+    isChannelThumbnail = false; // We want to use it as the main artwork, not a tiny badge
+    providerLogo = customLogo;
+    providerThumb = null; // Discard the ugly provider thumb
+  }
 
   const needsLogo = !providerLogo && !providerTeamLogo && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
   const needsPoster = !providerPoster && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
@@ -502,11 +510,11 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // card with the team crests and show the channel logo in the corner.
   let poster;
 
-  if (providerPoster && !isMotorsport) {
+  if (providerPoster) {
     poster = buildImg(providerPoster, posterText, color) || fallbackPoster;
-  } else if (providerThumb && !isMatchup && !isChannelThumbnail && !isMotorsport) {
+  } else if (providerThumb && !isMatchup && !isChannelThumbnail) {
     poster = buildImg(providerThumb, posterText, color, isThumbLogo) || fallbackPoster;
-  } else if (providerLogo && !isMatchup && !isMotorsport) {
+  } else if (providerLogo && !isMatchup) {
     poster = buildImg(providerLogo, posterText, color, true) || fallbackPoster;
   } else {
     // No provider artwork at all (typical for 24/7 networks from CdnLive and

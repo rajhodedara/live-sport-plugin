@@ -95,6 +95,9 @@ function _compoundify(t) {
     [/\bgreen\s*bay\s*packers\b|\bpackers\b/g, 'greenbaypacker'],
     [/\bcincinatti\s*bengals\b|\bbengals\b/g, 'cincinnatibengals'],
     [/\bpittsburgh\s*steelers\b|\bsteelers\b/g, 'pittsburghsteelers'],
+    // Cricket Channels
+    [/\bwillow(?:\s*2)?(?:\s*cricket)?\b/gi, 'willowcricket'],
+    [/\bfox\s*cricket\b/gi, 'foxcricket'],
     // Basketball — NBL (Australia) teams
     [/\bperth\s*wildcats\b/g, 'perthwildcat'],
     [/\badelaide\s*36ers\b/g, 'adelaide36er'],
@@ -171,7 +174,7 @@ const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
 class MatchAggregator {
   constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider }) {
-    this.providers = [timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamedPkProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : [])];
+    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
@@ -228,7 +231,7 @@ class MatchAggregator {
       if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
       if (['mlb', 'npb'].includes(lc)) return 'baseball';
       if (['nhl', 'khl', 'ice hockey', 'ice_hockey', 'icehockey'].includes(lc)) return 'hockey';
-      if (['sports', 'sport'].includes(lc)) return 'other';
+      if (['sports', 'sport', 'networks'].includes(lc)) return 'other';
       return lc;
     };
     const c1 = _normalizeCategory(p1.category);
@@ -244,8 +247,8 @@ class MatchAggregator {
     if (p1.date && p2.date && Math.abs(p1.date - p2.date) > 86400000) return false;
 
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
-    //    BOTH teams to independently fuzzy-match.
-    if (p1.teams && p2.teams) {
+    //    BOTH teams to independently fuzzy-match. (Skip for motorsport which has no teams).
+    if (p1.teams && p2.teams && c1 !== 'motorsport' && c2 !== 'motorsport') {
       const fwd = _teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]);
       const rev = _teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]);
       return fwd || rev;
@@ -256,13 +259,17 @@ class MatchAggregator {
     if (p1.tokens.size === 0 || p2.tokens.size === 0) return false;
 
     // Digit signatures must agree: "beIN 1" vs "beIN 2", "Court 13" vs "Court 7"
-    // are different channels/events even when the words are identical.
-    if (p1.digits !== p2.digits) return false;
+    // are different channels/events even when the words are identical. (Skip for motorsport Grand Prix).
+    const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('motogp') || t.has('nascar') || t.has('rally');
+    const cIsMoto = c1 === 'motorsport' || c2 === 'motorsport';
+    if (!cIsMoto || !(isGrandPrix(p1.tokens) && isGrandPrix(p2.tokens))) {
+      if (p1.digits !== p2.digits) return false;
+    }
 
     // 6a. One fixture + one channel-like listing: the channel-like tokens must be
     //     a subset of the fixture tokens ("Real Madrid live" ⊂ "Real Madrid vs
     //     Barcelona"). This keeps single-team listings merging with the fixture.
-    if (p1.teams || p2.teams) {
+    if ((p1.teams || p2.teams) && !cIsMoto) {
       const channel = p1.teams ? p2 : p1;
       const fixture = p1.teams ? p1 : p2;
       for (const w of channel.tokens) if (!fixture.tokens.has(w)) return false;
@@ -272,6 +279,17 @@ class MatchAggregator {
     // 6b. Both channel-like: strict identity only. Distinct channels with shared
     //     branding must never merge.
     if (p1.norm === p2.norm) return true;
+
+    // 6c. Motorsport specific fallback: Formula 1, MotoGP, etc.
+    // e.g. "Bahrain Grand Prix - Race" vs "Formula 1 Bahrain Grand Prix in Malaysia"
+    if (c1 === 'motorsport' || c2 === 'motorsport') {
+      const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('motogp') || t.has('nascar') || t.has('rally');
+      if (isGrandPrix(p1.tokens) && isGrandPrix(p2.tokens)) {
+        const generics = new Set(['grandprix', 'gp', 'formulaone', 'f1', 'motogp', 'nascar', 'rally', 'race', 'sunday', 'saturday', 'friday', 'practice', 'qualifying', 'sprint', 'championship', 'world', 'cup']);
+        const specificShared = [...p1.tokens].filter(x => p2.tokens.has(x) && !generics.has(x) && isNaN(x));
+        if (specificShared.length >= 1) return true;
+      }
+    }
 
     // Subset check: if one token set is entirely contained in the other (minimum
     // 2 content tokens), the narrower title is a refinement of the broader one.

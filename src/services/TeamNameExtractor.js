@@ -35,6 +35,11 @@ function extractTeamsFromTitle(title) {
   const colon = t.lastIndexOf(':');
   if (colon > 0 && colon < t.length - 3) t = t.slice(colon + 1).trim();
 
+  // Strip common Cricket and generic tournament prefixes that pollute Team 1
+  // (e.g. "WCL 2026 India vs", "T20 World Cup England vs", "Match 45 X vs")
+  t = t.replace(/^(?:icc\s+)?(?:wcl|ipl|bbl|t20|odi|test|cpl|psl|bpl|the hundred|sa20|asia cup|world cup)\s*(?:world cup)?\s*(?:\d{4})?\s*(?:-\s*)?/i, '').trim();
+  t = t.replace(/^(?:match|game)\s*\d+\s*(?:-\s*)?/i, '').trim();
+
   const parts = t.split(VS_SPLIT);
   if (parts.length !== 2) return null;
   const a = parts[0].trim();

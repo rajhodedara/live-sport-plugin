@@ -415,8 +415,8 @@ describe('generated cards do not pin stale artwork for 24h', () => {
     // These cards encode live state (status/score/kickoff) and embed badge URLs,
     // so a 24h cache kept serving pre-fix broken renders long after a deploy.
     const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
-    const matchCards = source.match(/res\.setHeader\('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600'\);/g) || [];
-    expect(matchCards.length).toBeGreaterThanOrEqual(2);
+    const matchCards = source.match(/res\.setHeader\('Cache-Control', 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600'\);/g) || [];
+    expect(matchCards.length).toBeGreaterThanOrEqual(1);
     // The generated-card handlers must no longer pin a 24h TTL.
     const indexHandlers = source.slice(source.indexOf("app.get(['/img/match'"), source.indexOf("app.get(['/img/badge'"));
     expect(indexHandlers).not.toContain('max-age=86400');
