@@ -709,9 +709,51 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   return metaPreview;
 }
 
+// ─── Server-side meta response cache ─────────────────────────────────────────
+// Cloudflare cannot cache /:config/meta/... URLs (unique per user), so every
+// personalized request hits the VPS. This bounded in-process LRU absorbs
+// repeat clicks for the same match across both workers, solving the main cause
+// of perceived "meta loading" slowness.
+// Key: id + timezone + replayFilter (the only config fields that affect meta output).
+// TTL: 30s for LIVE (so score changes propagate within 30s),
+//       5min for upcoming / 24-7 networks,
+//      30min for replay hubs (static archive content).
+const META_CACHE_MAX = 1000;
+const _metaCache = new Map(); // key → { data, expiresAt }
+
+function _metaCacheKey(id, config) {
+  const tz = (config && config.timezone) || '';
+  const rf = (config && config.replayFilter) || '';
+  return `${id}|${tz}|${rf}`;
+}
+
+function _metaCacheGet(key) {
+  const entry = _metaCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) { _metaCache.delete(key); return null; }
+  // Promote to end (keep-alive semantics on repeated access)
+  _metaCache.delete(key);
+  _metaCache.set(key, entry);
+  return entry.data;
+}
+
+function _metaCacheSet(key, data, ttlMs) {
+  if (_metaCache.size >= META_CACHE_MAX) {
+    // Evict the oldest entry (Map preserves insertion order)
+    _metaCache.delete(_metaCache.keys().next().value);
+  }
+  _metaCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
 async function buildReplayHubMeta(id, config = {}) {
+  // Replay hubs generate 2.5 MB+ JSON payloads — cache them for 30 minutes.
+  const _rhmCacheKey = _metaCacheKey(id, config);
+  const _rhmCached = _metaCacheGet(_rhmCacheKey);
+  if (_rhmCached) return _rhmCached;
+
   const cacheService = container.resolve('cacheService');
   let rawMatches = cacheService.getMatches() || [];
+
   if (rawMatches.length === 0 || !rawMatches.some(m => isReplayMatch(m))) {
     try {
       const aggregator = container.resolve('matchAggregator');
@@ -782,7 +824,7 @@ async function buildReplayHubMeta(id, config = {}) {
       overview: `📅 ${displayDate} • ${m.league || m.category.toUpperCase()}\n${m.title}`
     }));
 
-    return {
+    const _datehubResult = {
       meta: {
         id: id,
         type: 'series',
@@ -822,6 +864,8 @@ async function buildReplayHubMeta(id, config = {}) {
       cacheMaxAge: 1800,
       staleRevalidate: 3600
     };
+    _metaCacheSet(_rhmCacheKey, _datehubResult, 30 * 60 * 1000);
+    return _datehubResult;
   }
 
   // Case B: Sport Hub (e.g. nuvio_sport_replay_football or nuvio_sport_replay_all)
@@ -916,7 +960,7 @@ async function buildReplayHubMeta(id, config = {}) {
     ? `Complete catalog of ${sportDef.name}, organized date-wise.\n${dateGuide}\n\nSelect a date row to view matches from that day.`
     : `Complete catalog of ${sportDef.name}, organized date-wise.`;
 
-  return {
+  const _sporthubResult = {
     meta: {
       id: id,
       type: 'series',
@@ -937,6 +981,8 @@ async function buildReplayHubMeta(id, config = {}) {
     cacheMaxAge: 1800,
     staleRevalidate: 3600
   };
+  _metaCacheSet(_rhmCacheKey, _sporthubResult, 30 * 60 * 1000);
+  return _sporthubResult;
 }
 
 // ─── Handlers ─────────────────────────────────────────────────────────────────
@@ -1314,6 +1360,14 @@ async function handleMeta(type, id, config) {
     return { meta: null };
   }
 
+  // ─── Server-side cache lookup ─────────────────────────────────────────────
+  // Cloudflare bypasses its edge cache for /:config/meta/... URLs (unique per
+  // user), so every personalized click hits the VPS. This in-process LRU means
+  // repeat requests for the same match return in < 5ms instead of ~800ms.
+  const _hmCacheKey = _metaCacheKey(id, config);
+  const _hmCached = _metaCacheGet(_hmCacheKey);
+  if (_hmCached) return _hmCached;
+
   // Fire-and-forget stale-while-revalidate, same as handleCatalog.
   container.resolve('cronService').ensureFresh();
 
@@ -1360,19 +1414,26 @@ async function handleMeta(type, id, config) {
   //   - ALL sources, not just the top few. Minting only the top 3 meant the
   //     remaining providers (WatchFooty is commonly 4th) were minted while the
   //     user was already waiting - which is exactly where the delay came from.
+  //   - setImmediate defers the work one event-loop tick so the meta JSON is
+  //     fully flushed to the socket before stream-token minting begins.
   try {
     if (isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
-      prewarmMatch(match, config || {}, Number.MAX_SAFE_INTEGER).catch(() => {});
+      setImmediate(() => prewarmMatch(match, config || {}, Number.MAX_SAFE_INTEGER).catch(() => {}));
     }
   } catch (_) {}
 
   const effectiveType = type === 'series' ? 'series' : 'tv';
   const live = isMatchLive(match);
-  return {
+
+  // TTL: live 30s (score can change), upcoming/network 5min, everything else 10min
+  const _hmTtl = live ? 30 * 1000 : 5 * 60 * 1000;
+  const _hmResult = {
     meta: mapMatchToMetaPreview(match, config || {}, effectiveType),
     cacheMaxAge: live ? 120 : 600,
     staleRevalidate: live ? 300 : 1800
   };
+  _metaCacheSet(_hmCacheKey, _hmResult, _hmTtl);
+  return _hmResult;
 }
 
 module.exports = {
