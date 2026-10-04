@@ -33,7 +33,8 @@ class CronService {
   // Traffic-driven, so idle instances stay quiet; the 4-hour cron is the floor.
   ensureFresh() {
     try {
-      const isPrimary = (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0');
+      const isPrimary = (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0') &&
+                        (process.env.pm_id === undefined || process.env.pm_id === '0');
       if (!isPrimary) return;
       if (this.syncing) return;
       if (!this.cacheService || !this.cacheService.isStale(REVALIDATE_AFTER_MS)) return;
