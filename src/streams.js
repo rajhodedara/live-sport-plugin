@@ -593,16 +593,12 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts 
     const targets = activeSources.slice(0, topN);
     if (targets.length === 0) return;
     const options = opts || { skipSpeedProbe: true };
-    console.log(`[Prewarm] minting ${targets.length} sources for ${match.id} (in batches of 3)`);
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-      const batch = targets.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map(async (src) => {
-        const key = `${src.source}:${match.id}:${src.id}`;
-        if (resolveCache.get(key)) return null;
-        return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
-      }));
-    }
+    console.log(`[Prewarm] minting ${targets.length} sources for ${match.id}`);
+    await Promise.allSettled(targets.map(async (src) => {
+      const key = `${src.source}:${match.id}:${src.id}`;
+      if (resolveCache.get(key)) return null;
+      return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
+    }));
   } catch (err) {
     console.warn('[Prewarm] failed:', err.message);
   }
@@ -692,14 +688,29 @@ async function handleStream(type, id, config) {
   // usable arrived in time, wait for the remainder up to the hard ceiling.
   if (streams.length === 0 && inFlight.length > 0) {
     const remaining = Math.max(0, HARD_DEADLINE_MS - SOFT_DEADLINE_MS);
+    
+    // Track resolution state asynchronously to avoid hanging the event loop
+    inFlight.forEach(f => {
+      f.resolved = false;
+      f.promise.then(v => {
+        f.resolved = true;
+        f.value = v;
+      }).catch(() => {
+        f.resolved = true;
+        f.value = null;
+      });
+    });
+
     await Promise.race([
       Promise.allSettled(inFlight.map((f) => f.promise)),
       new Promise((r) => setTimeout(r, remaining)),
     ]);
+    
+    // Only extract streams that successfully resolved within the deadline
     for (const f of inFlight) {
-      // Attach a handler first so a late rejection can never be unhandled.
-      const v = await f.promise.catch(() => null);
-      if (Array.isArray(v)) streams.push(...v);
+      if (f.resolved && Array.isArray(f.value)) {
+        streams.push(...f.value);
+      }
     }
     lateCount = 0;
   } else if (lateCount > 0) {
