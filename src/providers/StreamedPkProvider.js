@@ -125,11 +125,11 @@ class StreamedPkProvider extends BaseProvider {
             status: status,
             date: is247Channel ? '' : String(item.date || Date.now()),
             popular: is247Channel ? '1' : (item.popular ? '1' : '0'),
-            poster: posterUrl,
-            logo: homeBadge,
-            background: posterUrl,
-            team1: item.teams && item.teams.home ? { name: item.teams.home.name, logo: homeBadge || null } : null,
-            team2: item.teams && item.teams.away ? { name: item.teams.away.name, logo: awayBadge || null } : null,
+            poster: null,
+            logo: null,
+            background: null,
+            team1: item.teams && item.teams.home ? { name: item.teams.home.name, logo: null } : null,
+            team2: item.teams && item.teams.away ? { name: item.teams.away.name, logo: null } : null,
             sources: sources
           }));
         }
