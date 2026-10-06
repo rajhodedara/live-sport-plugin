@@ -753,6 +753,60 @@ function _metaCacheSet(key, data, ttlMs) {
   _metaCache.set(key, { data, expiresAt: Date.now() + ttlMs });
 }
 
+// ─── Catalog page memo ────────────────────────────────────────────────────────
+// Building 100 meta previews per request costs ~0.8-2s at origin — and when a
+// Cloudflare cache-miss lands while the worker is mid-sync or mid-prewarm, it
+// queues behind background work and stretches past 20s (measured in
+// production). Metas only change when the catalog changes, so memoize the
+// whole handleCatalog result per (route, extra, config, generation). The
+// generation is CacheService.rev, bumped on every setMatches()/disk reload,
+// so each new sync invalidates every page at once. Bounded LRU; a page of
+// metas is ~30-80KB of JSON.
+const CATALOG_PAGE_CACHE_MAX = 150;
+const _catalogPageCache = new Map(); // pageKey -> { gen, result }
+
+function _stableSig(obj) {
+  if (obj === null || obj === undefined) return '';
+  if (typeof obj !== 'object') return String(obj);
+  return Object.keys(obj).sort().map(k => `${k}=${_stableSig(obj[k])}`).join('&');
+}
+
+async function handleCatalog(type, id, extra, config) {
+  if (type !== 'tv' && type !== 'series' && type !== 'channel') return { metas: [] };
+  if (!id.startsWith('nuvio_sports_')) return { metas: [] };
+
+  // Keep the SWR trigger on EVERY catalog request (a cheap staleness check) —
+  // memo hits must not starve the background re-sync.
+  container.resolve('cronService').ensureFresh();
+
+  try {
+    const cacheService = container.resolve('cacheService');
+    const gen = (cacheService && cacheService.rev) || 0;
+    const conf = config || (extra && extra.config) || {};
+    const pageKey = `${type}|${id}|${_stableSig(extra || {})}|${_stableSig(conf)}|${gen}`;
+
+    const hit = _catalogPageCache.get(pageKey);
+    if (hit) {
+      // LRU promote (Map preserves insertion order)
+      _catalogPageCache.delete(pageKey);
+      _catalogPageCache.set(pageKey, hit);
+      return hit.result;
+    }
+
+    const result = await handleCatalogUncached(type, id, extra, config);
+    if (result && Array.isArray(result.metas)) {
+      if (_catalogPageCache.size >= CATALOG_PAGE_CACHE_MAX) {
+        _catalogPageCache.delete(_catalogPageCache.keys().next().value);
+      }
+      _catalogPageCache.set(pageKey, { result, gen });
+    }
+    return result;
+  } catch (_) {
+    // Memoization must never break the request path.
+    return handleCatalogUncached(type, id, extra, config);
+  }
+}
+
 async function buildReplayHubMeta(id, config = {}) {
   // Replay hubs generate 2.5 MB+ JSON payloads — cache them for 30 minutes.
   const _rhmCacheKey = _metaCacheKey(id, config);
@@ -1117,17 +1171,12 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   return { metas, cacheMaxAge: 1800, staleRevalidate: 3600 };
 }
 
-async function handleCatalog(type, id, extra, config) {
-  if (type !== 'tv' && type !== 'series' && type !== 'channel') return { metas: [] };
-
-  if (!id.startsWith('nuvio_sports_')) {
-    return { metas: [] };
-  }
-
+async function handleCatalogUncached(type, id, extra, config) {
   // Fire-and-forget stale-while-revalidate: return the cached list now and let
   // CronService refresh it in the background once it passes the revalidate window.
+  // (Also called by the memoized handleCatalog wrapper on every request.)
   container.resolve('cronService').ensureFresh();
-  
+
   const conf = config || (extra && extra.config) || {};
 
   const categoryMatch = id.replace('nuvio_sports_', '');

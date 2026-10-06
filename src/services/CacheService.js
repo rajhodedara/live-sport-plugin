@@ -19,6 +19,10 @@ class CacheService {
     this.lastFetchTime = 0;
     this.lastDiskMtime = 0;
     this.lastStatCheck = 0;
+    // Monotonic revision, bumped whenever the match set changes (in-memory
+    // write or cross-worker disk reload). Downstream caches (catalog page
+    // memo) key off this so a new sync invalidates everything at once.
+    this.rev = 0;
     this.CACHE_TTL = 5 * 60 * 1000; // 5 minutes
     this.cacheFilePath = resolveCacheFile();
     this._loadDiskCache();
@@ -78,6 +82,7 @@ class CacheService {
         this.cachedMatches = this._clone(parsed.matches);
         this.lastFetchTime = parsed.timestamp || stats.mtimeMs;
         this.lastDiskMtime = stats.mtimeMs;
+        this.rev++;
         return true;
       }
     } catch (_) {}
@@ -110,6 +115,7 @@ class CacheService {
   setMatches(matches) {
     this.cachedMatches = this._clone(matches);
     this.lastFetchTime = Date.now();
+    this.rev++;
     this._saveDiskCache(matches);
   }
 
