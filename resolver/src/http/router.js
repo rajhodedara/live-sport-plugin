@@ -1,5 +1,6 @@
 import { run } from '../resolve/run.js'
 import { serveStatic } from './static.js'
+import { cacheGet, cacheClaim, cacheSet, cacheDelete, cachePrune, cacheStats } from '../cache.js'
 
 function json(res, status, body) {
   res.writeHead(status, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' })
@@ -45,6 +46,54 @@ export async function route(req, res) {
   try {
     if (pathname === '/health' || pathname === '/api/health') {
       json(res, 200, { ok: true, uptime: process.uptime() })
+      return
+    }
+
+    // ── Shared resolve cache (L2 for both cluster workers) ─────────────────
+    // GET    /api/cache/:key            → hit/miss/minting/failed snapshot
+    // GET    /api/cache/:key?claim=1    → reserve the mint (ok:false = held)
+    // POST   /api/cache/:key            → store { streams, ttlMs, status }
+    //                                     or { activeIds } for prune
+    // DELETE /api/cache/:key            → drop entry + claim (noteFailure)
+    // GET    /api/cache-stats           → entry counters
+    if (pathname === '/api/cache-stats') {
+      json(res, 200, cacheStats())
+      return
+    }
+    if (pathname.startsWith('/api/cache/')) {
+      const key = decodeURIComponent(pathname.slice('/api/cache/'.length))
+      if (!key) {
+        json(res, 400, { ok: false, error: 'missing key' })
+        return
+      }
+      if (req.method === 'GET') {
+        if (searchParams.get('claim') === '1') {
+          json(res, 200, cacheClaim(key, Number(searchParams.get('ttl')) || undefined))
+          return
+        }
+        json(res, 200, cacheGet(key))
+        return
+      }
+      if (req.method === 'POST') {
+        let body
+        try {
+          body = await readJson(req)
+        } catch (err) {
+          json(res, 400, { ok: false, error: 'invalid json' })
+          return
+        }
+        if (body && Array.isArray(body.activeIds)) {
+          json(res, 200, cachePrune(body.activeIds))
+          return
+        }
+        json(res, 200, cacheSet(key, body ? body.streams : [], body ? body.ttlMs : undefined, body ? body.status : undefined))
+        return
+      }
+      if (req.method === 'DELETE') {
+        json(res, 200, cacheDelete(key))
+        return
+      }
+      json(res, 405, { error: 'method not allowed' })
       return
     }
 
