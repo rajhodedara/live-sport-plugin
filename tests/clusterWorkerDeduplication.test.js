@@ -117,11 +117,14 @@ describe('Cluster Worker Deduplication & Batch Prewarming', () => {
       try {
         const mockMatch = {
           id: 'test_match_batching',
+          // Non-skipped providers only: the prewarm skip list
+          // (PREWARM_SKIP_PROVIDERS) excludes the heavy embed family, so these
+          // fixtures use prewarmable providers to test batching itself.
           sources: [
             { id: 's1', source: 'daddylive', name: 'Feed 1' },
-            { id: 's2', source: 'streamedpk', name: 'Feed 2' },
-            { id: 's3', source: 'watchfooty', name: 'Feed 3' },
-            { id: 's4', source: 'ppvst', name: 'Feed 4' },
+            { id: 's2', source: 'timstreams', name: 'Feed 2' },
+            { id: 's3', source: 'streamsports99', name: 'Feed 3' },
+            { id: 's4', source: 'cdnlive', name: 'Feed 4' },
             { id: 's5', source: 'livetv', name: 'Feed 5' },
             { id: 's6', source: 'damitv', name: 'Feed 6' },
             { id: 's7', source: 'replayzone', name: 'Feed 7' },
@@ -134,6 +137,36 @@ describe('Cluster Worker Deduplication & Batch Prewarming', () => {
         expect(executedKeys.length).toBe(7);
         // At no time should concurrency exceed batch size 3
         expect(maxConcurrency).toBeLessThanOrEqual(3);
+      } finally {
+        resolveCache.get.mockRestore ? resolveCache.get.mockRestore() : (resolveCache.get = origGet);
+        resolveCache.getOrCreate.mockRestore ? resolveCache.getOrCreate.mockRestore() : (resolveCache.getOrCreate = origGetOrCreate);
+      }
+    });
+
+    test('Skips heavy embed-family providers during prewarm (PREWARM_SKIP_PROVIDERS)', async () => {
+      const resolveCache = container.resolve('streamResolveCache');
+      const origGet = resolveCache.get.bind(resolveCache);
+      const origGetOrCreate = resolveCache.getOrCreate.bind(resolveCache);
+
+      jest.spyOn(resolveCache, 'get').mockReturnValue(null);
+      const getOrCreateSpy = jest.spyOn(resolveCache, 'getOrCreate').mockResolvedValue([]);
+
+      try {
+        const mockMatch = {
+          id: 'test_skip_heavy',
+          sources: [
+            { id: 'h1', source: 'admin', name: 'StreamedPk admin' },
+            { id: 'h2', source: 'delta', name: 'StreamedPk delta' },
+            { id: 'h3', source: 'ppvst', name: 'PpvSt' },
+            { id: 'h4', source: 'watchfooty', name: 'WatchFooty' },
+            { id: 'k1', source: 'daddylive', name: 'Feed 1' },
+          ],
+        };
+
+        await prewarmMatch(mockMatch, null);
+        // Only the prewarmable (non-heavy) source should have been minted
+        expect(getOrCreateSpy).toHaveBeenCalledTimes(1);
+        expect(getOrCreateSpy.mock.calls[0][0]).toContain('daddylive');
       } finally {
         resolveCache.get.mockRestore ? resolveCache.get.mockRestore() : (resolveCache.get = origGet);
         resolveCache.getOrCreate.mockRestore ? resolveCache.getOrCreate.mockRestore() : (resolveCache.getOrCreate = origGetOrCreate);
@@ -181,7 +214,7 @@ describe('Cluster Worker Deduplication & Batch Prewarming', () => {
           id: 'test_cached_skip',
           sources: [
             { id: 's1', source: 'daddylive', name: 'Feed 1' },
-            { id: 's2', source: 'streamedpk', name: 'Feed 2' },
+            { id: 's2', source: 'timstreams', name: 'Feed 2' },
           ],
         };
 

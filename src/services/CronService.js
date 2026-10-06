@@ -123,14 +123,19 @@ class CronService {
     try {
       const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 12);
       const { isMatchLive, isReplayMatch } = require('../catalog');
-      const { prewarmMatch } = require('../streams');
+      const { prewarmMatch, prewarmSkipProvidersSet } = require('../streams');
       const resolveCache = this.streamResolveCache;
+      const skip = prewarmSkipProvidersSet();
       const matches = this.cacheService ? this.cacheService.getMatches() : [];
 
       const live = matches.filter((m) => {
         if (!m || !m.sources || m.sources.length === 0) return false;
         if (m.category === 'networks') return false;      // 24/7 channels
         if (isReplayMatch(m)) return false;                // replays
+        // Matches whose sources are ALL heavy embed-family providers never
+        // prewarm (see PREWARM_SKIP_PROVIDERS) — excluding them here keeps the
+        // tick log honest instead of announcing no-op mints.
+        if (!m.sources.some((s) => s && !skip.has(String(s.source || '').toLowerCase()))) return false;
         return isMatchLive(m);                             // genuinely live
       });
       if (live.length === 0) return;
@@ -149,11 +154,11 @@ class CronService {
         if (todo.length >= PREWARM_MAX) break;
         let warm = false;
         if (resolveCache) {
-          const prioritySources = m.sources.filter(s => ['daddylive', 'ppvst'].includes(s.source));
+          const prioritySources = m.sources.filter(s => ['daddylive', 'ppvst'].includes(s.source) && !skip.has(String(s.source || '').toLowerCase()));
           if (prioritySources.length > 0) {
             warm = prioritySources.every(s => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
           } else {
-            warm = m.sources.some((s) => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+            warm = m.sources.some((s) => !skip.has(String(s.source || '').toLowerCase()) && resolveCache.get(`${s.source}:${m.id}:${s.id}`));
           }
         }
         if (!warm) todo.push(m);
@@ -162,6 +167,8 @@ class CronService {
 
       console.log(`[CronService] Prewarming ${todo.length} live match(es) (of ${live.length} live)`);
       // Sequential: never bursts upstream. Low priority, so slow is fine.
+      // (Heavy embed-family sources are excluded upstream via
+      // PREWARM_SKIP_PROVIDERS in prewarmMatch — see streams.js.)
       for (const m of todo) {
         await prewarmMatch(m, null, Number.MAX_SAFE_INTEGER).catch(() => {});
       }

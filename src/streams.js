@@ -585,12 +585,33 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 // 4th in priority order) were minted while the user was already waiting on the
 // click. Callers can still pass an explicit smaller number if they ever want to
 // cap it, but the safe default is "everything".
+// Providers excluded from PREWARMING (not from on-demand resolution).
+// Minting these is the heaviest work in the app:
+//   - admin/echo/golf/delta/streamedpk/embedindia/embedst: Streamed.pk embed
+//     chain — each variant spawns a WASM child process (StreamedPkProvider's
+//     own comment), batches of 5 per mint.
+//   - ppvst: spawns a full child Node process per resolve (PpvStProvider).
+//   - watchfooty: resolves many variants per source via native extraction.
+// Prewarming them all night is what saturated the origin at peak (measured:
+// Cloudflare 524s). They still resolve normally when a user clicks them.
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty';
+
+function prewarmSkipProvidersSet() {
+  const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
+    ? DEFAULT_PREWARM_SKIP_PROVIDERS
+    : process.env.PREWARM_SKIP_PROVIDERS;
+  if (!raw || !raw.trim()) return new Set();
+  return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
+
 async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
     const resolveCache = container.resolve('streamResolveCache');
     const activeSources = selectSources(match.sources, config || null);
-    const targets = activeSources.slice(0, topN);
+    const skip = prewarmSkipProvidersSet();
+    const eligible = skip.size ? activeSources.filter((s) => !skip.has(String(s.source || '').toLowerCase())) : activeSources;
+    const targets = eligible.slice(0, topN);
     if (targets.length === 0) return;
     const options = opts || { skipSpeedProbe: true };
     console.log(`[Prewarm] minting ${targets.length} sources for ${match.id} (in batches of 3)`);
@@ -978,6 +999,7 @@ function suppressPreMatchTeamChannels(streams, match) {
 module.exports = {
   handleStream,
   prewarmMatch,
+  prewarmSkipProvidersSet,
   selectSources,
   // Exported so the manifest proxy can transparently re-mint a single expired
   // source without going through the full stream-list path (see src/index.js).
