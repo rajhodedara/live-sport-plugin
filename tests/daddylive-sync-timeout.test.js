@@ -124,7 +124,9 @@ describe('ceiling is coupled to the circuit breaker, never above it', () => {
 
 describe('call sites are wired correctly', () => {
   test('exactly 3 sync fetches use the helper', () => {
-    expect((source.match(/AbortSignal\.timeout\(resolveSyncTimeoutMs\(\)\)/g) || []).length).toBe(3);
+    // Each sync fetch assigns its budget from the helper once, then passes the
+    // same value as both signal and timeoutMs (see the attempts:1 pin below).
+    expect((source.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(3);
   });
 
   test('the 4 resolve-path fetches keep their literal 6000 (bounded by handleStream)', () => {
@@ -136,11 +138,23 @@ describe('call sites are wired correctly', () => {
     const ctorEnd = source.indexOf('clearCache(sourceId)');
     const ctor = source.slice(ctorStart, ctorEnd);
     expect(ctor).not.toMatch(/AbortSignal\.timeout\(6000\)/);
-    expect((ctor.match(/AbortSignal\.timeout\(resolveSyncTimeoutMs\(\)\)/g) || []).length).toBe(3);
+    expect((ctor.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(3);
   });
 
   test("requires 'os' exactly once and imports the breaker timeout", () => {
     expect((source.match(/require\('os'\)/g) || []).length).toBe(1);
     expect(source).toMatch(/BREAKER_TIMEOUT_MS \} = require\('\.\.\/services\/CircuitBreakerService'\)/);
+  });
+
+  test('sync fetches forward budgetMs + attempts:1 so proxyFetch cannot substitute its own budget', () => {
+    // Regression pin: proxyFetch used to drop signal/timeoutMs, silently
+    // replacing this provider's tuned budget with a fixed 15s x 3 retries.
+    // Every sync fetch must pass its budget as timeoutMs AND attempts: 1
+    // (the mirror loop is the retry layer).
+    const ctorStart = source.indexOf('constructor(opts = {})');
+    const ctorEnd = source.indexOf('clearCache(sourceId)');
+    const ctor = source.slice(ctorStart, ctorEnd);
+    expect((ctor.match(/^\s*attempts: 1$/gm) || []).length).toBe(3);
+    expect((ctor.match(/timeoutMs: (?:home)?[bB]udgetMs/g) || []).length).toBe(3);
   });
 });

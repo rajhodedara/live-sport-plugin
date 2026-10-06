@@ -69,7 +69,7 @@ class CdnLiveProvider extends BaseProvider {
     this.apiUrl = 'https://api.cdnlivetv.tv/api/v1/events/sports/?user=cdnlivetv&plan=free';
     this._decoded = new Map(); // playerUrl -> { url, expiresAt }
     
-    this.fetchMain = this.circuitBreaker.wrap(`${this.name}_fetchMain`, async () => {
+    this.fetchMain = this.circuitBreaker.wrapSync(`${this.name}_fetchMain`, async () => {
       let lastErr = null;
       for (const url of EVENT_LIST_URLS) {
         try {
@@ -84,7 +84,7 @@ class CdnLiveProvider extends BaseProvider {
       throw lastErr || new Error('no sports events host answered');
     });
 
-    this.fetchChannels = this.circuitBreaker.wrap(`${this.name}_channels`, async () => {
+    this.fetchChannels = this.circuitBreaker.wrapSync(`${this.name}_channels`, async () => {
       let lastErr = null;
       for (const url of CHANNEL_LIST_URLS) {
         try {

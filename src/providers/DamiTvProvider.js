@@ -24,7 +24,7 @@ class DamiTvProvider extends BaseProvider {
     this.embedStProvider = opts.embedStProvider;
     this.embedIndiaProvider = opts.embedIndiaProvider;
 
-    this.fetchData = this.circuitBreaker.wrap(`${this.name}_fetch`, async () => {
+    this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
       const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
@@ -32,7 +32,7 @@ class DamiTvProvider extends BaseProvider {
 
     // Secondary feed for the 24/7 channels. Non-fatal: a failure here only
     // costs the 24/7 row, not the fixture schedule.
-    this.fetchAllMatches = this.circuitBreaker.wrap(`${this.name}_fetchAll`, async () => {
+    this.fetchAllMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchAll`, async () => {
       const res = await this.proxyFetch(MATCHES_ALL_URL, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();

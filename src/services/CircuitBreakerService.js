@@ -5,6 +5,24 @@ const CircuitBreaker = require('opossum');
 // safely BELOW it, instead of silently exceeding it and being cut short.
 const BREAKER_TIMEOUT_MS = 20000;
 
+// Options for operations invoked at SYNC cadence — once per revalidate cycle
+// (CATALOG_REVALIDATE_MS, default 10 min) or the 4-hour cron. Opossum's
+// default 10-second rolling stats window can never accumulate volumeThreshold
+// calls at that cadence, so a sync-path breaker configured with the defaults
+// can NEVER open, no matter how consistently the upstream fails (verified
+// empirically: 6 consecutive failures 10.5s apart, breaker stayed closed).
+// A 45-minute window in 45 one-minute buckets sees 3 failures (with at most
+// one success among them) reach the 67% error threshold and trip the breaker;
+// resetTimeout then probe-recovers it as usual. Carry-forward in
+// MatchAggregator keeps the catalog stable while a tripped sync breaker is
+// open, so fast-failing here is safe.
+const SYNC_CADENCE_OPTIONS = {
+  rollingCountTimeout: 45 * 60 * 1000,
+  rollingCountBuckets: 45,
+  volumeThreshold: 3,
+  errorThresholdPercentage: 67,
+};
+
 class CircuitBreakerService {
   constructor() {
     this.breakers = new Map();
@@ -12,8 +30,8 @@ class CircuitBreakerService {
 
   /**
    * Wraps an async function in a circuit breaker.
-   * If the function fails 3 times, the breaker opens and trips immediately
-   * for the next 5 minutes without hitting the actual endpoint.
+   * With the default options the breaker trips when >= 50% of at least 5 calls
+   * inside a 10-second window fail, and probes recovery after 90s.
    */
   wrap(name, asyncFunction, customOptions = {}) {
     if (this.breakers.has(name)) {
@@ -29,7 +47,7 @@ class CircuitBreakerService {
     };
 
     const breaker = new CircuitBreaker(asyncFunction, options);
-    
+
     breaker.fallback((err) => {
       const reason = err ? err.message : 'Unknown';
       console.warn(`[CircuitBreaker] ${name} Fallback triggered. Reason: ${reason}`);
@@ -42,6 +60,16 @@ class CircuitBreakerService {
 
     this.breakers.set(name, breaker);
     return breaker;
+  }
+
+  /**
+   * wrap() variant for SYNC-path operations (provider list/schedule fetches
+   * called once per revalidate cycle). Uses a rolling window long enough to
+   * see that cadence, so the breaker can actually open when an upstream dies.
+   * See SYNC_CADENCE_OPTIONS for the reasoning.
+   */
+  wrapSync(name, asyncFunction, customOptions = {}) {
+    return this.wrap(name, asyncFunction, { ...SYNC_CADENCE_OPTIONS, ...customOptions });
   }
 
   /**
@@ -78,3 +106,4 @@ class CircuitBreakerService {
 
 module.exports = CircuitBreakerService;
 module.exports.BREAKER_TIMEOUT_MS = BREAKER_TIMEOUT_MS;
+module.exports.SYNC_CADENCE_OPTIONS = SYNC_CADENCE_OPTIONS;

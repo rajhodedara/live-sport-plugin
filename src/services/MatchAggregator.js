@@ -322,11 +322,22 @@ class MatchAggregator {
     const finalMatches = [];
     const finalPres = []; // precomputed identity for each accepted match
 
-    const processProviderMatches = (providerMatches) => {
+    // The merge scan is O(incoming x accepted). At production scale one
+    // provider's rows used to land as a single ~200ms synchronous block on the
+    // event loop; every HTTP request queued behind it. Process rows in small
+    // chunks and yield between chunks (setImmediate lets pending I/O callbacks
+    // and queued request handlers run) so no single block exceeds ~20ms.
+    const MERGE_CHUNK = Number(process.env.MERGE_CHUNK_SIZE || 25);
+    const yieldToLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+    const processProviderMatches = async (providerMatches) => {
       if (!providerMatches || !Array.isArray(providerMatches)) return;
-      providerMatches.forEach(match => {
-        if (!match.id || !match.title) return;
-        if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) return;
+      for (let start = 0; start < providerMatches.length; start += MERGE_CHUNK) {
+        const end = Math.min(start + MERGE_CHUNK, providerMatches.length);
+        for (let r = start; r < end; r++) {
+          const match = providerMatches[r];
+          if (!match.id || !match.title) continue;
+          if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) continue;
 
         const pre = this._precompute(match);
         let idx = -1;
@@ -337,7 +348,7 @@ class MatchAggregator {
         if (idx === -1) {
           finalMatches.push(match);
           finalPres.push(pre);
-          return;
+          continue;
         }
 
         const existing = finalMatches[idx];
@@ -401,7 +412,9 @@ class MatchAggregator {
           existing._titleIsFixture = true;
           finalPres[idx] = pre;
         }
-      });
+        }
+        if (end < providerMatches.length) await yieldToLoop();
+      }
     };
 
     // Providers swallow their own errors and return []. A non-empty result is the
@@ -429,7 +442,7 @@ class MatchAggregator {
 
     if (isReplayFresh) {
       console.log(`[MatchAggregator] Reusing ${previousReplays.length} cached replay events (synced ${Math.round((Date.now() - this.lastReplaySync) / 60000)}m ago; 12h cadence). Skipping LiveTV & ReplayZone scrape.`);
-      processProviderMatches(previousReplays);
+      await processProviderMatches(previousReplays);
       anyProviderSucceeded = true;
     } else {
       this.lastReplaySync = Date.now();
@@ -449,7 +462,7 @@ class MatchAggregator {
         try {
           const providerMatches = await p.getMatches();
           if (Array.isArray(providerMatches) && providerMatches.length > 0) anyProviderSucceeded = true;
-          processProviderMatches(providerMatches);
+          await processProviderMatches(providerMatches);
         } catch (err) {
           console.error(`[MatchAggregator] Provider fetch failed:`, err.message);
         }
@@ -457,14 +470,15 @@ class MatchAggregator {
     } else {
       // Fast parallel fetching (Render / Local)
       const results = await Promise.allSettled(providersToQuery.map(p => p.getMatches()));
-      results.forEach((promiseResult, index) => {
+      for (let index = 0; index < results.length; index++) {
+        const promiseResult = results[index];
         if (promiseResult.status === 'fulfilled') {
           if (Array.isArray(promiseResult.value) && promiseResult.value.length > 0) anyProviderSucceeded = true;
-          processProviderMatches(promiseResult.value);
+          await processProviderMatches(promiseResult.value);
         } else {
           console.error(`[MatchAggregator] Provider ${index} failed:`, promiseResult.reason);
         }
-      });
+      }
     }
 
     const now = Date.now();
@@ -632,7 +646,23 @@ class MatchAggregator {
           if (m.category === 'networks' || (!m.team1 && !m.team2)) return !!m.title && !m.logo;
           return (m.team1 && m.team1.name && !m.team1.logo) || !m.logo;
         }).slice(0, 600);
-        Promise.allSettled(enrichable.map(m => this.teamLogoService.enrichMatch(m))).catch(() => {});
+        // Bounded pool instead of an unbounded allSettled fan-out: 600
+        // simultaneous lookups fire a burst of TLS handshakes and JSON parses
+        // onto this worker right after every sync — exactly when user requests
+        // are already queued. A small pool keeps the enrichment throughput
+        // while capping its event-loop and socket pressure. Tune with
+        // LOGO_ENRICH_CONCURRENCY if needed.
+        const ENRICH_CONCURRENCY = Math.max(1, Number(process.env.LOGO_ENRICH_CONCURRENCY || 8));
+        const queue = enrichable.slice();
+        const enrichWorker = async () => {
+          while (queue.length) {
+            const m = queue.shift();
+            try { await this.teamLogoService.enrichMatch(m); } catch (_) {}
+          }
+        };
+        Promise.all(
+          Array.from({ length: Math.min(ENRICH_CONCURRENCY, enrichable.length) }, enrichWorker)
+        ).catch(() => {});
       }
 
       return activeMatches;

@@ -10,7 +10,7 @@ class TimStreamsProvider extends BaseProvider {
     this.name = 'TimStreams';
     this.apiUrl = 'https://timst.top/api/live-upcoming';
     
-    this.fetchData = this.circuitBreaker.wrap(`${this.name}_fetch`, async () => {
+    this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
       const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();

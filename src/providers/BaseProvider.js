@@ -107,16 +107,21 @@ class BaseProvider {
     
     // safeFetch tries impit first (browser TLS fingerprint), falls back to
     // undici automatically — works on Windows, Linux x64, ARM64, musl, etc.
-
+    //
+    // signal/timeoutMs/attempts are forwarded: callers tune a per-fetch budget
+    // (e.g. DaddyLive's load-scaled sync timeout) and safeFetch is what enforces
+    // it. Dropping them here used to silently replace every caller's budget with
+    // a fixed 15s x 3 attempts, which both failed slow-but-alive mirrors and
+    // stretched dead ones to ~60s of retries.
     const reqOptions = {
       method: options.method || 'GET',
       headers: options.headers || {},
       body: options.body,
-      timeoutMs: 15000,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs || 15000,
+      attempts: options.attempts,
     };
 
-    // safeFetch tries impit first (browser TLS fingerprint), falls back to
-    // undici automatically — works on Windows, Linux x64, ARM64, musl, etc.
     return await _safeFetch(url, reqOptions);
   }
 

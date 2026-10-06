@@ -13,7 +13,7 @@ class GenericYamlProvider extends BaseProvider {
     this.name = config.name;
     this.config = config;
 
-    this.fetchData = this.circuitBreaker.wrap(`${this.name}_fetch`, async () => {
+    this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
       const res_req = await request(this.config.baseUrl, { headersTimeout: 10000, bodyTimeout: 10000 });
     const res = {
       data: await res_req.body.text().then(t => { try { return JSON.parse(t); } catch(e) { return t; } })

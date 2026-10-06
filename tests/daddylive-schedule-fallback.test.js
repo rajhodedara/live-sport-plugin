@@ -21,7 +21,13 @@ const DaddyLiveProvider = require('../src/providers/DaddyLiveProvider');
 const MatchAggregator = require('../src/services/MatchAggregator');
 
 // Minimal stand-in for CircuitBreakerService: runs the wrapped function directly.
-const fakeCB = { wrap: (name, fn) => ({ fire: () => fn() }) };
+// wrapSync mirrors wrap — the sync-path fetches (DaddyLive schedule/channels)
+// declare themselves via wrapSync so the real breaker can use a cadence-aware
+// rolling window; for the stub the behaviour is identical either way.
+const fakeCB = {
+  wrap: (name, fn) => ({ fire: () => fn() }),
+  wrapSync: (name, fn) => ({ fire: () => fn() }),
+};
 
 const CHANNELS_HTML = '<a href="/watch.php?id=94"><div class="card__title">beIN Sports 4</div></a>';
 

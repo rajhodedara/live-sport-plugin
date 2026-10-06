@@ -154,20 +154,26 @@ class DaddyLiveProvider extends BaseProvider {
       }
     }
 
-    this.fetchSchedule = this.circuitBreaker.wrap(`${this.name}_fetchSchedule`, async () => {
+    this.fetchSchedule = this.circuitBreaker.wrapSync(`${this.name}_fetchSchedule`, async () => {
       let lastErr = null;
 
       // Pass 1: Try static JSON schedule across mirror domains (if fresh or in test environment)
       for (const base of this.baseDomains) {
         try {
           const url = `${base}/schedule/schedule-generated.json`;
+          // The mirror loop below is the retry layer, so each fetch gets ONE
+          // engine attempt inside the caller's budget (attempts: 1) instead of
+          // safeFetch's default 3x retries stacking behind it.
+          const budgetMs = resolveSyncTimeoutMs();
           const res = await this.proxyFetch(url, {
             headers: {
               'User-Agent': UA,
               'Accept': 'application/json',
               'Referer': `${base}/`
             },
-            signal: AbortSignal.timeout(resolveSyncTimeoutMs())
+            signal: AbortSignal.timeout(budgetMs),
+            timeoutMs: budgetMs,
+            attempts: 1
           });
           if (res && res.ok) {
             const data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
@@ -206,12 +212,15 @@ class DaddyLiveProvider extends BaseProvider {
       // Pass 2: Scrape live homepage HTML (contains current real-time schedule)
       for (const base of this.baseDomains) {
         try {
+          const homeBudgetMs = resolveSyncTimeoutMs();
           const homeRes = await this.proxyFetch(`${base}/`, {
             headers: {
               'User-Agent': UA,
               'Referer': `${base}/`
             },
-            signal: AbortSignal.timeout(resolveSyncTimeoutMs())
+            signal: AbortSignal.timeout(homeBudgetMs),
+            timeoutMs: homeBudgetMs,
+            attempts: 1
           });
           if (homeRes && homeRes.ok) {
             const homeHtml = typeof homeRes.text === 'function' ? await homeRes.text() : homeRes.text;
@@ -226,17 +235,20 @@ class DaddyLiveProvider extends BaseProvider {
       throw lastErr || new Error('All DaddyLive schedule endpoints failed');
     }, { timeout: 30000 });
 
-    this.fetchChannels = this.circuitBreaker.wrap(`${this.name}_fetchChannels`, async () => {
+    this.fetchChannels = this.circuitBreaker.wrapSync(`${this.name}_fetchChannels`, async () => {
       let lastErr = null;
       for (const base of this.baseDomains) {
         try {
           const url = `${base}/24-7-channels.php`;
+          const budgetMs = resolveSyncTimeoutMs();
           const res = await this.proxyFetch(url, {
             headers: {
               'User-Agent': UA,
               'Referer': `${base}/`
             },
-            signal: AbortSignal.timeout(resolveSyncTimeoutMs())
+            signal: AbortSignal.timeout(budgetMs),
+            timeoutMs: budgetMs,
+            attempts: 1
           });
           if (res.ok) {
             if (typeof res.text === 'function') {

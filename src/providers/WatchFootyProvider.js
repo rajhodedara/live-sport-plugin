@@ -11,7 +11,7 @@ class WatchFootyProvider extends BaseProvider {
     // Hitting the /all endpoint to fetch 13+ sports instead of just football
     this.apiUrl = 'https://api.watchfooty.st/api/v1/matches/all';
     
-    this.fetchMain = this.circuitBreaker.wrap(`${this.name}_fetchMain`, async () => {
+    this.fetchMain = this.circuitBreaker.wrapSync(`${this.name}_fetchMain`, async () => {
       const headers = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
       const res = await this.proxyFetch(this.apiUrl, { headers, signal: AbortSignal.timeout(10000) });
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);

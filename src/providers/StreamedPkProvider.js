@@ -10,7 +10,7 @@ class StreamedPkProvider extends BaseProvider {
     this.embedIndiaProvider = opts.embedIndiaProvider;
     this.apiUrl = 'https://streamed.pk/api';
 
-    this.fetchMatches = this.circuitBreaker.wrap(`${this.name}_fetchMatches`, async () => {
+    this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
       const res = await this.proxyFetch(`${this.apiUrl}/matches/all`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -22,7 +22,7 @@ class StreamedPkProvider extends BaseProvider {
       return await res.json();
     });
 
-    this.fetchLiveMatches = this.circuitBreaker.wrap(`${this.name}_fetchLiveMatches`, async () => {
+    this.fetchLiveMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchLiveMatches`, async () => {
       const res = await this.proxyFetch(`${this.apiUrl}/matches/live`, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
