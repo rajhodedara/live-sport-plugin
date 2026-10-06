@@ -567,22 +567,44 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   // rasterisation is unavailable, because then the SVG is what ships.
   const png = jpeg;
   const deliveredSize = png ? png.length : Buffer.byteLength(svg, 'utf8');
+  let droppedForSize = false;
   if (deliveredSize > CARD_BUDGET_BYTES && (badgesToUse.badge1 || badgesToUse.badge2)) {
+    droppedForSize = true;
     badgesToUse = { ...badgesToUse, badge1: null, badge2: null };
     svg = renderCard(badgesToUse);
     jpeg = await rasterize(svg);
   }
 
   // Don't memoize a logo-less card when team names are present — it just means
-  // the async logo lookups were still in-flight on first render. The next request
+  // the async logo lookups were still in-flight on first render. The next
+  // request resolves from the warmed TeamLogoService cache and memoizes the
+  // complete card instead of pinning the crest-less render for the worker's
+  // lifetime. (This is the rule the comment above always described; the memoize
+  // call below used to run unconditionally, which is exactly the "logos take
+  // time to load / some cards never get their crest" symptom after a restart
+  // wiped the warm memos.) Cards whose crests were dropped for size ARE final,
+  // so they memoize as-is.
+  const hasNameSlot = !!(qs(query.t1) || qs(query.t2) || qs(query.title));
+  const hasArtwork = !!(badgesToUse.badge1 || badgesToUse.badge2 || badgesToUse.leagueBadge || badgesToUse.channelBadge || badgesToUse.channelMark);
+  const memoWorthy = droppedForSize || !hasNameSlot || hasArtwork;
+
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
 
+  if (memoWorthy) {
+    if (jpeg) {
+      matchCardMemo.set(memoKey, jpeg);
+      res.setHeader('Content-Type', 'image/jpeg');
+      return res.send(jpeg);
+    }
+    matchCardMemo.set(memoKey, svg);
+    res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
+    return res.send(svg);
+  }
+
   if (jpeg) {
-    matchCardMemo.set(memoKey, jpeg);
     res.setHeader('Content-Type', 'image/jpeg');
     return res.send(jpeg);
   }
-  matchCardMemo.set(memoKey, svg);
   res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8');
   return res.send(svg);
 });

@@ -557,7 +557,38 @@ class TeamLogoService {
   constructor() {
     this.cache = new Map(); // key -> { url, expiresAt }
     this.inFlight = new Map(); // key -> Promise<string|null>
+    // Optional callback fired (debounced) whenever a NEW team badge is found,
+    // so generation-keyed caches (catalog page memo) can rebuild pages that
+    // were built before this crest was available.
+    this.onChange = null;
+    this._lastLogoNotify = 0;
+    this._logoDirty = false;
+    this._logoNotifyTimer = null;
     this._loadDiskCache();
+  }
+
+  // Fire onChange at most every 20s (leading edge + one trailing fire), so a
+  // post-sync burst of badge lookups causes a couple of rebuilds instead of
+  // one per lookup.
+  _notifyLogoChanged() {
+    if (typeof this.onChange !== 'function') return;
+    this._logoDirty = true;
+    const now = Date.now();
+    if (now - this._lastLogoNotify >= 20000) {
+      this._lastLogoNotify = now;
+      this._logoDirty = false;
+      try { this.onChange(); } catch (_) {}
+    } else if (!this._logoNotifyTimer) {
+      this._logoNotifyTimer = setTimeout(() => {
+        this._logoNotifyTimer = null;
+        if (this._logoDirty) {
+          this._lastLogoNotify = Date.now();
+          this._logoDirty = false;
+          try { this.onChange(); } catch (_) {}
+        }
+      }, 20000);
+      if (this._logoNotifyTimer.unref) this._logoNotifyTimer.unref();
+    }
   }
 
   _loadDiskCache() {
@@ -797,8 +828,12 @@ class TeamLogoService {
 
             if (bestTeam && bestTeam.strBadge) {
               const badgeUrl = bestTeam.strBadge;
+              const prev = this.cache.get(key);
               this.cache.set(key, { url: badgeUrl, expiresAt: Date.now() + 30 * 24 * 3600 * 1000 });
               if (this.cache.size % 20 === 0) this._saveDiskCache();
+              // A crest that wasn't there before changes how match cards render —
+              // tell generation-keyed caches to rebuild.
+              if (!prev || prev.url !== badgeUrl) this._notifyLogoChanged();
               return badgeUrl;
             }
           }

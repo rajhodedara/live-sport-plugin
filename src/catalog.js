@@ -763,7 +763,20 @@ function _metaCacheSet(key, data, ttlMs) {
 // so each new sync invalidates every page at once. Bounded LRU; a page of
 // metas is ~30-80KB of JSON.
 const CATALOG_PAGE_CACHE_MAX = 150;
-const _catalogPageCache = new Map(); // pageKey -> { gen, result }
+const CATALOG_PAGE_TTL_MS = 5 * 60 * 1000; // safety net: never serve a page older than 5 min
+const _catalogPageCache = new Map(); // pageKey -> { gen, result, expiresAt }
+let _logoHookWired = false;
+
+function _wireLogoInvalidationHook() {
+  if (_logoHookWired) return;
+  _logoHookWired = true;
+  try {
+    const tls = container.resolve('teamLogoService');
+    tls.onChange = () => {
+      try { container.resolve('cacheService').bumpRev(); } catch (_) {}
+    };
+  } catch (_) {}
+}
 
 function _stableSig(obj) {
   if (obj === null || obj === undefined) return '';
@@ -778,6 +791,7 @@ async function handleCatalog(type, id, extra, config) {
   // Keep the SWR trigger on EVERY catalog request (a cheap staleness check) —
   // memo hits must not starve the background re-sync.
   container.resolve('cronService').ensureFresh();
+  _wireLogoInvalidationHook();
 
   try {
     const cacheService = container.resolve('cacheService');
@@ -786,19 +800,20 @@ async function handleCatalog(type, id, extra, config) {
     const pageKey = `${type}|${id}|${_stableSig(extra || {})}|${_stableSig(conf)}|${gen}`;
 
     const hit = _catalogPageCache.get(pageKey);
-    if (hit) {
+    if (hit && Date.now() <= hit.expiresAt) {
       // LRU promote (Map preserves insertion order)
       _catalogPageCache.delete(pageKey);
       _catalogPageCache.set(pageKey, hit);
       return hit.result;
     }
+    if (hit) _catalogPageCache.delete(pageKey);
 
     const result = await handleCatalogUncached(type, id, extra, config);
     if (result && Array.isArray(result.metas)) {
       if (_catalogPageCache.size >= CATALOG_PAGE_CACHE_MAX) {
         _catalogPageCache.delete(_catalogPageCache.keys().next().value);
       }
-      _catalogPageCache.set(pageKey, { result, gen });
+      _catalogPageCache.set(pageKey, { result, gen, expiresAt: Date.now() + CATALOG_PAGE_TTL_MS });
     }
     return result;
   } catch (_) {

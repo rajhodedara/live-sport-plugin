@@ -119,6 +119,14 @@ class CacheService {
     this._saveDiskCache(matches);
   }
 
+  // Explicit invalidation for downstream caches keyed on rev (catalog page
+  // memo): called when async background work (logo enrichment) fills in data
+  // that the match set alone doesn't capture, so memoized pages rebuild with
+  // the artwork included.
+  bumpRev() {
+    this.rev++;
+  }
+
   findMatch(matchId) {
     if (!matchId) return null;
     this._ensureLoaded();
