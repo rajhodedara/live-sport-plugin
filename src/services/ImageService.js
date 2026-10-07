@@ -17,6 +17,15 @@
 
 const { request } = require('undici');
 
+// Disable sharp/libvips's decoded-image operation cache. Measured on the live
+// server: every burst of image work left a permanent 15-22 MB anonymous block
+// behind — libvips caches DECODED pixel buffers (a 500 KB logo decodes to a
+// ~16 MB RGBA surface), up to its default 500 MB cache budget, across ~24
+// blocks per worker. Our own encoded-byte cache (below) already handles reuse,
+// so re-decoding on repeated views costs a few ms. Without this, worker RSS
+// climbs ~250 MB/h during busy match nights and crosses the PM2 ceiling.
+try { require('sharp').cache(false); } catch (_) {}
+
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
 const IMAGE_TTL_MS = 10 * 60 * 1000;   // 10 minutes

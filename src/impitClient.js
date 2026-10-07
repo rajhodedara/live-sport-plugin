@@ -19,12 +19,30 @@ const { request: undiciRequest, Agent } = require('undici');
 // null       = probed and unavailable (native binary missing / bad arch)
 // Impit obj  = ready to use
 let _impitInstance;
+let _impitBornAt = 0;
+
+// The Impit instance holds Rust-side state (connection pools, TLS sessions,
+// per-host buffers) that accumulates with fetch volume and is never released —
+// measured on the live server as worker native memory climbing ~250 MB/h and
+// never dropping, even at zero demand. impit exposes no close() API, so the
+// instance is dropped and re-probed periodically; the Rust side is freed when
+// V8 collects the old object (global.gc() right after, when --expose-gc is on).
+// In-flight fetches keep their reference and finish safely on the old instance.
+const IMPIT_RECYCLE_MS = Math.max(10 * 60 * 1000, Number(process.env.IMPIT_RECYCLE_MS) || 90 * 60 * 1000);
 
 function getImpit() {
+  if (_impitInstance && Date.now() - _impitBornAt > IMPIT_RECYCLE_MS) {
+    console.log('[impitClient] recycling impit instance (native memory hygiene)');
+    _impitInstance = undefined;
+    if (typeof global.gc === 'function') {
+      try { global.gc(); } catch (_) {}
+    }
+  }
   if (_impitInstance !== undefined) return _impitInstance;
   try {
     const { Impit } = require('impit');
     _impitInstance = new Impit({ browser: 'chrome142' });
+    _impitBornAt = Date.now();
     console.log('[impitClient] impit native client loaded successfully.');
   } catch (e) {
     _impitInstance = null;
