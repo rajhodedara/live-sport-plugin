@@ -22,38 +22,10 @@ class CronService {
       const activeMatches = await this.matchAggregator.syncMatches();
       if (activeMatches !== null) {
         this.pruneStreamCache(activeMatches);
-        this.prewarmCatalogMemo();
       }
     } finally {
       this.syncing = false;
     }
-  }
-
-  // Rebuild the hot catalog pages right after a sync, so no user ever pays the
-  // post-sync rebuild. Every sync bumps CacheService.rev and wipes the page
-  // memo; the first catalog request after that rebuilt from scratch (2-8s
-  // baseline, 10-24s measured when it collided with peak-hour work). Building
-  // the two hottest pages here — in a controlled background moment seconds
-  // after the sync — means arriving users hit a warm memo (~11ms) instead of
-  // becoming the rebuild trigger. Fire-and-forget with error swallowing: if
-  // this fails, behavior is exactly the old first-request-rebuilds path.
-  prewarmCatalogMemo() {
-    if (String(process.env.CATALOG_MEMO_PREWARM ?? 'true') === 'false') return;
-    if (this._memoPrewarmBusy) return;
-    this._memoPrewarmBusy = true;
-    setImmediate(async () => {
-      try {
-        const { handleCatalog } = require('../catalog');
-        // Yield between pages so this never blocks request handling.
-        await handleCatalog('tv', 'nuvio_sports_live', {}, {}).catch(() => {});
-        await new Promise((r) => setImmediate(r));
-        await handleCatalog('tv', 'nuvio_sports_catalog', {}, {}).catch(() => {});
-      } catch (_) {
-        // Never let memo hygiene disturb the sync cycle.
-      } finally {
-        this._memoPrewarmBusy = false;
-      }
-    });
   }
 
   // Catalog stale-while-revalidate: serve the cached list immediately and
