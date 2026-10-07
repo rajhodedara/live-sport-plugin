@@ -1,7 +1,16 @@
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function resolveCacheFile() {
+  // Jest runs test files in parallel worker processes that all share the repo's
+  // matches_cache.json. Concurrent setMatches() calls overwrite each other and
+  // the mtime poll then reloads foreign data mid-test (observed as replay
+  // catalogs returning 0 metas in the full suite). Give each jest worker its
+  // own temp file so parallel tests are isolated; production paths unchanged.
+  if (process.env.JEST_WORKER_ID) {
+    return path.join(os.tmpdir(), `nuvio-matches-cache-test-${process.pid}.json`);
+  }
   const srcDataDir = path.join(process.cwd(), 'src', 'data');
   if (fs.existsSync(srcDataDir)) {
     return path.join(srcDataDir, 'matches_cache.json');
