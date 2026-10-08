@@ -658,6 +658,92 @@ function truncateToWidth(value, maxPx, fontSize) {
  * @param {string}  [spec.time]          already-formatted display time
  * @param {string}  [spec.shape]         landscape (800x450, default) | poster (600x900)
  */
+
+function generateCombatCardSvg(spec, w, h, isPoster) {
+  const cx = w / 2;
+  const cy = h / 2;
+  const team1 = truncateLabel(spec.team1, 24) || 'FIGHTER 1';
+  const team2 = truncateLabel(spec.team2, 24) || 'FIGHTER 2';
+  
+  const splitName = (name) => {
+    const parts = name.split(' ');
+    if (parts.length === 1) return { top: '', bottom: parts[0] };
+    return { top: parts[0], bottom: parts.slice(1).join(' ') };
+  };
+  const n1 = splitName(team1);
+  const n2 = splitName(team2);
+  
+  const stRaw = String(spec.status || '').toUpperCase();
+  const statusColor = (stRaw === 'LIVE' || stRaw === 'REPLAY') ? '#ef4444' : '#f59e0b';
+  const statusLabel = stRaw || 'FIGHT NIGHT';
+  const footerText = escapeXml(truncateLabel(spec.time || spec.title || 'TBA', 32)).toUpperCase();
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+    <defs>
+      <linearGradient id="cbg" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#090d14"/>
+        <stop offset="100%" stop-color="#04060a"/>
+      </linearGradient>
+      <linearGradient id="redG" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#991b1b"/>
+        <stop offset="100%" stop-color="#ef4444"/>
+      </linearGradient>
+      <linearGradient id="blueG" x1="100%" y1="0%" x2="0%" y2="0%">
+        <stop offset="0%" stop-color="#1e3a8a"/>
+        <stop offset="100%" stop-color="#3b82f6"/>
+      </linearGradient>
+      <linearGradient id="txtG" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stop-color="#ffffff"/>
+        <stop offset="100%" stop-color="#a1a1aa"/>
+      </linearGradient>
+      <pattern id="dots" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+        <circle fill="rgba(255,255,255,0.05)" cx="2" cy="2" r="1.5"/>
+      </pattern>
+    </defs>
+    
+    <rect width="${w}" height="${h}" fill="url(#cbg)"/>
+    <rect width="${w}" height="${h}" fill="url(#dots)"/>
+
+    <g>
+      <polygon points="0,0 ${w*0.4},0 0,${h}" fill="rgba(239,68,68,0.05)"/>
+      <polygon points="0,${h*0.1} ${w*0.3},${h*0.5} 0,${h*0.9} 0,${h*0.75} ${w*0.18},${h*0.5} 0,${h*0.25}" fill="url(#redG)"/>
+      <polygon points="0,${h*0.3} ${w*0.15},${h*0.5} 0,${h*0.7} 0,${h*0.6} ${w*0.07},${h*0.5} 0,${h*0.4}" fill="#ef4444" opacity="0.8"/>
+    </g>
+    
+    <g>
+      <polygon points="${w},0 ${w*0.6},0 ${w},${h}" fill="rgba(59,130,246,0.05)"/>
+      <polygon points="${w},${h*0.1} ${w*0.7},${h*0.5} ${w},${h*0.9} ${w},${h*0.75} ${w*0.82},${h*0.5} ${w},${h*0.25}" fill="url(#blueG)"/>
+      <polygon points="${w},${h*0.3} ${w*0.85},${h*0.5} ${w},${h*0.7} ${w},${h*0.6} ${w*0.93},${h*0.5} ${w},${h*0.4}" fill="#3b82f6" opacity="0.8"/>
+    </g>
+
+    <g transform="translate(${cx - 70}, ${h * (isPoster ? 0.08 : 0.06)})">
+      <rect width="140" height="30" rx="15" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+      <circle cx="24" cy="15" r="5" fill="${statusColor}"/>
+      <text x="38" y="20" font-family="${CARD_SANS}" font-size="12" font-weight="bold" letter-spacing="2" fill="${statusColor}">${escapeXml(statusLabel)}</text>
+    </g>
+
+    <text x="${cx}" y="${h * (isPoster ? 0.25 : 0.25)}" font-family="${CARD_COND}" font-size="${h * (isPoster ? 0.045 : 0.045)}" font-weight="900" fill="rgba(255,255,255,0.7)" text-anchor="middle" letter-spacing="2">${escapeXml(n1.top)}</text>
+    <text x="${cx}" y="${h * (isPoster ? 0.35 : 0.36)}" font-family="${CARD_COND}" font-size="${h * (isPoster ? 0.09 : 0.10)}" font-weight="900" fill="url(#txtG)" text-anchor="middle" letter-spacing="1">${escapeXml(n1.bottom)}</text>
+    
+    <text x="${cx}" y="${h * (isPoster ? 0.65 : 0.67)}" font-family="${CARD_COND}" font-size="${h * (isPoster ? 0.045 : 0.045)}" font-weight="900" fill="rgba(255,255,255,0.7)" text-anchor="middle" letter-spacing="2">${escapeXml(n2.top)}</text>
+    <text x="${cx}" y="${h * (isPoster ? 0.75 : 0.78)}" font-family="${CARD_COND}" font-size="${h * (isPoster ? 0.09 : 0.10)}" font-weight="900" fill="url(#txtG)" text-anchor="middle" letter-spacing="1">${escapeXml(n2.bottom)}</text>
+
+    <g transform="translate(0, ${h * 0.5})">
+      <line x1="${w*0.25}" y1="0" x2="${w*0.42}" y2="0" stroke="#ef4444" stroke-width="2"/>
+      <line x1="${w*0.58}" y1="0" x2="${w*0.75}" y2="0" stroke="#3b82f6" stroke-width="2"/>
+      <text x="${cx - 18}" y="12" font-family="${CARD_COND}" font-size="${isPoster ? 32 : 38}" font-weight="900" font-style="italic" fill="#ef4444" text-anchor="middle">V</text>
+      <text x="${cx + 14}" y="12" font-family="${CARD_COND}" font-size="${isPoster ? 32 : 38}" font-weight="900" font-style="italic" fill="#3b82f6" text-anchor="middle">S</text>
+    </g>
+
+    <g transform="translate(${cx - 150}, ${h * (isPoster ? 0.88 : 0.90)})">
+      <polygon points="20,0 280,0 300,20 280,40 20,40 0,20" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/>
+      <polyline points="20,40 0,20 20,0" fill="none" stroke="#ef4444" stroke-width="3"/>
+      <polyline points="280,0 300,20 280,40" fill="none" stroke="#3b82f6" stroke-width="3"/>
+      <text x="150" y="25" font-family="${CARD_SANS}" font-size="16" font-weight="bold" letter-spacing="1.5" fill="#e4e4e7" text-anchor="middle">${footerText}</text>
+    </g>
+  </svg>`;
+}
+
 function generateMatchCardSvg(spec = {}) {
   const isPoster = spec.shape === 'poster';
   // Canvas ratios follow the Stremio meta spec: posterShape "landscape" = 1:1.77
@@ -665,7 +751,17 @@ function generateMatchCardSvg(spec = {}) {
   const w = isPoster ? 600 : 800;
   const h = isPoster ? 889 : 450;
 
+  
+  
   const catKey = String(spec.category || 'other').toLowerCase().trim();
+  if (['mma', 'boxing', 'wwe', 'ufc', 'combat', 'fighting'].includes(catKey)) {
+    return generateCombatCardSvg(spec, w, h, isPoster);
+  }
+
+  if (['mma', 'boxing', 'wwe', 'ufc', 'combat', 'fighting'].includes(catKey)) {
+    return generateCombatCardSvg(spec, w, h, isPoster);
+  }
+
   const cfg = SPORT_CONFIGS[catKey] || SPORT_CONFIGS.other;
   const accent = cfg.accent || CARD_FALLBACK_ACCENT;
 
