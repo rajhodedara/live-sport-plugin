@@ -1059,7 +1059,7 @@ function generateMatchCardSvg(spec = {}) {
   // ── Footer: centred time + channel mark ──
   const footerY = isPoster ? h - 58 : 412;
   if (timeText) {
-    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="16" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.68)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
+    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="22" font-weight="700" letter-spacing="1.5" fill="rgba(255,255,255,0.90)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
   }
   if (channelName || channelBadge) {
     const label = channelName.toUpperCase();
