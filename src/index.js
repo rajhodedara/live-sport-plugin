@@ -242,14 +242,16 @@ const { resolveEmbedBase } = require('./services/EmbedBase');
  */
 async function entryToDataUri(entry) {
   if (!entry || !entry.buffer || !entry.contentType) return null;
-  if (entry.contentType.includes('webp') || entry.contentType.includes('avif')) {
+  let buffer = entry.buffer;
+  let contentType = entry.contentType;
+  if (contentType.includes('webp') || contentType.includes('avif')) {
     try {
       const sharp = require('sharp');
-      entry.buffer = await sharp(entry.buffer).png().toBuffer();
-      entry.contentType = 'image/png';
+      buffer = await sharp(buffer).png().toBuffer();
+      contentType = 'image/png';
     } catch (e) {}
   }
-  return `data:${entry.contentType};base64,${entry.buffer.toString('base64')}`;
+  return `data:${contentType};base64,${buffer.toString('base64')}`;
 }
 
 

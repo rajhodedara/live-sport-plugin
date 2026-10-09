@@ -576,7 +576,12 @@ function truncateLabel(value, maxChars) {
   const str = String(value === undefined || value === null ? '' : value).trim();
   if (!str) return '';
   if (str.length <= maxChars) return str;
-  return str.slice(0, Math.max(1, maxChars - 1)).trimEnd() + '\u2026';
+  const slice = str.slice(0, Math.max(1, maxChars - 1));
+  // Prefer the last full word over a mid-word chop; keep the hard slice when
+  // that would discard too much of the label.
+  const wordCut = slice.replace(/\s+\S*$/, '').trimEnd();
+  const base = wordCut.length >= Math.max(6, Math.floor(maxChars * 0.55)) ? wordCut : slice.trimEnd();
+  return base + '\u2026';
 }
 
 function badgeImage(dataUri, x, y, size) {
@@ -868,7 +873,10 @@ function generateMatchCardSvg(spec = {}) {
   // Hard edges: a small radius and a 1px hairline instead of a 10px pill edge
   // with a 1.5px stroke. Reads as a broadcast slate rather than a soft tile.
   parts.push('<rect x="0.5" y="0.5" width="' + (w - 1) + '" height="' + (h - 1) + '" rx="4" fill="none" stroke="rgba(255,255,255,0.10)"/>');
-  parts.push('<rect x="0" y="0" width="' + w + '" height="4" fill="' + accent + '" opacity="0.95"/>');
+  // A live fixture earns a red state strip along the top edge; otherwise the
+  // strip carries the sport accent. State is then readable while scrolling.
+  const stripAccent = status === 'live' ? '#ef4444' : accent;
+  parts.push('<rect x="0" y="0" width="' + w + '" height="4" fill="' + stripAccent + '" opacity="0.95"/>');
   parts.push('<rect x="0" y="0" width="' + (w * 0.42).toFixed(1) + '" height="4" fill="' + CARD_HOT + '" opacity="0.95"/>');
 
   // ── Header: league chip (left) ──
@@ -880,7 +888,7 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(badgeImage(leagueBadge, margin, headerY - 12, 16));
       lx = margin + 24;
     }
-    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="16" font-weight="700" letter-spacing="2.2" fill="' + leagueAccent + '">' + escapeXml(label) + '</text>');
+    parts.push('<text x="' + lx + '" y="' + (headerY + 1) + '" font-family="' + CARD_COND + '" font-size="17" font-weight="800" letter-spacing="2.2" fill="' + leagueAccent + '">' + escapeXml(label) + '</text>');
   }
 
   // ── Header: status pill (right) - status word only; the score lives in the hero slot ──
@@ -965,14 +973,14 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(teamName(600, 346, team2, 25));
       parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 1) {
-      const shownBadge = badge1 || badge2;
-      const shownName = badge1 ? team1 : team2;
-      const otherName = badge1 ? team2 : team1;
-      parts.push(crest(400, 170, 96, shownBadge, shownName));
-      parts.push(teamName(400, 312, shownName, 25));
-      if (otherName) {
-        parts.push('<text x="400" y="350" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.60)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
-      }
+      // Two-plate geometry is preserved when only one crest resolved: the side
+      // without artwork keeps its slot as a monogram plate, so the fixture
+      // still reads as a contest instead of collapsing into one centred plate.
+      parts.push(crest(200, 188, 104, badge1, team1));
+      parts.push(crest(600, 188, 104, badge2, team2));
+      parts.push(vsBadge(400, 188, 30));
+      parts.push(teamName(200, 346, team1, 25));
+      parts.push(teamName(600, 346, team2, 25));
       parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 0 && catKey === 'tennis' && team1 && team2) {
       // ── Landscape Tennis: Monogram Crests & Racket Icon ──
@@ -1045,7 +1053,7 @@ function generateMatchCardSvg(spec = {}) {
         
         heroLines.forEach((line, i) => {
           const isVs = line.toUpperCase() === 'VS';
-          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(isVs ? line : line.toUpperCase()) + '</text>');
         });
       }
       parts.push('<line x1="' + margin + '" y1="392" x2="' + (w - margin) + '" y2="392" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
@@ -1076,14 +1084,12 @@ function generateMatchCardSvg(spec = {}) {
       parts.push(teamName(414, 432, team2, 24));
       parts.push('<line x1="' + margin + '" y1="512" x2="' + (w - margin) + '" y2="512" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 1) {
-      const shownBadge = badge1 || badge2;
-      const shownName = badge1 ? team1 : team2;
-      const otherName = badge1 ? team2 : team1;
-      parts.push(crest(300, 286, 80, shownBadge, shownName));
-      parts.push(teamName(300, 424, shownName, 24));
-      if (otherName) {
-        parts.push('<text x="300" y="462" font-family="' + CARD_SANS + '" font-size="15" font-weight="600" letter-spacing="2" fill="rgba(255,255,255,0.60)" text-anchor="middle">' + escapeXml(otherName.toUpperCase()) + '</text>');
-      }
+      // Same two-plate guarantee as the landscape canvas.
+      parts.push(crest(186, 296, 78, badge1, team1));
+      parts.push(crest(414, 296, 78, badge2, team2));
+      parts.push(vsBadge(300, 296, 26));
+      parts.push(teamName(186, 432, team1, 24));
+      parts.push(teamName(414, 432, team2, 24));
       parts.push('<line x1="' + margin + '" y1="532" x2="' + (w - margin) + '" y2="532" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
     } else if (available === 0 && catKey === 'tennis' && team1 && team2) {
       // ── Poster Tennis: Monogram Crests & Racket Icon ──
@@ -1145,7 +1151,7 @@ function generateMatchCardSvg(spec = {}) {
         
         heroLines.forEach((line, i) => {
           const isVs = line.toUpperCase() === 'VS';
-          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(line) + '</text>');
+          parts.push('<text x="' + (w / 2) + '" y="' + (startY + i * lh + fs * 0.35).toFixed(1) + '" font-family="' + CARD_COND + '" font-size="' + (isVs ? Math.round(fs * 0.6) : fs) + '" font-weight="800" letter-spacing="' + (isVs ? 4 : 1) + '" fill="' + (isVs ? CARD_HOT_SOFT : 'url(#nameFill)') + '" text-anchor="middle">' + escapeXml(isVs ? line : line.toUpperCase()) + '</text>');
         });
       }
       parts.push('<line x1="' + margin + '" y1="560" x2="' + (w - margin) + '" y2="560" stroke="rgba(255,255,255,0.14)" stroke-width="1"/>');
@@ -1155,7 +1161,7 @@ function generateMatchCardSvg(spec = {}) {
   // ── Footer: centred time + channel mark ──
   const footerY = isPoster ? h - 58 : 412;
   if (timeText) {
-    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="22" font-weight="700" letter-spacing="1.5" fill="rgba(255,255,255,0.90)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
+    parts.push('<text x="' + (w / 2) + '" y="' + footerY + '" font-family="' + CARD_SANS + '" font-size="22" font-weight="700" letter-spacing="1.5" fill="rgba(255,255,255,0.95)" text-anchor="middle">' + escapeXml(timeText.toUpperCase()) + '</text>');
   }
   if (channelName || channelBadge) {
     const label = channelName.toUpperCase();
@@ -1166,7 +1172,7 @@ function generateMatchCardSvg(spec = {}) {
       px += 30;
     }
     if (label) {
-      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="14" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.58)">' + escapeXml(label) + '</text>');
+      parts.push('<text x="' + px.toFixed(1) + '" y="' + (footerY + 3) + '" font-family="' + CARD_SANS + '" font-size="14" font-weight="600" letter-spacing="1.4" fill="rgba(255,255,255,0.75)">' + escapeXml(label) + '</text>');
     }
   }
 

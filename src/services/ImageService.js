@@ -340,7 +340,13 @@ async function getImage(rawUrl) {
           let tooBig = false;
           for await (const chunk of res.body) {
             total += chunk.length;
-            if (total > IMAGE_MAX_BYTES) { tooBig = true; res.body.destroy(); break; }
+            if (total > IMAGE_MAX_BYTES) {
+              tooBig = true;
+              res.body.destroy();
+              const err = new Error('oversize');
+              err.isFatal = true;
+              throw err;
+            }
             chunks.push(chunk);
           }
           if (!tooBig && total >= 32) {
@@ -362,8 +368,11 @@ async function getImage(rawUrl) {
           }
         }
         res.body.destroy(); // Cleanup on failure
-      } catch (_) {
-        // retry
+        if (res.statusCode >= 400 && res.statusCode < 500 && res.statusCode !== 429) {
+          break; // Exit retry loop immediately for 404, 403, etc.
+        }
+      } catch (err) {
+        if (err && err.isFatal) break;
       }
     }
     
