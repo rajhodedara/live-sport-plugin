@@ -85,10 +85,10 @@ describe('generateMatchCardSvg', () => {
 
     expect(svg.length).toBeGreaterThan(500);
     expect((svg.match(/<image/g) || []).length).toBe(0);
-    // Hero matchup is derived from the title (mixed case, matching the
-    // existing typographic-card house style).
-    expect(svg).toContain('Some Niche FC');
-    expect(svg).toContain('FC Nobody');
+    // Hero matchup is derived from the title (now rendered in all-caps 
+    // to match the styling of cards with crests).
+    expect(svg).toContain('SOME NICHE FC');
+    expect(svg).toContain('FC NOBODY');
     expect(svg).toContain('24/7');
     expect(svg).not.toMatch(/undefined|NaN/);
   });
@@ -105,9 +105,12 @@ describe('generateMatchCardSvg', () => {
 
     expect(svg).not.toContain('<script>');
     expect(svg).not.toContain('</script>');
+    expect(svg).not.toContain('<SCRIPT>');
+    expect(svg).not.toContain('</SCRIPT>');
     expect(svg).not.toContain('<b>');
+    expect(svg).not.toContain('<B>');
     expect(svg).toContain('&amp;');
-    expect(svg).toContain('&lt;script&gt;');
+    expect(svg).toContain('&lt;SCRIPT&gt;');
     expect(svg).toContain('&quot;');
     expect(svg).toContain('&apos;');
     // The escaped output must still be well-formed XML.

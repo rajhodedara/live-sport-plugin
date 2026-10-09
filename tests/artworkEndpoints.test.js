@@ -208,9 +208,14 @@ describe('per-sport identity reaches the card chrome', () => {
     expect(football).not.toBe(basketball);
   });
 
-  test('the top bar follows the sport rather than a hardcoded orange', () => {
-    const hockey = topBarOf(generateMatchCardSvg({ category: 'hockey', team1: 'A', team2: 'B', status: 'live' }));
-    expect(hockey).toBe('#06b6d4');
+  test('the top bar follows the sport rather than a hardcoded orange, but turns red if live', () => {
+    // Upcoming matches use the sport's accent color
+    const hockeyUpcoming = topBarOf(generateMatchCardSvg({ category: 'hockey', team1: 'A', team2: 'B', status: 'upcoming' }));
+    expect(hockeyUpcoming).toBe('#06b6d4');
+    
+    // Live matches override the sport accent with a red state strip
+    const hockeyLive = topBarOf(generateMatchCardSvg({ category: 'hockey', team1: 'A', team2: 'B', status: 'live' }));
+    expect(hockeyLive).toBe('#ef4444');
   });
 
   test('an unknown sport still renders a valid card', () => {
