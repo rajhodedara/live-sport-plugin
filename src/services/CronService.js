@@ -159,6 +159,7 @@ class CronService {
       const live = matches.filter((m) => {
         if (!m || !m.sources || m.sources.length === 0) return false;
         if (m.category === 'networks') return false;      // 24/7 channels
+        if (m.category === 'other') return false;         // other sports
         if (isReplayMatch(m)) return false;                // replays
         // Matches whose sources are ALL heavy embed-family providers never
         // prewarm (see PREWARM_SKIP_PROVIDERS) — excluding them here keeps the
