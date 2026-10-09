@@ -551,9 +551,18 @@ class MatchAggregator {
     //   - only entries still inside the normal retention window, so we never
     //     resurrect finished events;
     //   - hard capped, so a long outage cannot grow the cache without limit.
+    //
+    // Priority ordering before the cap (DaddyLive ~914 entries; cap was 400 so
+    // live/upcoming fixtures at positions 500+ were silently dropped during outages --
+    // observed in production: dlv future-dated entries went 914 --> 0):
+    //   0 live now          kickoff <= now <= kickoff + 14h (matches the live window)
+    //   1 upcoming          kickoff > now, sorted soonest-first
+    //   2 evergreen         no parseable date (24/7 channels)
+    //   3 past-in-retention kickoff already passed but still inside 24h window
+    // Entries within each priority tier retain their original relative order (stable sort).
     try {
       const CARRY_FORWARD_PROVIDERS = ['daddylive'];
-      const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 400);
+      const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 600);
       const nowForCarry = Date.now();
       const retentionMs = 24 * 3600 * 1000;
 
@@ -599,6 +608,29 @@ class MatchAggregator {
           const kickoff = _parseEventDate(rawDate);
           if (!kickoff) return true;
           return nowForCarry <= kickoff + retentionMs;
+        }).sort((a, b) => {
+          // Classify each entry into a priority bucket so that when the cap
+          // bites, the entries that matter most (live -> upcoming -> evergreen ->
+          // past-but-retained) survive. Without this, .slice() takes array
+          // insertion order and live fixtures at positions 500+ are lost first.
+          const _priority = (m) => {
+            const rawDate = m.date;
+            const isEvergreen = rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim());
+            if (isEvergreen) return { bucket: 2, kickoff: 0 };
+            const kickoff = _parseEventDate(rawDate);
+            if (!kickoff) return { bucket: 2, kickoff: 0 };
+            const LIVE_WINDOW_MS = 14 * 3600 * 1000;
+            if (kickoff <= nowForCarry && nowForCarry <= kickoff + LIVE_WINDOW_MS) return { bucket: 0, kickoff };
+            if (kickoff > nowForCarry) return { bucket: 1, kickoff };
+            return { bucket: 3, kickoff };
+          };
+          const pa = _priority(a);
+          const pb = _priority(b);
+          if (pa.bucket !== pb.bucket) return pa.bucket - pb.bucket;
+          // Within bucket 1 (upcoming) sort soonest-first so the nearest
+          // fixtures survive the cap; other buckets keep insertion order (0).
+          if (pa.bucket === 1) return pa.kickoff - pb.kickoff;
+          return 0;
         }).slice(0, CARRY_FORWARD_MAX);
 
         if (carried.length > 0) {
