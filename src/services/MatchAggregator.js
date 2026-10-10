@@ -87,6 +87,14 @@ function _compoundify(t) {
     [/\bal[\s\-]ahly\b/g, 'alahly'],
     [/\bboca\s*juniors\b|\bca\s*boca\b/g, 'bocajuniors'],
     // American Football
+    // College
+    [/\bbyu\b|\bbrigham\s*young(\s*cougars)?\b/g, 'byu'],
+    [/\bucf\b|\bcentral\s*florida(\s*knights)?\b/g, 'ucf'],
+    [/\busc\b|\bsouthern\s*california(\s*trojans)?\b/g, 'usc'],
+    [/\blsu\b|\blouisiana\s*state(\s*tigers)?\b/g, 'lsu'],
+    [/\bsmu\b|\bsouthern\s*methodist(\s*mustangs)?\b/g, 'smu'],
+    [/\btcu\b|\btexas\s*christian(\s*horned\s*frogs)?\b/g, 'tcu'],
+    // NFL
     [/\bkansas\s*city\s*chiefs\b|\bkc\s*chiefs\b|\bchiefs\b/g, 'kansascitychiefs'],
     [/\bseattle\s*seahawks\b|\bseahawks\b/g, 'seattleseahawks'],
     [/\bsan\s*francisco\s*49ers\b|\bniners\b|\b49ers\b/g, 'sf49ers'],
