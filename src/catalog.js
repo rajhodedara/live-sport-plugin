@@ -1368,8 +1368,6 @@ async function handleCatalogUncached(type, id, extra, config) {
     return { metas: [...hubMetas, ...dateMetas], cacheMaxAge: 1800, staleRevalidate: 3600 };
   }
 
-  let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf, type));
-
   // ── Genre filter (Replays / Live Now / Upcoming) ──────────────────────────
   const GENRE_FILTERABLE = { replays: 1, live: 1, upcoming: 1 };
   if (GENRE_FILTERABLE[categoryMatch] && extra && typeof extra.genre === 'string' && extra.genre.trim()) {
@@ -1377,22 +1375,21 @@ async function handleCatalogUncached(type, id, extra, config) {
     if (wanted) {
       if (wanted === 'other') {
         const known = new Set(Object.values(GENRE_TO_CATEGORY));
-        metas = metas.filter(m => {
-          const cat = String((m.genres && m.genres[0]) || '').toLowerCase();
+        filteredMatches = filteredMatches.filter(m => {
+          const cat = String(m.category || '').toLowerCase();
           return cat && !known.has(cat);
         });
       } else {
-        const label = wanted.toUpperCase();
-        metas = metas.filter(m => (m.genres || []).some(g => String(g).toUpperCase() === label));
+        filteredMatches = filteredMatches.filter(m => (m.category || '').toLowerCase() === wanted.toLowerCase());
       }
     }
   }
   if (extra && extra.search) {
     const q = extra.search.toLowerCase();
-    metas = metas.filter(m => 
-      m.name.toLowerCase().includes(q) || 
-      (m.description && m.description.toLowerCase().includes(q)) ||
-      (m.cast && m.cast.some(c => c.toLowerCase().includes(q)))
+    filteredMatches = filteredMatches.filter(m => 
+      (m.title && m.title.toLowerCase().includes(q)) || 
+      (m.league && m.league.toLowerCase().includes(q)) ||
+      (m.sources && m.sources.some(s => s.channelName && s.channelName.toLowerCase().includes(q)))
     );
   }
 
@@ -1401,9 +1398,11 @@ async function handleCatalogUncached(type, id, extra, config) {
   // Cap large catalogs (like 24/7 Live TV with 900+ channels) to 100 items per page
   // This avoids massive 750KB payloads that trigger timeouts or crash low-memory TV clients
   const PAGE_SIZE = 100;
-  if (skip > 0 || (metas.length > PAGE_SIZE && !extra?.search)) {
-    metas = metas.slice(skip, skip + PAGE_SIZE);
+  if (skip > 0 || (filteredMatches.length > PAGE_SIZE && !extra?.search)) {
+    filteredMatches = filteredMatches.slice(skip, skip + PAGE_SIZE);
   }
+
+  let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf, type));
 
   let cacheTtl = 180; // default 3 minutes
   let staleTtl = 600; // 10 minutes
