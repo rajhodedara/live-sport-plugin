@@ -131,11 +131,12 @@ describe('DaddyLiveProvider', () => {
       const testNow = Date.parse('21 March 2025 12:00:00 UTC');
       const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
 
-      // Mock proxyFetch to return mockSchedule
+      // Mock proxyFetch to return mock HTML, and mock the parser to return mockSchedule
       provider.proxyFetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockSchedule
+        text: async () => '<html>MOCK HTML</html>'
       });
+      provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
       dateNowSpy.mockRestore();
@@ -477,8 +478,9 @@ describe('DaddyLiveProvider', () => {
 
       provider.proxyFetch = jest.fn().mockResolvedValue({
         ok: true,
-        json: async () => mockSchedule
+        text: async () => '<html>MOCK HTML</html>'
       });
+      provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
       dateNowSpy.mockRestore();

@@ -154,60 +154,15 @@ class DaddyLiveProvider extends BaseProvider {
       }
     }
 
+    const dlCbOptions = {
+      timeout: 30000,
+      resetTimeout: 30000,
+      volumeThreshold: 5,
+      errorThresholdPercentage: 75
+    };
+
     this.fetchSchedule = this.circuitBreaker.wrapSync(`${this.name}_fetchSchedule`, async () => {
       let lastErr = null;
-
-      // Pass 1: Try static JSON schedule across mirror domains (if fresh or in test environment)
-      for (const base of this.baseDomains) {
-        try {
-          const url = `${base}/schedule/schedule-generated.json`;
-          // The mirror loop below is the retry layer, so each fetch gets ONE
-          // engine attempt inside the caller's budget (attempts: 1) instead of
-          // safeFetch's default 3x retries stacking behind it.
-          const budgetMs = resolveSyncTimeoutMs();
-          const res = await this.proxyFetch(url, {
-            headers: {
-              'User-Agent': UA,
-              'Accept': 'application/json',
-              'Referer': `${base}/`
-            },
-            signal: AbortSignal.timeout(budgetMs),
-            timeoutMs: budgetMs,
-            attempts: 1
-          });
-          if (res && res.ok) {
-            const data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
-            if (data && typeof data === 'object') {
-              const keys = Object.keys(data);
-              const hasEvents = keys.some(k => data[k] && Object.keys(data[k]).length > 0);
-              if (hasEvents) {
-                let isFresh = process.env.NODE_ENV === 'test';
-                if (!isFresh) {
-                  const now = Date.now();
-                  for (const k of keys) {
-                    const m = k.match(/(\d+)(?:st|nd|rd|th)\s+([A-Za-z]+)(?:\s+(\d{4}))?/i);
-                    if (m) {
-                      const currentYear = new Date().getUTCFullYear();
-                      const year = m[3] ? parseInt(m[3], 10) : currentYear;
-                      const parsed = Date.parse(`${m[1]} ${m[2]} ${year} 00:00:00 UTC`);
-                      if (!Number.isNaN(parsed) && parsed > 0) {
-                        const diffDays = Math.abs(now - parsed) / (1000 * 60 * 60 * 24);
-                        if (diffDays <= 2) {
-                          isFresh = true;
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-                if (isFresh) return data;
-              }
-            }
-          }
-        } catch (e) {
-          lastErr = e;
-        }
-      }
 
       // Pass 2: Scrape live homepage HTML (contains current real-time schedule)
       for (const base of this.baseDomains) {
@@ -233,7 +188,7 @@ class DaddyLiveProvider extends BaseProvider {
       }
 
       throw lastErr || new Error('All DaddyLive schedule endpoints failed');
-    }, { timeout: 30000 });
+    }, dlCbOptions);
 
     this.fetchChannels = this.circuitBreaker.wrapSync(`${this.name}_fetchChannels`, async () => {
       let lastErr = null;
@@ -262,7 +217,7 @@ class DaddyLiveProvider extends BaseProvider {
         }
       }
       throw lastErr || new Error('All DaddyLive 24-7 channels endpoints failed');
-    }, { timeout: 30000 });
+    }, dlCbOptions);
   }
 
   clearCache(sourceId) {
