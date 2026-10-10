@@ -118,5 +118,151 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-module.exports = { builder, manifest };
+// Rolling/competition replay rows for the sport collections. Kept OUT of the
+// static manifest so the manifest stays under the Stremio SDK's 8192-byte limit.
+const REPLAY_MANIFEST_ROWS = [
+  // Basketball
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_nba', name: '\uD83C\uDFC0 NBA', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_basketball_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] },
+  // Tennis
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_today', name: "\uD83D\uDCC5 Today's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_yesterday', name: "\uD83D\uDCC5 Yesterday's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_this_week', name: "\uD83D\uDCC5 This Week's Matches", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_atp', name: '\uD83C\uDFBE ATP Tour', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_tennis_older', name: '\uD83D\uDCC5 Older Matches', extra: [{ name: 'skip', isRequired: true }] },
+  // Hockey
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_nhl', name: '\uD83C\uDFD2 NHL', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_hockey_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] },
+  // American Football
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_today', name: "\uD83D\uDCC5 Today's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_yesterday', name: "\uD83D\uDCC5 Yesterday's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_this_week', name: "\uD83D\uDCC5 This Week's Games", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_nfl', name: '\uD83C\uDFC8 NFL', extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_american_football_older', name: '\uD83D\uDCC5 Older Games', extra: [{ name: 'skip', isRequired: true }] }
+];
+
+/**
+ * Builds and customizes manifest catalogs based on user config and optional match cache.
+ *
+ * @param {Array<object>} baseCatalogs
+ * @param {object} parsedConfig
+ * @param {Array<object>|null} cachedMatches
+ * @returns {Array<object>}
+ */
+function buildManifestCatalogs(baseCatalogs, parsedConfig = {}, cachedMatches = null) {
+  let catalogs = JSON.parse(JSON.stringify(baseCatalogs));
+
+  // 1. Inject REPLAY_MANIFEST_ROWS if missing
+  for (const extra of REPLAY_MANIFEST_ROWS) {
+    if (!catalogs.some((c) => c.id === extra.id)) catalogs.push(extra);
+  }
+
+  // 2. Custom sports filtering and ordering
+  if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
+    if (parsedConfig.sports === 'none') {
+      const keepCatalogs = ['nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_networks', 'nuvio_sports_replays'];
+      catalogs = catalogs.filter(c => keepCatalogs.includes(c.id));
+    } else {
+      const enabledSports = parsedConfig.sports
+        .split(',')
+        .map(s => s.trim().toLowerCase())
+        .filter(Boolean);
+
+      const catalogMap = new Map();
+      for (const cat of catalogs) {
+        catalogMap.set(cat.id, cat);
+      }
+
+      const topAnchorIds = ['nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_networks', 'nuvio_sports_replays'];
+      const orderedCatalogs = [];
+
+      // 1. Top anchors (in their initial relative order)
+      for (const id of topAnchorIds) {
+        if (catalogMap.has(id)) {
+          orderedCatalogs.push(catalogMap.get(id));
+        }
+      }
+
+      // 2. Replay sub-catalogs grouped by user's enabled sports order
+      for (const sport of enabledSports) {
+        for (const cat of catalogs) {
+          if (cat.id.startsWith(`nuvio_sports_replays_${sport}`)) {
+            if (!orderedCatalogs.some(c => c.id === cat.id)) {
+              orderedCatalogs.push(cat);
+            }
+          }
+        }
+      }
+
+      // 3. Sport catalogs in exact user-specified order
+      for (const sport of enabledSports) {
+        const sportCatalogId = `nuvio_sports_${sport}`;
+        if (catalogMap.has(sportCatalogId)) {
+          orderedCatalogs.push(catalogMap.get(sportCatalogId));
+        }
+      }
+
+      // 4. Bottom anchor (Upcoming)
+      if (catalogMap.has('nuvio_sports_upcoming')) {
+        orderedCatalogs.push(catalogMap.get('nuvio_sports_upcoming'));
+      }
+
+      catalogs = orderedCatalogs;
+    }
+  }
+
+  // Remove teams catalog if the user hasn't configured any teams
+  if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {
+    catalogs = catalogs.filter(c => c.id !== 'nuvio_sports_teams');
+  }
+
+  // Empty catalog pruning if cache is populated
+  if (Array.isArray(cachedMatches) && cachedMatches.length > 0) {
+    const present = new Set(cachedMatches.map(m => m && m.category).filter(Boolean));
+    const ALWAYS_KEEP = new Set([
+      'nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming',
+      'nuvio_sports_other', 'nuvio_sports_networks'
+    ]);
+    catalogs = catalogs.filter((c) => {
+      if (ALWAYS_KEEP.has(c.id)) return true;
+
+      if (c.id === 'nuvio_sports_replays' || c.id.startsWith('nuvio_sports_replays_')) {
+        if (parsedConfig.replayFilter === 'disabled') {
+          return false;
+        }
+        return true;
+      }
+
+      const cat = c.id.replace('nuvio_sports_', '');
+      if (present.has(cat)) return true;
+      if (cachedMatches.some(m => m && m.category === 'networks')) {
+        const titleLower = (m => String((m && m.title) || '').toLowerCase());
+        if (cachedMatches.some(m => m && m.category === 'networks' && titleLower(m).includes(cat))) return true;
+      }
+      return false;
+    });
+  }
+
+  // Ensure "⭐ Your Teams" catalog is strictly in first place (index 0) if present
+  const teamsCatalogIndex = catalogs.findIndex(c => c.id === 'nuvio_sports_teams');
+  if (teamsCatalogIndex > 0) {
+    const [teamsCatalog] = catalogs.splice(teamsCatalogIndex, 1);
+    catalogs.unshift(teamsCatalog);
+  }
+
+  return catalogs;
+}
+
+module.exports = {
+  builder,
+  manifest,
+  REPLAY_MANIFEST_ROWS,
+  buildManifestCatalogs
+};
 
