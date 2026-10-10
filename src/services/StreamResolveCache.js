@@ -29,6 +29,7 @@ const SHARED_POLL_INTERVAL_MS = 400;
 const SHARED_POLL_MAX_MS = 8000;
 const REMOTE_DOWN_BACKOFF_MS = 30000;
 let _remoteDownUntil = 0;
+let _sharedFailStreak = 0;
 
 function _sharedBase() {
   if (String(process.env.RESOLVE_CACHE_SHARED ?? 'true') === 'false') return null;
@@ -42,6 +43,7 @@ function _sharedAvailable() {
 
 function _sharedDown() {
   _remoteDownUntil = Date.now() + REMOTE_DOWN_BACKOFF_MS;
+  _sharedFailStreak = 0;
 }
 
 async function _sharedJson(path, opts = {}, timeoutMs = 1500) {
@@ -52,9 +54,16 @@ async function _sharedJson(path, opts = {}, timeoutMs = 1500) {
   try {
     const res = await fetch(base + path, { signal: ctrl.signal, ...opts });
     if (!res.ok) return null;
-    return await res.json();
-  } catch (_) {
-    _sharedDown();
+    const out = await res.json();
+    _sharedFailStreak = 0;
+    return out;
+  } catch (err) {
+    // A single timeout (resolver event-loop stall under load) shouldn't
+    // disable the L2 tier for every worker — require consecutive failures
+    // first. A real outage (connection refused) fails fast repeatedly and
+    // trips the backoff on the second miss.
+    _sharedFailStreak++;
+    if (_sharedFailStreak >= 2) _sharedDown();
     return null;
   } finally {
     clearTimeout(timer);
@@ -215,6 +224,14 @@ class StreamResolveCache {
         }
       } catch (_) {
         this._set(key, sourceName, matchId, [], 'failed', this.negativeTtlMs);
+        // Release the shared mint claim so other workers don't stall up to
+        // SHARED_POLL_MAX_MS waiting for a result we failed to produce.
+        // (Claims self-expire at 30s, but an immediate release lets the next
+        // worker retry right away.) Releasing also restores retry diversity:
+        // the other worker's attempt may succeed where ours failed.
+        if (claimed && _sharedAvailable()) {
+          _sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
+        }
       } finally {
         this.inFlight.delete(key);
       }
