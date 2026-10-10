@@ -870,14 +870,14 @@ function decodeConfigSegment(configStr) {
   }
 }
 app.get('/:config?/manifest.json', (req, res, next) => {
-  const { manifest, buildManifestCatalogs } = require('./manifest');
+  const { manifest } = require('./manifest');
   let parsedConfig = {};
   if (req.params.config) {
     parsedConfig = decodeConfigSegment(req.params.config);
     if (parsedConfig === null) return next();
   }
 
-  // Clone manifest
+  // Clone manifest catalogs
   const newManifest = JSON.parse(JSON.stringify(manifest));
 
   // Compact personalization params (see generateCollections): the Nuvio
@@ -893,12 +893,95 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     parsedConfig.webStreams = req.query.ws.trim();
   }
 
-  let cachedMatches = null;
-  try {
-    cachedMatches = container.resolve('cacheService').getMatches();
-  } catch (_) {}
+  // ── Replay collection rows, injected here to stay under the 8kb manifest cap ──
+  // The Stremio SDK rejects a manifest > 8192 bytes at build time, and the base
+  // manifest already sits close to that ceiling. The sport-head catalogs are
+  // declared in the manifest; their rolling date/competition rows below are
+  // appended at request time instead, which keeps every row queryable by the
+  // collection folders without paying the build-time size cost.
+  for (const extra of REPLAY_MANIFEST_ROWS) {
+    if (!newManifest.catalogs.some((c) => c.id === extra.id)) newManifest.catalogs.push(extra);
+  }
+  
+  if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
+    const enabledSports = parsedConfig.sports.split(',');
+    
+    // General catalogs to always keep (Your Teams leads first)
+    const keepCatalogs = ['nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_networks', 'nuvio_sports_replays'];
+    
+    // Add specific catalogs based on selection
+    const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
+    for (const sport of sportCatalogs) {
+      if (enabledSports.includes(sport)) {
+        keepCatalogs.push(`nuvio_sports_${sport}`);
+      }
+    }
+    if (enabledSports.includes('other')) keepCatalogs.push('nuvio_sports_other');
+    
+    newManifest.catalogs = newManifest.catalogs.filter(c => {
+      if (keepCatalogs.includes(c.id)) return true;
+      if (c.id.startsWith('nuvio_sports_replays_')) {
+        return enabledSports.some(sport => c.id.startsWith(`nuvio_sports_replays_${sport}`));
+      }
+      return false;
+    });
+  }
+  
+  // Remove teams catalog if the user hasn't configured any teams
+  if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {
+    newManifest.catalogs = newManifest.catalogs.filter(c => c.id !== 'nuvio_sports_teams');
+  }
 
-  newManifest.catalogs = buildManifestCatalogs(manifest.catalogs, parsedConfig, cachedMatches);
+  // Catalog management: hide sport catalogs that currently have no content.
+  // Dead shelves (a catalog chip that always opens empty) are worse UX than an
+  // absent one. Guarded so this only applies once a sync has actually produced
+  // matches — on a cold start the cache is empty and hiding everything would be
+  // far worse than showing a temporary empty shelf.
+  try {
+    const cached = container.resolve('cacheService').getMatches();
+    if (Array.isArray(cached) && cached.length > 0) {
+      const present = new Set(cached.map(m => m && m.category).filter(Boolean));
+      const replaysAvailable = new Set(
+        cached.filter(m => isReplayMatch(m)).map(m => m.category).filter(Boolean)
+      );
+
+      // Always-keep catalogs: not tied to a single sport.
+      const ALWAYS_KEEP = new Set([
+        'nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming',
+        'nuvio_sports_other', 'nuvio_sports_networks'
+      ]);
+      newManifest.catalogs = newManifest.catalogs.filter((c) => {
+        if (ALWAYS_KEEP.has(c.id)) return true;
+
+        // Keep all replay catalogs in manifest so Nuvio Collections can query them!
+        // Because they have isRequired: true on 'skip', Stremio/Nuvio will NOT display them on the Home screen.
+        if (c.id === 'nuvio_sports_replays' || c.id.startsWith('nuvio_sports_replays_')) {
+          if (parsedConfig.replayFilter === 'disabled') {
+            return false;
+          }
+          return true;
+        }
+
+        const cat = c.id.replace('nuvio_sports_', '');
+        // Keep 24/7 network-carried sports even when no fixture is scheduled.
+        if (present.has(cat)) return true;
+        if (cached.some(m => m && m.category === 'networks')) {
+          const titleLower = (m => String((m && m.title) || '').toLowerCase());
+          if (cached.some(m => m && m.category === 'networks' && titleLower(m).includes(cat))) return true;
+        }
+        return false;
+      });
+    }
+  } catch (_) {
+    // Never let catalog curation break the manifest.
+  }
+
+  // Ensure "⭐ Your Teams" catalog is strictly in first place (index 0) if present
+  const teamsCatalogIndex = newManifest.catalogs.findIndex(c => c.id === 'nuvio_sports_teams');
+  if (teamsCatalogIndex > 0) {
+    const [teamsCatalog] = newManifest.catalogs.splice(teamsCatalogIndex, 1);
+    newManifest.catalogs.unshift(teamsCatalog);
+  }
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');

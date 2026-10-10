@@ -1,6 +1,0 @@
-{"ts":"2026-10-09T13:11:06.398Z","pid":1514598,"uptime_s":286,"rss_mb":662.8,"heap_mb":133.4,"native_mb":514.8,"breakers":13,"open":[],"cache_entries":128}
-{"ts":"","pid":1522392,"uptime_s":641,"rss_mb":800,"heap_mb":71.9,"native_mb":712.8,"breakers":13,"open":[],"cache_entries":162}
-{"ts":"2026-10-09T14:14:51.412Z","pid":1535204,"uptime_s":1053,"rss_mb":937.1,"heap_mb":138.5,"native_mb":767.2,"breakers":13,"open":[],"cache_entries":200}
-{"ts":"2026-10-09T14:35:28.496Z","pid":1549367,"uptime_s":193,"rss_mb":729.6,"heap_mb":140.5,"native_mb":557.3,"breakers":13,"open":[],"cache_entries":53}
-{"ts":"2026-10-09T15:30:56.067Z","pid":1561263,"uptime_s":1803,"rss_mb":834.4,"heap_mb":76.2,"native_mb":743.5,"breakers":13,"open":[],"cache_entries":200}
-{"ts":"2026-10-09T16:31:06.904Z","pid":1591728,"uptime_s":186,"rss_mb":936.9,"heap_mb":214.3,"native_mb":642.3,"breakers":13,"open":[],"cache_entries":63}

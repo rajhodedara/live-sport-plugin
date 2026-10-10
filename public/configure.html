@@ -214,70 +214,6 @@
       outline-offset: 2px;
     }
 
-    /* Sport reorderable cards */
-    .sport-item {
-      cursor: grab;
-      position: relative;
-    }
-
-    .sport-item:active {
-      cursor: grabbing;
-    }
-
-    .sport-item .sport-title {
-      flex: 1;
-      cursor: pointer;
-      user-select: none;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .sport-actions {
-      display: inline-flex;
-      align-items: center;
-      gap: 3px;
-      margin-left: auto;
-    }
-
-    .sport-btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 22px;
-      height: 22px;
-      padding: 0;
-      border: 1px solid var(--line);
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--faint);
-      cursor: pointer;
-      transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
-    }
-
-    .sport-btn:hover {
-      background: rgba(255, 255, 255, 0.15);
-      color: var(--text);
-      border-color: var(--line-strong);
-    }
-
-    .sport-btn:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    .sport-item.drag-over {
-      border-color: var(--accent);
-      background: var(--accent-soft);
-      box-shadow: 0 0 0 2px var(--accent-soft);
-    }
-
-    .sport-item.dragging {
-      opacity: 0.35;
-      border-style: dashed;
-    }
-
-
     input[type="checkbox"] {
       appearance: none;
       -webkit-appearance: none;
@@ -729,121 +665,23 @@
       <section class="panel" aria-labelledby="sports-h">
         <div class="panel-head">
           <h2 id="sports-h">Sports</h2>
-          <p>All enabled by default. Reorder with ▲ / ▼ or drag to prioritize your favorites.</p>
+          <p>All enabled by default. Turn off anything you do not follow.</p>
         </div>
         <div class="chip-grid" id="sportsGrid">
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="football">
-            <input type="checkbox" id="sport_football" value="football" checked>
-            <label for="sport_football" class="sport-title">Football</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Football Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Football Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="basketball">
-            <input type="checkbox" id="sport_basketball" value="basketball" checked>
-            <label for="sport_basketball" class="sport-title">Basketball</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Basketball Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Basketball Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="cricket">
-            <input type="checkbox" id="sport_cricket" value="cricket" checked>
-            <label for="sport_cricket" class="sport-title">Cricket</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Cricket Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Cricket Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="american_football">
-            <input type="checkbox" id="sport_american_football" value="american_football" checked>
-            <label for="sport_american_football" class="sport-title">NFL</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move NFL Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move NFL Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="motorsport">
-            <input type="checkbox" id="sport_motorsport" value="motorsport" checked>
-            <label for="sport_motorsport" class="sport-title">Racing</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Racing Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Racing Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="hockey">
-            <input type="checkbox" id="sport_hockey" value="hockey" checked>
-            <label for="sport_hockey" class="sport-title">Hockey</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Hockey Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Hockey Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="baseball">
-            <input type="checkbox" id="sport_baseball" value="baseball" checked>
-            <label for="sport_baseball" class="sport-title">Baseball</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Baseball Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Baseball Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="rugby">
-            <input type="checkbox" id="sport_rugby" value="rugby" checked>
-            <label for="sport_rugby" class="sport-title">Rugby</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Rugby Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Rugby Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="college">
-            <input type="checkbox" id="sport_college" value="college" checked>
-            <label for="sport_college" class="sport-title">College</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move College Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move College Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="mma">
-            <input type="checkbox" id="sport_mma" value="mma" checked>
-            <label for="sport_mma" class="sport-title">MMA</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move MMA Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move MMA Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="golf">
-            <input type="checkbox" id="sport_golf" value="golf" checked>
-            <label for="sport_golf" class="sport-title">Golf</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Golf Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Golf Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="tennis">
-            <input type="checkbox" id="sport_tennis" value="tennis" checked>
-            <label for="sport_tennis" class="sport-title">Tennis</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Tennis Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Tennis Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="darts">
-            <input type="checkbox" id="sport_darts" value="darts" checked>
-            <label for="sport_darts" class="sport-title">Darts</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Darts Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Darts Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
-          <div class="checkbox-label sport-item active" draggable="true" data-sport="other">
-            <input type="checkbox" id="sport_other" value="other" checked>
-            <label for="sport_other" class="sport-title">Other Sports</label>
-            <div class="sport-actions">
-              <button type="button" class="sport-btn sport-up" title="Move Up" aria-label="Move Other Sports Up"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 15-6-6-6 6"/></svg></button>
-              <button type="button" class="sport-btn sport-down" title="Move Down" aria-label="Move Other Sports Down"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>
-            </div>
-          </div>
+          <label class="checkbox-label active"><input type="checkbox" value="football" checked> Football</label>
+          <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> Basketball</label>
+          <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> Cricket</label>
+          <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> NFL</label>
+          <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> Racing</label>
+          <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> Hockey</label>
+          <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> Baseball</label>
+          <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> Rugby</label>
+          <label class="checkbox-label active"><input type="checkbox" value="college" checked> College</label>
+          <label class="checkbox-label active"><input type="checkbox" value="mma" checked> MMA</label>
+          <label class="checkbox-label active"><input type="checkbox" value="golf" checked> Golf</label>
+          <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> Tennis</label>
+          <label class="checkbox-label active"><input type="checkbox" value="darts" checked> Darts</label>
+          <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
         </div>
       </section>
 
@@ -1183,45 +1021,16 @@
       webStreamsSelect.value = existingConfig.webStreams === 'disabled' ? 'disabled' : 'enabled';
     }
 
-    const sportsGrid = document.getElementById('sportsGrid');
     if (existingConfig.sports) {
-      const allSportItems = sportsGrid ? Array.from(sportsGrid.querySelectorAll('.sport-item')) : [];
       if (existingConfig.sports === 'none') {
-        allSportItems.forEach(item => {
-          const cb = item.querySelector('input[type="checkbox"]');
-          if (cb) cb.checked = false;
-          item.classList.remove('active');
-        });
+        checkboxes.forEach(cb => { cb.checked = false; cb.closest('.checkbox-label').classList.remove('active'); });
       } else if (existingConfig.sports !== 'all') {
-        const sports = existingConfig.sports.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-        if (sportsGrid && allSportItems.length > 0) {
-          sports.forEach(s => {
-            const item = allSportItems.find(it => {
-              const cb = it.querySelector('input[type="checkbox"]');
-              return cb && cb.value === s;
-            });
-            if (item) {
-              sportsGrid.appendChild(item);
-              const cb = item.querySelector('input[type="checkbox"]');
-              if (cb) cb.checked = true;
-              item.classList.add('active');
-            }
-          });
-          allSportItems.forEach(item => {
-            const cb = item.querySelector('input[type="checkbox"]');
-            if (cb && !sports.includes(cb.value)) {
-              cb.checked = false;
-              item.classList.remove('active');
-              sportsGrid.appendChild(item);
-            }
-          });
-        } else {
-          checkboxes.forEach(cb => {
-            cb.checked = sports.includes(cb.value);
-            if (cb.checked) cb.closest('.checkbox-label').classList.add('active');
-            else cb.closest('.checkbox-label').classList.remove('active');
-          });
-        }
+        const sports = existingConfig.sports.split(',');
+        checkboxes.forEach(cb => {
+          cb.checked = sports.includes(cb.value);
+          if (cb.checked) cb.closest('.checkbox-label').classList.add('active');
+          else cb.closest('.checkbox-label').classList.remove('active');
+        });
       }
     }
 
@@ -1267,8 +1076,7 @@
       const languages = languagesInput ? languagesInput.value.trim() : '';
       const replayFilter = replayFilterSelect ? replayFilterSelect.value : 'all';
       const webStreams = webStreamsSelect ? webStreamsSelect.value : 'enabled';
-      const sportsCheckboxes = sportsGrid ? sportsGrid.querySelectorAll('input[type="checkbox"]') : checkboxes;
-      const selectedSports = Array.from(sportsCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
+      const selectedSports = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
       const selectedSources = Array.from(sourceCheckboxes).filter(cb => cb.checked).map(cb => cb.value);
       let tz = timezoneSelect.value || Intl.DateTimeFormat().resolvedOptions().timeZone;
       try {
@@ -1290,12 +1098,8 @@
       if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
       if (webStreams === 'disabled') config.webStreams = 'disabled';
 
-      const DEFAULT_SPORTS_ORDER = ['football', 'basketball', 'cricket', 'american_football', 'motorsport', 'hockey', 'baseball', 'rugby', 'college', 'mma', 'golf', 'tennis', 'darts', 'other'];
-      const isDefaultOrderAndAllSelected =
-        selectedSports.length === sportsCheckboxes.length &&
-        selectedSports.every((s, i) => s === DEFAULT_SPORTS_ORDER[i]);
 
-      if (!isDefaultOrderAndAllSelected) {
+      if (selectedSports.length < checkboxes.length) {
         config.sports = selectedSports.join(',');
         if (config.sports === '') config.sports = 'none';
       }
@@ -1452,77 +1256,6 @@
         updateLink();
       });
     });
-
-    if (sportsGrid) {
-      sportsGrid.addEventListener('click', (e) => {
-        const upBtn = e.target.closest('.sport-up');
-        if (upBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const item = upBtn.closest('.sport-item');
-          if (item && item.previousElementSibling) {
-            item.parentNode.insertBefore(item, item.previousElementSibling);
-            updateLink();
-          }
-          return;
-        }
-        const downBtn = e.target.closest('.sport-down');
-        if (downBtn) {
-          e.preventDefault();
-          e.stopPropagation();
-          const item = downBtn.closest('.sport-item');
-          if (item && item.nextElementSibling) {
-            item.parentNode.insertBefore(item.nextElementSibling, item);
-            updateLink();
-          }
-          return;
-        }
-      });
-
-      let draggedItem = null;
-      sportsGrid.addEventListener('dragstart', (e) => {
-        const item = e.target.closest('.sport-item');
-        if (!item) return;
-        draggedItem = item;
-        item.classList.add('dragging');
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = 'move';
-          e.dataTransfer.setData('text/plain', item.dataset.sport || '');
-        }
-      });
-
-      sportsGrid.addEventListener('dragend', (e) => {
-        const item = e.target.closest('.sport-item');
-        if (item) item.classList.remove('dragging');
-        sportsGrid.querySelectorAll('.sport-item').forEach(el => el.classList.remove('drag-over'));
-        draggedItem = null;
-      });
-
-      sportsGrid.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        const targetItem = e.target.closest('.sport-item');
-        if (!targetItem || targetItem === draggedItem) return;
-        if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-        sportsGrid.querySelectorAll('.sport-item').forEach(el => el.classList.remove('drag-over'));
-        targetItem.classList.add('drag-over');
-      });
-
-      sportsGrid.addEventListener('dragleave', (e) => {
-        const targetItem = e.target.closest('.sport-item');
-        if (targetItem) targetItem.classList.remove('drag-over');
-      });
-
-      sportsGrid.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const targetItem = e.target.closest('.sport-item');
-        if (!targetItem || !draggedItem || targetItem === draggedItem) return;
-        targetItem.classList.remove('drag-over');
-        const rect = targetItem.getBoundingClientRect();
-        const next = (e.clientY - rect.top) / (rect.bottom - rect.top) > 0.5;
-        sportsGrid.insertBefore(draggedItem, next ? targetItem.nextSibling : targetItem);
-        updateLink();
-      });
-    }
 
     updateLink();
 

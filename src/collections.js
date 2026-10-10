@@ -191,27 +191,7 @@ function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
   const manifestQuery = manifestParams.toString();
   const manifestUrl = `${cleanBaseUrl}${manifestPath}${manifestQuery ? `?${manifestQuery}` : ''}`;
 
-  let activeDefinitions = [...FOLDER_DEFINITIONS];
-  const parsedConfig = decodeConfigSegment(config) || {};
-  if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
-    if (parsedConfig.sports === 'none') {
-      activeDefinitions = [];
-    } else {
-      const userSports = parsedConfig.sports.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-      const folderMap = new Map();
-      for (const def of FOLDER_DEFINITIONS) {
-        folderMap.set(def.sport, def);
-      }
-      activeDefinitions = [];
-      for (const s of userSports) {
-        if (folderMap.has(s)) {
-          activeDefinitions.push(folderMap.get(s));
-        }
-      }
-    }
-  }
-
-  const folders = activeDefinitions.map(def => {
+  const folders = FOLDER_DEFINITIONS.map(def => {
     const coverImageUrl = `${cleanBaseUrl}${def.poster}?v=luffy`;
     const dynamicCatalogs = getSportCatalogs(def);
     const catalogSources = dynamicCatalogs.map(cat => ({
