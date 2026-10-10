@@ -99,10 +99,11 @@ class CacheService {
   }
 
   _saveDiskCache(matches) {
+    let tempPath;
     try {
       const dir = path.dirname(this.cacheFilePath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const tempPath = `${this.cacheFilePath}.tmp.${process.pid}.${Date.now()}`;
+      tempPath = `${this.cacheFilePath}.tmp.${process.pid}.${Date.now()}`;
       const payload = JSON.stringify({
         timestamp: this.lastFetchTime,
         matches: matches
@@ -113,6 +114,7 @@ class CacheService {
       this.lastDiskMtime = stats.mtimeMs;
     } catch (err) {
       console.error('[CacheService] Failed to save disk cache:', err.message);
+      try { if (tempPath && fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch (_) {}
     }
   }
 
@@ -137,7 +139,10 @@ class CacheService {
   }
 
   findMatch(matchId) {
-    if (!matchId) return null;
+    if (!matchId || typeof matchId !== 'string') {
+      matchId = String(matchId || '');
+      if (!matchId) return null;
+    }
     this._ensureLoaded();
     const matches = this.cachedMatches;
     if (!Array.isArray(matches) || matches.length === 0) return null;
@@ -174,7 +179,7 @@ class CacheService {
 
   isStale(ttlMs = this.CACHE_TTL) {
     if (Date.now() - this.lastFetchTime > ttlMs) {
-      this._loadDiskCache();
+      this._ensureLoaded();
     }
     return (Date.now() - this.lastFetchTime) > ttlMs;
   }
