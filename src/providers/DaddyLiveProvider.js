@@ -154,8 +154,9 @@ class DaddyLiveProvider extends BaseProvider {
       }
     }
 
+    const cbTimeout = parseInt(process.env.DADDYLIVE_CB_TIMEOUT_MS, 10) || 30000;
     const dlCbOptions = {
-      timeout: 30000,
+      timeout: cbTimeout,
       resetTimeout: 30000,
       volumeThreshold: 5,
       errorThresholdPercentage: 75
