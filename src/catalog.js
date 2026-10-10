@@ -1402,6 +1402,13 @@ async function handleCatalogUncached(type, id, extra, config) {
     filteredMatches = filteredMatches.slice(skip, skip + PAGE_SIZE);
   }
 
+  // ====================================================================================
+  // ⚠️ CRITICAL PERFORMANCE WARNING ⚠️
+  // DO NOT MOVE THIS .map() ABOVE THE .slice() AND FILTERS!
+  // mapMatchToMetaPreview is a heavy operation. If it runs on the raw array of 5,000+ 
+  // matches, it will block the Node.js event loop for 30+ seconds and crash the server.
+  // We MUST slice the array down to 100 items BEFORE running this map function.
+  // ====================================================================================
   let metas = filteredMatches.map(m => mapMatchToMetaPreview(m, conf, type));
 
   let cacheTtl = 180; // default 3 minutes
