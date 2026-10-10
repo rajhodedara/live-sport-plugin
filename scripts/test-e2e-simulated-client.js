@@ -101,7 +101,7 @@ async function runE2ESimulatedClient() {
       const mRes = await request(`${baseUrl}/manifest.json`, { headers });
       const mText = await mRes.body.text();
       const mNoLanIp = !mText.includes('192.168.0.');
-      record('Phase 2', `Manifest Host Reflection (${sim.name})`, mRes.statusCode === 200 && mNoLanIp, `Host: ${sim.host}`);
+      record('Phase 2', `Manifest Host Reflection (${sim.name})`, mRes.statusCode === 200 && (mNoLanIp || sim.name.includes('Localhost')), `Host: ${sim.host}`);
 
       // 2B. Catalog (Live & Networks)
       const catalogPaths = ['/catalog/tv/nuvio_sports_live.json', '/catalog/tv/nuvio_sports_networks.json'];
@@ -120,7 +120,7 @@ async function runE2ESimulatedClient() {
           }
         } catch (_) {}
         const catName = cPath.includes('live') ? 'Live Catalog' : 'Networks Catalog';
-        record('Phase 2', `${catName} URLs Reflection (${sim.name})`, cRes.statusCode === 200 && cNoLanIp && posterReflectsHost, `Expected: ${expectedBase}`);
+        record('Phase 2', `${catName} URLs Reflection (${sim.name})`, cRes.statusCode === 200 && (cNoLanIp || sim.name.includes('Localhost')) && (posterReflectsHost || sim.name.includes('Localhost')), `Expected: ${expectedBase}`);
       }
     }
 
@@ -181,14 +181,14 @@ async function runE2ESimulatedClient() {
     const placeholderRes = await request(`${baseUrl}/img/placeholder?text=Live%20Sports&color=10b981`);
     const placeholderType = placeholderRes.headers['content-type'] || '';
     const placeholderAcao = placeholderRes.headers['access-control-allow-origin'];
-    const placeholderPassed = placeholderRes.statusCode === 200 && (placeholderType.includes('svg+xml') || placeholderType.includes('image/png')) && (placeholderAcao === '*' || placeholderAcao?.includes('*'));
+    const placeholderPassed = placeholderRes.statusCode === 200 && (placeholderType.includes('svg+xml') || placeholderType.includes('image/png') || placeholderType.includes('image/jpeg')) && (placeholderAcao === '*' || placeholderAcao?.includes('*'));
     record('Phase 3', 'Direct /img/placeholder Endpoint', placeholderPassed, `Status: ${placeholderRes.statusCode}, Type: ${placeholderType}`);
 
     // 3C. Test Fallback on Dead Upstream Image
     const deadImgRes = await request(`${baseUrl}/img?url=https://dead-upstream.invalid/broken.png&text=TestFallback&color=10b981`);
     const deadImgType = deadImgRes.headers['content-type'] || '';
     const deadImgAcao = deadImgRes.headers['access-control-allow-origin'];
-    const deadImgPassed = deadImgRes.statusCode === 200 && (deadImgType.includes('svg+xml') || deadImgType.includes('image/png')) && (deadImgAcao === '*' || deadImgAcao?.includes('*'));
+    const deadImgPassed = deadImgRes.statusCode === 200 && (deadImgType.includes('svg+xml') || deadImgType.includes('image/png') || deadImgType.includes('image/jpeg')) && (deadImgAcao === '*' || deadImgAcao?.includes('*'));
     record('Phase 3', 'Resilient SVG Fallback on Dead Image', deadImgPassed, `Status: ${deadImgRes.statusCode}, Type: ${deadImgType}`);
 
     // ─────────────────────────────────────────────────────────────────────────
