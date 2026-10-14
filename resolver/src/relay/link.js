@@ -3,6 +3,7 @@ export function relayLink(base, target, slot) {
   if (slot.path) q.set('embed', slot.path)
   if (slot.origin) q.set('embedOrigin', slot.origin)
   if (slot.referer) q.set('referer', slot.referer)
+  if (slot.playbackGrant) q.set('pt', slot.playbackGrant)
   return `${base}/api/hls/playlist.m3u8?${q}`
 }
 
@@ -11,6 +12,7 @@ export function parseRelaySlot(params) {
   const embedOrigin = params.get('embedOrigin')
   const origin = params.get('origin') // fallback for generic providers
   const referer = params.get('referer')
+  const playbackGrant = params.get('pt')
   
   const slot = {}
   
@@ -24,5 +26,6 @@ export function parseRelaySlot(params) {
   }
   
   if (referer) slot.referer = referer
+  if (playbackGrant) slot.playbackGrant = playbackGrant
   return slot
 }

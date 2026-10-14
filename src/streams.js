@@ -4,6 +4,7 @@ const { withRetry, isTransientStatus, isTransientError } = require('./services/r
 const { rewriteHlsUri } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
+const { appendPlaybackGrant, isOwnedPlaybackUrl } = require('./auth/addonAuth');
 const { performance } = require('perf_hooks');
 
 // Source selection (shared by handleStream and prewarmMatch)
@@ -990,6 +991,31 @@ async function handleStream(type, id, config) {
       title: '❤️ Help keep servers & streams alive\nTap to open Donation Center (Ko-fi / Crypto)',
       externalUrl: donationUrl
     });
+  }
+
+  const playbackGrant = config && config.__playbackGrant;
+  if (playbackGrant) {
+    for (const stream of streams) {
+      // Authenticated installs route raw HLS through the protected manifest
+      // proxy so sharing the upstream URL is not required for playback.
+      if (
+        stream.url &&
+        /^https?:\/\//i.test(stream.url) &&
+        stream.url.includes('.m3u8') &&
+        !isOwnedPlaybackUrl(stream.url, BASE_URL)
+      ) {
+        const requestHeaders = stream.behaviorHints && stream.behaviorHints.proxyHeaders &&
+          stream.behaviorHints.proxyHeaders.request;
+        const referer = requestHeaders && (requestHeaders.Referer || requestHeaders.referer);
+        const origin = requestHeaders && (requestHeaders.Origin || requestHeaders.origin);
+        let proxyUrl = `/api/manifest?url=${encodeURIComponent(stream.url)}`;
+        if (referer) proxyUrl += `&referer=${encodeURIComponent(referer)}`;
+        if (origin) proxyUrl += `&origin=${encodeURIComponent(origin)}`;
+        stream.url = proxyUrl;
+      }
+      stream.url = appendPlaybackGrant(stream.url, playbackGrant, BASE_URL);
+      stream.externalUrl = appendPlaybackGrant(stream.externalUrl, playbackGrant, BASE_URL);
+    }
   }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.

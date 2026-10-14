@@ -150,6 +150,37 @@ function decodeConfigSegment(segment) {
   }
 }
 
+const COLLECTION_CONFIG_KEYS = {
+  accessToken: 'a',
+  timezone: 'z',
+  teams: 'tm',
+  sports: 'sp',
+  sources: 'so',
+  languages: 'lg',
+  replayFilter: 'rf',
+  webStreams: 'ws',
+};
+
+function compactConfigSegment(segment) {
+  if (!segment) return '';
+  try {
+    let parsed;
+    if (segment.startsWith('%7B') || segment.startsWith('{')) {
+      parsed = JSON.parse(decodeURIComponent(segment));
+    } else {
+      parsed = JSON.parse(Buffer.from(segment, 'base64url').toString('utf8'));
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return segment;
+    const compact = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      compact[COLLECTION_CONFIG_KEYS[key] || key] = value;
+    }
+    return Buffer.from(JSON.stringify(compact), 'utf8').toString('base64url');
+  } catch (_) {
+    return segment;
+  }
+}
+
 /**
  * Builds the Nuvio Collections JSON.
  *
@@ -160,8 +191,8 @@ function decodeConfigSegment(segment) {
  * merged over any config segment already in the URL, so a bare
  * /collections.json?replayFilter=mainstream import still honours the filter.
  *
- * With no options the pre-existing behaviour is preserved exactly: the segment
- * is used verbatim.
+ * Config keys are compacted in collection rows because the segment is repeated
+ * for every source; the addon resolver expands them before authentication.
  */
 function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
   const cleanBaseUrl = (baseUrl || '').replace(/\/+$/, '');
@@ -180,11 +211,12 @@ function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
   // Nuvio's paste size ceiling, which surfaced as a mid-document EOF parse
   // error rather than a syntax error.
   //
-  // When the request already carried a config segment it is reused verbatim in
-  // the path (no duplication, no recomputation). Explicit options are appended
-  // as two short query params instead of being merged into a second segment:
+  // Existing config values are retained under compact keys in the path.
+  // Explicit options are appended as two short query params instead of being
+  // merged into a second segment:
   // `?rf=mainstream&lg=Spanish` costs a few bytes per row rather than ~41.
-  const manifestPath = config ? `/${config}/manifest.json` : '/manifest.json';
+  const collectionConfig = compactConfigSegment(config);
+  const manifestPath = collectionConfig ? `/${collectionConfig}/manifest.json` : '/manifest.json';
   const manifestParams = new URLSearchParams();
   if (overrides.replayFilter) manifestParams.set('rf', overrides.replayFilter);
   if (overrides.languages) manifestParams.set('lg', overrides.languages);
@@ -196,11 +228,11 @@ function generateCollections(baseUrl = BASE_URL, config = '', options = {}) {
     const dynamicCatalogs = getSportCatalogs(def);
     const catalogSources = dynamicCatalogs.map(cat => ({
       addonId: 'community.nuvio.live-sports',
-      addonName: 'Nuvio Live Sports',
       manifestUrl: manifestUrl,
       catalogId: cat.id,
       catalogName: cat.name,
-      // `name` and `title` were byte-identical duplicates of catalogName.
+      // `addonName`, `name`, and `title` duplicated collection-level or
+      // catalogName labels and are optional in Nuvio's collection schema.
       // With the config segment repeated in all 48 manifestUrls, the export
       // had grown to ~20.5 kB, which Nuvio's paste import truncates (it
       // reports EOF mid-document rather than a syntax error). One label is

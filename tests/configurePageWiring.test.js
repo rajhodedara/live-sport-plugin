@@ -94,3 +94,25 @@ describe('existing controls remain wired', () => {
     expect(script).toMatch(/timezoneSelect\.addEventListener\(\s*'change'\s*,\s*updateLink\s*\)/);
   });
 });
+
+describe('account access gate', () => {
+  test('configuration starts locked behind the access panel', () => {
+    expect(html).toMatch(/<body class="auth-pending">/);
+    expect(html).toContain('id="accessPanel"');
+    expect(script).toContain("authApi('/status')");
+    expect(script).toContain("authApi('/me')");
+  });
+
+  test('device tokens are retained for setup and encoded into config', () => {
+    expect(script).toContain("sessionStorage.getItem('nuvioDeviceToken')");
+    expect(script).toContain("sessionStorage.setItem('nuvioDeviceToken'");
+    expect(script).toMatch(/config\.accessToken\s*=\s*currentAccessToken/);
+    expect(script).toMatch(/delete existingConfig\.accessToken/);
+    expect(script).toContain("authApi('/device/validate'");
+    expect(script).toContain("sessionStorage.removeItem('nuvioDeviceToken')");
+  });
+
+  test('passwords are never added to the generated addon config', () => {
+    expect(script).not.toMatch(/config\.password\s*=/);
+  });
+});

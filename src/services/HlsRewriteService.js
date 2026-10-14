@@ -58,7 +58,7 @@ function resolveSegmentUrl(segmentUri, manifestUrl) {
  * Rewrite one playlist entry into the URL the player should fetch.
  */
 function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
-  const { referer = '', origin = '', rckSuffix = '', absoluteAddonBaseUrl = '' } = opts;
+  const { referer = '', origin = '', rckSuffix = '', playbackSuffix = '', absoluteAddonBaseUrl = '' } = opts;
   const absoluteUrl = resolveSegmentUrl(segmentUri, manifestUrl);
 
   if (absoluteUrl.includes('.m3u8')) {
@@ -66,11 +66,12 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     if (referer) manifestPath += `&referer=${encodeURIComponent(referer)}`;
     if (origin) manifestPath += `&origin=${encodeURIComponent(origin)}`;
     manifestPath += rckSuffix || '';
+    manifestPath += playbackSuffix || '';
     return absoluteAddonBaseUrl ? new URL(manifestPath, absoluteAddonBaseUrl).toString() : manifestPath;
   }
 
   if (absoluteUrl.includes('.image')) {
-    const cfWorker = getCfImageWorker();
+    const cfWorker = playbackSuffix ? null : getCfImageWorker();
     if (cfWorker) {
       let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
       if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
@@ -81,6 +82,7 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
     if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
     if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+    chunkPath += playbackSuffix || '';
     return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
   }
 
@@ -91,7 +93,7 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   // plain .ts goes through the workers too. /api/hlschunk stays as the
   // server-side fallback when no worker is configured.
   if (/\.ts(\?|$)/.test(absoluteUrl) && absoluteUrl.includes('strmd.st')) {
-    const cfWorker = getCfImageWorker();
+    const cfWorker = playbackSuffix ? null : getCfImageWorker();
     if (cfWorker) {
       let workerChunkUrl = `${cfWorker}/?url=${encodeURIComponent(absoluteUrl)}`;
       if (referer) workerChunkUrl += `&referer=${encodeURIComponent(referer)}`;
@@ -102,6 +104,17 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
     if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
     if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+    chunkPath += playbackSuffix || '';
+    return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
+  }
+
+  // Authenticated playback keeps every media/key/init request on a protected
+  // local route. Anonymous mode preserves the historical direct-CDN behavior.
+  if (playbackSuffix) {
+    let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
+    if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
+    if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+    chunkPath += playbackSuffix;
     return absoluteAddonBaseUrl ? new URL(chunkPath, absoluteAddonBaseUrl).toString() : chunkPath;
   }
 

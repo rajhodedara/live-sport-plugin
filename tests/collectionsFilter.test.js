@@ -9,8 +9,8 @@
 //  - The first attempt embedded a second full base64 config segment in all 48
 //    rows. That grew the export to ~20.5 kB and Nuvio's paste import truncated
 //    it (a mid-document EOF parse error, not a syntax error).
-//  - Scope now travels as two short query params (rf/lg) so it costs a few
-//    bytes per row instead of ~41.
+//  - Scope travels as short query params and authenticated config keys are
+//    compacted because each manifest URL is repeated across every source.
 
 const { generateCollections } = require('../src/collections');
 
@@ -34,15 +34,27 @@ describe('collections JSON carries the replay scope', () => {
     expect(url).toMatch(/[?&]lg=Spanish/);
   });
 
-  test('a config segment in the request is reused in the path, never duplicated', () => {
+  test('a config segment is compacted for repeated collection manifest URLs', () => {
     const s = seg({ timezone: 'Asia/Calcutta' });
     const url = firstUrl(generateCollections('https://nuviosports.xyz', s, { replayFilter: 'mainstream' }));
-    expect(url).toContain(`/${s}/manifest.json`);
-    expect((url.match(new RegExp(s, 'g')) || []).length).toBe(1);
+    const encoded = new URL(url).pathname.split('/')[1];
+    expect(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))).toEqual({ z: 'Asia/Calcutta' });
+  });
+
+  test('an authenticated config segment preserves the credential through its compact alias', () => {
+    const token = `nd_${'a'.repeat(22)}`;
+    const s = seg({ timezone: 'UTC', accessToken: token });
+    const cols = generateCollections('https://nuviosports.xyz', s, { replayFilter: 'mainstream' });
+    for (const folder of cols[0].folders) {
+      for (const source of folder.catalogSources) {
+        const encoded = new URL(source.manifestUrl).pathname.split('/')[1];
+        expect(JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')).a).toBe(token);
+      }
+    }
   });
 
   test('the document stays under the size that previously imported successfully', () => {
-    const s = seg({ timezone: 'Asia/Calcutta' });
+    const s = seg({ timezone: 'Asia/Calcutta', accessToken: `nd_${'a'.repeat(22)}` });
     const cols = generateCollections('https://nuviosports.xyz', s, { replayFilter: 'mainstream' });
     // 18,650 chars is the known-good pre-feature export size.
     expect(JSON.stringify(cols).length).toBeLessThan(18650);

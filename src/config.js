@@ -11,6 +11,7 @@
  */
 
 const os = require('os');
+const path = require('path');
 
 function getLocalIp() {
   try {
@@ -79,4 +80,43 @@ const BASE_URL = (
   `http://${getLocalIp()}:${PORT}`                              // Local dev fallback to LAN IP
 ).replace(/\/$/, '');                                           // Strip trailing slash if any
 
-module.exports = { PORT, BASE_URL, getLocalIp, getRequestBaseUrl };
+function envBool(value, fallback) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return /^(1|true|yes|on)$/i.test(String(value));
+}
+
+function envInt(value, fallback, min) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min || 0, parsed);
+}
+
+function loadAuthConfig(env = process.env) {
+  const required = envBool(env.AUTH_REQUIRED, false);
+  const pepper = String(env.AUTH_TOKEN_PEPPER || '');
+  if (required && pepper.length < 32) {
+    throw new Error('AUTH_TOKEN_PEPPER must be at least 32 characters when AUTH_REQUIRED=true');
+  }
+  return {
+    required,
+    dbDriver: String(env.AUTH_DB_DRIVER || 'sqlite').toLowerCase(),
+    dbPath: env.AUTH_DB_PATH || path.join(process.cwd(), 'data', 'auth.sqlite'),
+    tokenPepper: pepper || 'development-only-auth-pepper-change-before-enabling',
+    sessionTtlMs: envInt(env.AUTH_SESSION_TTL_HOURS, 168, 1) * 60 * 60 * 1000,
+    deviceTokenTtlMs: envInt(env.AUTH_DEVICE_TOKEN_TTL_DAYS, 0, 0) * 24 * 60 * 60 * 1000,
+    playbackTtlMs: envInt(env.AUTH_PLAYBACK_TTL_MINUTES, 30, 1) * 60 * 1000,
+    playbackSessionTtlMs: envInt(env.AUTH_PLAYBACK_SESSION_TTL_HOURS, 12, 1) * 60 * 60 * 1000,
+    cookieSecure: env.AUTH_COOKIE_SECURE === 'auto' || env.AUTH_COOKIE_SECURE === undefined
+      ? /^https:/i.test(
+        env.ADDON_URL ||
+        env.RENDER_EXTERNAL_URL ||
+        (env.WEBSITE_HOSTNAME ? `https://${env.WEBSITE_HOSTNAME}` : '')
+      )
+      : envBool(env.AUTH_COOKIE_SECURE, false),
+    cookieName: 'nuvio_session',
+  };
+}
+
+const AUTH_CONFIG = loadAuthConfig();
+
+module.exports = { PORT, BASE_URL, getLocalIp, getRequestBaseUrl, AUTH_CONFIG, loadAuthConfig };

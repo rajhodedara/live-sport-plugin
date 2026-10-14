@@ -27,6 +27,7 @@
   "dependencies": {
     "acorn": "^8.18.0",
     "awilix": "^13.0.5",
+    "better-sqlite3": "^12.11.1",
     "big-integer": "^1.6.52",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",

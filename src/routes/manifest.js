@@ -21,12 +21,13 @@ router.get('/api/manifest', async (req, res) => {
   const targetUrl = req.query.url;
   const referer = req.query.referer || 'https://embed.st/';
   const origin = req.query.origin || 'https://embed.st';
+  const playbackSuffix = req.query.pt ? '&pt=' + encodeURIComponent(req.query.pt) : '';
 
   if (!targetUrl) return res.status(400).send('Missing url');
 
   // Playlist-only proxy (same as WatchFooty / Streamed.pk .ts): this host fetches
   // the m3u8 with the CDN Referer, then the player pulls every media byte from the CDN.
-  const cacheKey = `${targetUrl}|${referer}|${origin}`;
+  const cacheKey = `${targetUrl}|${referer}|${origin}|${req.query.pt || ''}`;
   // Recovery key for this stream, if the URL was emitted by our own resolver.
   const rck = readRck(req);
   const rckSuffix = rck ? '&rck=' + encodeURIComponent(rck) : '';
@@ -121,20 +122,20 @@ router.get('/api/manifest', async (req, res) => {
           if (!l) return resultLine;
           
           if (l.startsWith('#')) {
-              // Handle EXT-X-MAP:URI="relative.mp4"
-              if (l.startsWith('#EXT-X-MAP:')) {
-                  const uriMatch = l.match(/URI="([^"]+)"/);
-                  if (uriMatch) {
-                      try {
-                          const absUri = new URL(uriMatch[1], effectiveUrl).toString();
-                          resultLine = l.replace(uriMatch[1], absUri);
-                      } catch(e) {}
-                  }
+              // Protect nested init segments, encryption keys, and media tags.
+              const uriMatch = l.match(/URI="([^"]+)"/);
+              if (uriMatch) {
+                  try {
+                      const rewrittenUri = rewriteHlsUri(uriMatch[1], effectiveUrl, {
+                        referer, origin, rckSuffix, playbackSuffix
+                      });
+                      resultLine = l.replace(uriMatch[1], rewrittenUri);
+                  } catch(e) {}
               }
               return resultLine;
           }
 
-          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix });
+          return rewriteHlsUri(l, effectiveUrl, { referer, origin, rckSuffix, playbackSuffix });
         });
 
         const rewrittenResult = rewritten.join('\n');

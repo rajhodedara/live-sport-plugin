@@ -580,6 +580,9 @@
 
     .status.is-ok { color: var(--ok); }
     .status.is-err { color: var(--danger); }
+    body.auth-pending main > section:not(#accessPanel) { display: none; }
+    .access-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .access-actions .btn { width: auto; margin: 0; padding: 9px 14px; }
 
     /* ---------- Responsive ---------- */
 
@@ -607,7 +610,7 @@
   </style>
 </head>
 
-<body>
+<body class="auth-pending">
   <div class="shell">
 
     <header class="masthead">
@@ -620,6 +623,34 @@
     </header>
 
     <main>
+
+      <section class="panel panel-primary" id="accessPanel" aria-labelledby="access-h">
+        <div class="panel-head">
+          <h2 id="access-h">Account access</h2>
+          <p id="accessDescription">Checking authentication requirements…</p>
+        </div>
+        <div id="accessSignedOut" hidden>
+          <p class="hint">Sign in or create an account before configuring this hosted add-on.</p>
+          <div class="access-actions">
+            <a class="btn btn-primary" href="/account">Sign in or register</a>
+          </div>
+        </div>
+        <div id="accessDevice" hidden>
+          <p class="hint" id="accessAccount"></p>
+          <div class="field">
+            <label for="accessDeviceName">Device name</label>
+            <input id="accessDeviceName" type="text" maxlength="80" placeholder="Living room TV">
+          </div>
+          <button type="button" class="btn btn-primary" id="createAccessDevice">Create device access</button>
+        </div>
+        <div id="accessReady" hidden>
+          <p class="status is-ok">Device access is ready. Your password is never included in the add-on URL.</p>
+          <div class="access-actions">
+            <a class="btn btn-ghost" href="/account">Manage devices</a>
+          </div>
+        </div>
+        <p class="status" id="accessStatus" role="status" aria-live="polite"></p>
+      </section>
 
       <!-- 1 · Support -->
       <section class="panel" aria-labelledby="support-h">
@@ -938,6 +969,14 @@
 
     const configSummary = document.getElementById('configSummary');
     const installStatus = document.getElementById('installStatus');
+    const accessPanel = document.getElementById('accessPanel');
+    const accessDescription = document.getElementById('accessDescription');
+    const accessSignedOut = document.getElementById('accessSignedOut');
+    const accessDevice = document.getElementById('accessDevice');
+    const accessReady = document.getElementById('accessReady');
+    const accessStatus = document.getElementById('accessStatus');
+    const createAccessDevice = document.getElementById('createAccessDevice');
+    let currentAccessToken = sessionStorage.getItem('nuvioDeviceToken') || '';
 
     // Attempt to load existing config from URL
     let existingConfig = {};
@@ -951,6 +990,10 @@
       }
     } catch (e) {
       console.warn("Could not parse existing config from URL", e);
+    }
+    if (typeof existingConfig.accessToken === 'string' && existingConfig.accessToken) {
+      currentAccessToken = existingConfig.accessToken;
+      delete existingConfig.accessToken;
     }
 
     // Populate timezones
@@ -1109,6 +1152,7 @@
       if (languages) config.languages = languages;
       if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
       if (webStreams === 'disabled') config.webStreams = 'disabled';
+      if (currentAccessToken) config.accessToken = currentAccessToken;
 
 
       if (selectedSports.length < checkboxes.length) {
@@ -1304,6 +1348,90 @@
         /* autocomplete is a nicety; never let it break the page */
       }
     })();
+
+    async function authApi(path, options) {
+      const response = await fetch('/api/auth' + path, {
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+      });
+      const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Authentication request failed.');
+      return data;
+    }
+
+    function unlockConfiguration() {
+      document.body.classList.remove('auth-pending');
+      accessSignedOut.hidden = true;
+      accessDevice.hidden = true;
+      accessReady.hidden = false;
+      accessDescription.textContent = 'Authenticated device access';
+      updateLink();
+    }
+
+    async function initializeAccess() {
+      try {
+        const status = await authApi('/status');
+        if (!status.required) {
+          accessPanel.hidden = true;
+          document.body.classList.remove('auth-pending');
+          return;
+        }
+        if (currentAccessToken) {
+          try {
+            await authApi('/device/validate', {
+              method: 'POST',
+              body: JSON.stringify({ token: currentAccessToken }),
+            });
+            unlockConfiguration();
+            return;
+          } catch (_) {
+            currentAccessToken = '';
+            sessionStorage.removeItem('nuvioDeviceToken');
+            accessStatus.className = 'status is-err';
+            accessStatus.textContent = 'This device access has expired or was revoked. Create a new one.';
+          }
+        }
+        try {
+          const me = await authApi('/me');
+          accessDescription.textContent = 'Create access for this Nuvio installation';
+          document.getElementById('accessAccount').textContent = 'Signed in as ' + me.user.email;
+          accessDevice.hidden = false;
+        } catch (_) {
+          accessDescription.textContent = 'Authentication required';
+          accessSignedOut.hidden = false;
+        }
+      } catch (error) {
+        accessDescription.textContent = 'Authentication unavailable';
+        accessStatus.className = 'status is-err';
+        accessStatus.textContent = error.message;
+      }
+    }
+
+    createAccessDevice.addEventListener('click', async () => {
+      createAccessDevice.disabled = true;
+      accessStatus.className = 'status';
+      accessStatus.textContent = 'Creating device access…';
+      try {
+        const result = await authApi('/devices', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: document.getElementById('accessDeviceName').value || 'Nuvio device',
+          }),
+        });
+        currentAccessToken = result.token;
+        sessionStorage.setItem('nuvioDeviceToken', currentAccessToken);
+        accessStatus.textContent = '';
+        unlockConfiguration();
+      } catch (error) {
+        accessStatus.className = 'status is-err';
+        accessStatus.textContent = error.message;
+      } finally {
+        createAccessDevice.disabled = false;
+      }
+    });
+
+    initializeAccess();
 
     if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
       fetch('/api/server-info')

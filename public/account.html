@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <title>Nuvio Live Sports | Account</title>
+  <style>
+    :root { --bg:#0a0a0c; --panel:#141419; --field:#1b1b22; --line:rgba(255,255,255,.1); --text:#f4f4f5; --muted:#a1a1aa; --accent:#dc2626; --ok:#22c55e; --danger:#ef4444; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; padding:32px 18px 64px; background:var(--bg); color:var(--text); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    .shell { width:100%; max-width:620px; margin:0 auto; }
+    header { display:flex; align-items:center; gap:14px; margin-bottom:22px; padding-bottom:20px; border-bottom:1px solid var(--line); }
+    header .home-link { margin-left:auto; white-space:nowrap; }
+    header img { width:50px; height:50px; border-radius:12px; }
+    h1,h2 { margin:0; }
+    h1 { font-size:24px; }
+    header p,.muted { margin:3px 0 0; color:var(--muted); font-size:13px; }
+    .panel { margin-bottom:16px; padding:20px; border:1px solid var(--line); border-radius:12px; background:var(--panel); }
+    .panel h2 { margin-bottom:4px; font-size:17px; }
+    .panel-head { margin-bottom:16px; }
+    .field { margin-bottom:14px; }
+    label { display:block; margin-bottom:6px; font-size:13px; font-weight:600; }
+    input { width:100%; padding:11px 12px; border:1px solid var(--line); border-radius:8px; background:var(--field); color:var(--text); font:inherit; }
+    input:focus { outline:2px solid var(--accent); outline-offset:1px; }
+    button,.link-btn { display:inline-flex; align-items:center; justify-content:center; min-height:42px; padding:10px 15px; border:1px solid var(--line); border-radius:9px; background:var(--field); color:var(--text); font:600 14px inherit; text-decoration:none; cursor:pointer; }
+    button.primary,.link-btn.primary { border-color:var(--accent); background:var(--accent); }
+    button.danger { border-color:rgba(239,68,68,.45); color:#fca5a5; }
+    button:disabled { opacity:.55; cursor:wait; }
+    .actions { display:flex; flex-wrap:wrap; gap:9px; }
+    .tabs { display:flex; gap:8px; margin-bottom:16px; }
+    .tabs button[aria-selected="true"] { border-color:var(--accent); background:rgba(220,38,38,.16); }
+    .status { min-height:22px; margin:12px 0 0; color:var(--muted); font-size:13px; }
+    .status.ok { color:var(--ok); } .status.error { color:var(--danger); }
+    .device { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+    .device:last-child { border-bottom:0; }
+    .device strong { display:block; }
+    .device small { color:var(--muted); }
+    .device-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+    .token-box { padding:12px; border:1px solid rgba(245,158,11,.35); border-radius:8px; background:rgba(245,158,11,.08); }
+    .token-box code { display:block; margin:8px 0; overflow-wrap:anywhere; user-select:all; }
+    [hidden] { display:none !important; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <img src="/logo.png" alt="Nuvio Live Sports">
+      <div><h1>Account access</h1><p>Manage sign-in and Nuvio device access.</p></div>
+      <a class="link-btn home-link" href="/">← Home</a>
+    </header>
+
+    <main>
+      <section class="panel" id="signedOutPanel">
+        <div class="tabs" role="tablist" aria-label="Account action">
+          <button type="button" id="loginTab" role="tab" aria-selected="true">Sign in</button>
+          <button type="button" id="registerTab" role="tab" aria-selected="false">Register</button>
+        </div>
+        <form id="authForm">
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required maxlength="254">
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128">
+          </div>
+          <button class="primary" id="authSubmit" type="submit">Sign in</button>
+          <p class="status" id="authStatus" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section class="panel" id="accountPanel" hidden>
+        <div class="panel-head"><h2>Your account</h2><p class="muted" id="accountEmail"></p></div>
+        <div class="actions">
+          <a class="link-btn primary" href="/configure">Configure add-on</a>
+          <button type="button" id="logoutButton">Sign out</button>
+        </div>
+      </section>
+
+      <section class="panel" id="devicePanel" hidden>
+        <div class="panel-head"><h2>Nuvio devices</h2><p class="muted">Create one access token per TV or app installation. Revoke access immediately or delete old entries permanently.</p></div>
+        <form id="deviceForm">
+          <div class="field">
+            <label for="deviceName">Device name</label>
+            <input id="deviceName" name="deviceName" placeholder="Living room TV" maxlength="80" required>
+          </div>
+          <button class="primary" type="submit">Create device access</button>
+        </form>
+        <div class="token-box" id="tokenBox" hidden>
+          <strong>Copy this token now</strong>
+          <p class="muted">It is shown only once. The configure page can use it during this browser session.</p>
+          <code id="deviceToken"></code>
+          <div class="actions">
+            <button type="button" id="copyToken">Copy token</button>
+            <a class="link-btn primary" href="/configure">Use in configure</a>
+          </div>
+        </div>
+        <div id="deviceList"></div>
+        <p class="status" id="deviceStatus" role="status" aria-live="polite"></p>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const signedOutPanel = document.getElementById('signedOutPanel');
+    const accountPanel = document.getElementById('accountPanel');
+    const devicePanel = document.getElementById('devicePanel');
+    const authForm = document.getElementById('authForm');
+    const authStatus = document.getElementById('authStatus');
+    const authSubmit = document.getElementById('authSubmit');
+    const loginTab = document.getElementById('loginTab');
+    const registerTab = document.getElementById('registerTab');
+    const deviceForm = document.getElementById('deviceForm');
+    const deviceStatus = document.getElementById('deviceStatus');
+    const tokenBox = document.getElementById('tokenBox');
+    const deviceToken = document.getElementById('deviceToken');
+    let mode = 'login';
+
+    function setMode(next) {
+      mode = next;
+      const registering = mode === 'register';
+      loginTab.setAttribute('aria-selected', String(!registering));
+      registerTab.setAttribute('aria-selected', String(registering));
+      authSubmit.textContent = registering ? 'Create account' : 'Sign in';
+      document.getElementById('password').autocomplete = registering ? 'new-password' : 'current-password';
+      authStatus.textContent = '';
+    }
+    loginTab.addEventListener('click', () => setMode('login'));
+    registerTab.addEventListener('click', () => setMode('register'));
+
+    async function api(path, options) {
+      const response = await fetch('/api/auth' + path, {
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', ...(options && options.headers || {}) },
+        ...options,
+      });
+      const data = response.status === 204 ? {} : await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || 'Request failed.');
+      return data;
+    }
+
+    function showAccount(user) {
+      signedOutPanel.hidden = true;
+      accountPanel.hidden = false;
+      devicePanel.hidden = false;
+      document.getElementById('accountEmail').textContent = user.email;
+      loadDevices();
+    }
+
+    async function loadSession() {
+      try { showAccount((await api('/me')).user); } catch (_) {}
+    }
+
+    authForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      authSubmit.disabled = true;
+      authStatus.className = 'status';
+      authStatus.textContent = mode === 'register' ? 'Creating account…' : 'Signing in…';
+      try {
+        const data = await api('/' + mode, {
+          method: 'POST',
+          body: JSON.stringify({
+            email: document.getElementById('email').value,
+            password: document.getElementById('password').value,
+          }),
+        });
+        showAccount(data.user);
+      } catch (error) {
+        authStatus.className = 'status error';
+        authStatus.textContent = error.message;
+      } finally {
+        authSubmit.disabled = false;
+      }
+    });
+
+    document.getElementById('logoutButton').addEventListener('click', async () => {
+      await api('/logout', { method: 'POST', body: '{}' }).catch(() => {});
+      sessionStorage.removeItem('nuvioDeviceToken');
+      location.reload();
+    });
+
+    async function loadDevices() {
+      try {
+        const devices = (await api('/devices')).devices || [];
+        const list = document.getElementById('deviceList');
+        list.replaceChildren();
+        for (const device of devices) {
+          const row = document.createElement('div');
+          row.className = 'device';
+          const info = document.createElement('div');
+          const name = document.createElement('strong');
+          name.textContent = device.name;
+          const meta = document.createElement('small');
+          meta.textContent = device.revokedAt ? 'Revoked' : (device.lastUsedAt ? 'Last used ' + new Date(device.lastUsedAt).toLocaleString() : 'Not used yet');
+          info.append(name, meta);
+          const revoke = document.createElement('button');
+          revoke.type = 'button';
+          revoke.textContent = 'Revoke';
+          revoke.disabled = !!device.revokedAt;
+          revoke.addEventListener('click', async () => {
+            await api('/devices/' + device.id, { method: 'DELETE' });
+            loadDevices();
+          });
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'danger';
+          remove.textContent = 'Delete';
+          remove.addEventListener('click', async () => {
+            if (!confirm('Permanently delete “' + device.name + '”? Its access token will stop working immediately.')) return;
+            try {
+              await api('/devices/' + device.id + '/permanent', { method: 'DELETE' });
+              deviceStatus.className = 'status ok';
+              deviceStatus.textContent = 'Device deleted.';
+              loadDevices();
+            } catch (error) {
+              deviceStatus.className = 'status error';
+              deviceStatus.textContent = error.message;
+            }
+          });
+          const actions = document.createElement('div');
+          actions.className = 'device-actions';
+          actions.append(revoke, remove);
+          row.append(info, actions);
+          list.appendChild(row);
+        }
+      } catch (error) {
+        deviceStatus.className = 'status error';
+        deviceStatus.textContent = error.message;
+      }
+    }
+
+    deviceForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        const data = await api('/devices', {
+          method: 'POST',
+          body: JSON.stringify({ name: document.getElementById('deviceName').value }),
+        });
+        sessionStorage.setItem('nuvioDeviceToken', data.token);
+        deviceToken.textContent = data.token;
+        tokenBox.hidden = false;
+        deviceStatus.className = 'status ok';
+        deviceStatus.textContent = 'Device access created.';
+        deviceForm.reset();
+        loadDevices();
+      } catch (error) {
+        deviceStatus.className = 'status error';
+        deviceStatus.textContent = error.message;
+      }
+    });
+
+    document.getElementById('copyToken').addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(deviceToken.textContent);
+        deviceStatus.className = 'status ok';
+        deviceStatus.textContent = 'Token copied.';
+      } catch (_) {
+        deviceStatus.className = 'status error';
+        deviceStatus.textContent = 'Copy failed. Select the token and copy it manually.';
+      }
+    });
+
+    loadSession();
+  </script>
+</body>
+</html>

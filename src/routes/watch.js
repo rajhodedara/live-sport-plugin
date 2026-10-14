@@ -61,6 +61,7 @@ router.get('/watch', (req, res) => {
     const safeTitle = String(title)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const playbackSuffix = req.query.pt ? '&pt=' + encodeURIComponent(req.query.pt) : '';
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     return res.send(`<!DOCTYPE html>
@@ -181,7 +182,7 @@ router.get('/watch', (req, res) => {
 
       try {
         status.textContent = 'Fetching embed page\u2026';
-        const proxyUrl = '/api/proxy-embed?url=' + encodeURIComponent(embedUrl) + '&referer=' + encodeURIComponent(referer);
+        const proxyUrl = '/api/proxy-embed?url=' + encodeURIComponent(embedUrl) + '&referer=' + encodeURIComponent(referer) + '${playbackSuffix}';
         const resp = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
 
         if (!resp.ok) {

@@ -23,8 +23,11 @@ const path = require('path');
 const { builder } = require('./manifest');
 const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
-const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
+const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp, AUTH_CONFIG } = require('./config');
 const { isLocalDirectRequest } = require('./services/localRequest');
+const {
+  authenticateAddonConfig, sendAuthError, requirePlaybackGrant
+} = require('./auth/addonAuth');
 const container = require('./container');
 const https = require('https');
 const http = require('http');
@@ -84,6 +87,10 @@ app.get(['/configure', '/:config/configure'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'configure.html'));
 });
 
+app.get(['/account', '/login', '/register'], (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'account.html'));
+});
+
 app.get(['/donate', '/:config/donate'], (req, res) => {
   res.redirect('/#donate');
 });
@@ -126,6 +133,13 @@ const REPLAY_MANIFEST_ROWS = [
 app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.json', '/:config/nuvio-collections.json'], (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   const config = req.params.config || '';
+  try {
+    const parsed = config ? decodeConfigSegment(config) : {};
+    if (parsed === null) return sendAuthError(res, { status: 401, code: 'invalid_configuration', message: 'Invalid addon configuration.' });
+    authenticateAddonConfig(parsed);
+  } catch (error) {
+    return sendAuthError(res, error);
+  }
   // Explicit query overrides let a bare collections URL still pin the replay
   // scope, since each row queries its own manifestUrl.
   const options = {
@@ -142,6 +156,13 @@ app.get(['/collections.json', '/nuvio-collections.json', '/:config/collections.j
 app.get(['/api/collections/download', '/:config/api/collections/download'], (req, res) => {
   const reqBaseUrl = getRequestBaseUrl(req);
   const config = req.params.config || '';
+  try {
+    const parsed = config ? decodeConfigSegment(config) : {};
+    if (parsed === null) return sendAuthError(res, { status: 401, code: 'invalid_configuration', message: 'Invalid addon configuration.' });
+    authenticateAddonConfig(parsed);
+  } catch (error) {
+    return sendAuthError(res, error);
+  }
   const options = {
     replayFilter: typeof req.query.replayFilter === 'string' ? req.query.replayFilter : undefined,
     languages: typeof req.query.languages === 'string' ? req.query.languages : undefined,
@@ -212,6 +233,10 @@ app.get('/api/options', (req, res) => {
     ]
   });
 });
+
+// Browser account/session APIs must be registered before the catch-all /api
+// resolver proxy below.
+app.use('/api/auth', require('./routes/auth'));
 
 app.get('/api/matches', (req, res) => {
   // Internal/debug surface: the configure page does not use it, but local helper
@@ -732,6 +757,10 @@ app.get('/img', async (req, res) => {
 // ─── Shared safe HTTP client (impit + undici fallback) ───────────────────────
 // Works on Windows, Linux x64/ARM64, Alpine/musl. If impit native binary is
 // absent, all fetches silently use undici — streams continue to work.
+// Account auth APIs and other public /api routes are registered above this
+// point. Every remaining media/resolver API is a playback surface.
+app.use('/api', requirePlaybackGrant);
+app.use('/watch', requirePlaybackGrant);
 app.use(require('./routes/streamProxy'));
 app.use(require('./routes/manifest'));
 app.use(require('./routes/embed'));
@@ -878,12 +907,30 @@ function decodeConfigSegment(configStr) {
     return null;
   }
 }
+
+function forcePrivateNoStore(res) {
+  const originalSetHeader = res.setHeader.bind(res);
+  originalSetHeader('Cache-Control', 'private, no-store');
+  res.setHeader = (name, value) => {
+    if (String(name).toLowerCase() === 'cache-control') {
+      return originalSetHeader('Cache-Control', 'private, no-store');
+    }
+    return originalSetHeader(name, value);
+  };
+}
+
 app.get('/:config?/manifest.json', (req, res, next) => {
   const { manifest } = require('./manifest');
   let parsedConfig = {};
   if (req.params.config) {
     parsedConfig = decodeConfigSegment(req.params.config);
-    if (parsedConfig === null) return next();
+    if (parsedConfig === null) {
+      return sendAuthError(res, {
+        status: AUTH_CONFIG.required ? 401 : 400,
+        code: 'invalid_configuration',
+        message: 'Invalid addon configuration.',
+      });
+    }
   }
 
   // Clone manifest catalogs
@@ -900,6 +947,21 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   }
   if (typeof req.query.ws === 'string' && req.query.ws.trim()) {
     parsedConfig.webStreams = req.query.ws.trim();
+  }
+
+  let authenticatedDevice = null;
+  if (req.params.config) {
+    try {
+      const auth = authenticateAddonConfig(parsedConfig);
+      parsedConfig = auth.config;
+      authenticatedDevice = auth.device;
+    } catch (error) {
+      return sendAuthError(res, error);
+    }
+  } else if (AUTH_CONFIG.required) {
+    // The public bootstrap manifest remains readable so Nuvio can direct users
+    // to /configure, but it cannot be installed as an anonymous working addon.
+    newManifest.behaviorHints = { ...(newManifest.behaviorHints || {}), configurable: true, configurationRequired: true };
   }
 
   // ── Replay collection rows, injected here to stay under the 8kb manifest cap ──
@@ -1011,7 +1073,7 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', authenticatedDevice ? 'private, no-store' : 'public, max-age=300');
   res.send(newManifest);
 });
 
@@ -1028,20 +1090,37 @@ function applyCompactParams(target, query) {
   return out;
 }
 
-// The SDK router JSON.parses the raw config segment. Nuvio installs use a
-// base64url config, so rewrite it to URL-encoded JSON before the SDK sees it.
+// Authenticate and normalize protocol requests before the SDK sees them. The
+// SDK JSON.parses its config segment, while Nuvio installs use base64url JSON.
 app.use((req, res, next) => {
-  const m = req.url.match(/^\/([A-Za-z0-9_-]+)(\/(?:catalog|meta|stream)\/.+)$/);
-  const rest = m ? m[2] : null;
-
-  // Fold the compact personalization params (rf/lg/ws) into whatever config this
-  // request carries, then hand the SDK router a URL-encoded config segment.
-  const hasCompact = typeof req.query.rf === 'string' || typeof req.query.lg === 'string' || typeof req.query.ws === 'string';
-  if (rest && (m[1] && !m[1].startsWith('%7B') || hasCompact)) {
-    const parsed = m[1] ? decodeConfigSegment(m[1]) : {};
-    if (parsed !== null) {
-      req.url = `/${encodeURIComponent(JSON.stringify(applyCompactParams(parsed, req.query)))}${rest}`;
+  const bare = req.url.match(/^\/(catalog|meta|stream)\//);
+  if (bare) {
+    if (AUTH_CONFIG.required) {
+      return sendAuthError(res, { status: 401, code: 'authentication_required', message: 'Install an authenticated addon URL.' });
     }
+    return next();
+  }
+
+  const m = req.url.match(/^\/([^/]+)(\/(?:catalog|meta|stream)\/.+)$/);
+  const rest = m ? m[2] : null;
+  if (!rest) return next();
+
+  const parsed = decodeConfigSegment(m[1]);
+  if (parsed === null) {
+    if (AUTH_CONFIG.required) {
+      return sendAuthError(res, { status: 401, code: 'invalid_configuration', message: 'Invalid addon configuration.' });
+    }
+    return next();
+  }
+
+  try {
+    const withCompact = applyCompactParams(parsed, req.query);
+    const auth = authenticateAddonConfig(withCompact, { mintPlayback: rest.startsWith('/stream/') });
+    req.addonAuth = auth;
+    if (auth.device) forcePrivateNoStore(res);
+    req.url = `/${encodeURIComponent(JSON.stringify(auth.config))}${rest}`;
+  } catch (error) {
+    return sendAuthError(res, error);
   }
   next();
 });
@@ -1075,7 +1154,9 @@ app.get([
     const result = await handleCatalog(type, id, extra, config);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    if (result && Number.isInteger(result.cacheMaxAge)) {
+    if (req.addonAuth && req.addonAuth.device) {
+      forcePrivateNoStore(res);
+    } else if (result && Number.isInteger(result.cacheMaxAge)) {
       const swr = Number.isInteger(result.staleRevalidate) ? result.staleRevalidate : result.cacheMaxAge * 2;
       res.setHeader('Cache-Control', `max-age=${result.cacheMaxAge}, stale-while-revalidate=${swr}, public`);
     }
