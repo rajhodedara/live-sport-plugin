@@ -14,7 +14,34 @@ const assets = {
 export function serveStatic(pathname, res) {
   const asset = assets[pathname]
   if (!asset) return false
-  res.writeHead(200, { 'Content-Type': asset[1], 'Cache-Control': 'no-store' })
-  createReadStream(join(root, asset[0])).pipe(res)
+  const stream = createReadStream(join(root, asset[0]))
+  const stop = () => stream.destroy()
+  res.once('close', stop)
+  res.once('error', stop)
+  stream.once('close', () => {
+    res.removeListener('close', stop)
+    res.removeListener('error', stop)
+  })
+  stream.once('error', (err) => {
+    if (res.destroyed || res.writableEnded) return
+    if (res.headersSent) {
+      res.destroy()
+      return
+    }
+    const missing = err.code === 'ENOENT' || err.code === 'ENOTDIR'
+    res.writeHead(missing ? 404 : 500, {
+      'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store',
+    })
+    res.end(missing ? 'not found' : 'unable to read asset')
+  })
+  stream.once('open', () => {
+    if (res.destroyed || res.writableEnded) {
+      stop()
+      return
+    }
+    res.writeHead(200, { 'Content-Type': asset[1], 'Cache-Control': 'no-store' })
+    stream.pipe(res)
+  })
+  if (res.destroyed || res.writableEnded) stop()
   return true
 }
