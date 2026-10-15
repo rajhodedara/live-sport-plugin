@@ -101,12 +101,47 @@ const MAX_REDIRECT_HOPS = 5;
  * @param {string} url
  * @param {object} opts   - { method, headers, body, signal, timeoutMs, attempts, proxyUrl }
  *   attempts: how many times to try the impit path before falling back to
- *   undici (default 3). Callers that run their own retry policy should pass 1,
- *   so the two layers do not multiply: three impit tries at a 5s timeout plus
- *   backoff is ~17s inside a call the caller believes is bounded by timeoutMs.
+ *   undici (default 3). timeoutMs is one total budget across headers, body,
+ *   retries, backoff and fallback. External retry policies still add calls;
+ *   those callers should pass attempts: 1 and retain their own outer deadline.
  * @returns {{ ok, status, text: () => string, json: () => object }}
  */
 async function safeFetch(url, opts = {}) {
+  const { signal: callerSignal, timeoutMs = 15000 } = opts;
+  const abortReason = () => callerSignal.reason instanceof Error ? callerSignal.reason :
+    Object.assign(new Error('safeFetch aborted'), { name: 'AbortError', cause: callerSignal.reason });
+  if (callerSignal?.aborted) throw abortReason();
+  const controller = new AbortController();
+  const deadlineAt = performance.now() + timeoutMs;
+  let rejectCancelled;
+  const cancelled = new Promise((_, reject) => { rejectCancelled = reject; });
+  const cancel = reason => { controller.abort(reason); rejectCancelled(reason); };
+  const onCallerAbort = () => cancel(abortReason());
+  callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+  const timer = setTimeout(() => cancel(Object.assign(
+    new Error(`safeFetch timeout ${timeoutMs}ms`), { name: 'TimeoutError', code: 'ETIMEDOUT' }
+  )), timeoutMs);
+  try {
+    return await Promise.race([
+      fetchWithinDeadline(url, { ...opts, signal: controller.signal }, deadlineAt),
+      cancelled,
+    ]);
+  } finally {
+    clearTimeout(timer);
+    callerSignal?.removeEventListener('abort', onCallerAbort);
+  }
+}
+
+function abortableDelay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const onAbort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+async function fetchWithinDeadline(url, opts, deadlineAt) {
   const { signal, timeoutMs = 15000, attempts = 3 } = opts;
   // Method, headers and body are reassigned per redirect hop on the undici path
   // (see the redirect loop below), so they cannot be destructured as const.
@@ -135,15 +170,12 @@ async function safeFetch(url, opts = {}) {
     let lastErr = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // The caller gave up (deadline hit upstream); stop burning its budget.
-      if (signal && signal.aborted) throw Object.assign(new Error('aborted before impit attempt'), { name: 'AbortError' });
-      let timer = null;
+      if (signal.aborted) throw signal.reason;
       try {
-        const res = await Promise.race([
-          impit.fetch(url, { method, headers, body }),
-          new Promise((_, rej) => {
-            timer = setTimeout(() => rej(new Error(`impit timeout ${timeoutMs}ms`)), timeoutMs);
-          }),
-        ]);
+        const res = await impit.fetch(url, {
+          method, headers, body, signal,
+          timeout: Math.max(1, Math.ceil(deadlineAt - performance.now())),
+        });
         const buf = await res.arrayBuffer();
         if (res.status === 400 && url.includes('ok.ru')) {
            throw new Error('ok.ru blocked impit');
@@ -172,7 +204,8 @@ async function safeFetch(url, opts = {}) {
           console.warn(`[impitClient] impit got 403, trying undici once for: ${url.slice(0, 90)}`);
           try {
             return await undiciPath(method, headers, body, url, signal, timeoutMs);
-          } catch (_) {
+          } catch (err) {
+            if (signal.aborted) throw signal.reason || err;
             return impit403;
           }
         }
@@ -185,18 +218,15 @@ async function safeFetch(url, opts = {}) {
           arrayBuffer: async () => buf,
         };
       } catch (impitErr) {
+        if (signal.aborted) throw signal.reason || impitErr;
         lastErr = impitErr;
         const errMsg = String(impitErr);
         if (errMsg.includes('InvalidCertificate') || errMsg.includes('UnknownIssuer') || errMsg.includes('certificate has expired')) {
            break;
         }
         if (attempt < maxAttempts) {
-           await new Promise(r => setTimeout(r, 800 * attempt));
+           await abortableDelay(800 * attempt, signal);
         }
-      } finally {
-        // Always clear the timeout so a fast response does not leave a pending
-        // timer holding the event loop (timer churn under load).
-        if (timer) clearTimeout(timer);
       }
     }
     if (proxyUrl) {
@@ -231,12 +261,11 @@ async function safeFetch(url, opts = {}) {
   //   - the hop count is bounded, and the timeoutMs budget covers the WHOLE
   //     chain (each hop only gets the time left), so a redirect loop cannot
   //     multiply the caller's deadline.
-  const deadlineAt = Date.now() + timeoutMs;
   let currentUrl = url;
   let res;
   for (let hop = 0; ; hop++) {
-    const remainingMs = deadlineAt - Date.now();
-    if (remainingMs <= 0) throw new Error(`undici timeout ${timeoutMs}ms (redirect chain)`);
+    const remainingMs = Math.ceil(deadlineAt - performance.now());
+    if (remainingMs <= 0) throw Object.assign(new Error(`safeFetch timeout ${timeoutMs}ms (redirect chain)`), { name: 'TimeoutError', code: 'ETIMEDOUT' });
     res = await undiciRequest(currentUrl, {
       method,
       headers,

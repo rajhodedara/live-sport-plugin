@@ -86,6 +86,7 @@ function playlistHasContent(text) {
 // Fetch + validate the upstream manifest. Throws on failure so coalesced
 // waiters share the same outcome; successful bodies are cached by the caller.
 async function fetchUpstreamManifest(targetUrl, referer, origin) {
+  const deadlineAt = performance.now() + 10000;
   const headers = {
     'Referer': referer,
     'Origin': origin,
@@ -94,7 +95,9 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
   // _safeFetch: impit (browser TLS fingerprint) with automatic undici fallback.
   // A hard 10 s timeout ensures a hung upstream can never hold the viewer's poll.
   const attempt = async () => {
-    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000 });
+    const remainingMs = Math.ceil(deadlineAt - performance.now());
+    if (remainingMs <= 0) throw Object.assign(new Error('Manifest timeout 10000ms'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+    const result = await _safeFetch(targetUrl, { headers, timeoutMs: remainingMs });
     if (!result.ok) {
       // Carry the upstream status so the caller can tell "the token/CDN said no"
       // apart from "our proxy is broken" — they need different HTTP responses.
@@ -120,6 +123,9 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
     );
     const isTransient = status === 500 || status === 502 || status === 503 || status === 504 || isNetworkTransient;
     if (!isTransient) throw err;
+    // Backoff and the retry share the original manifest budget. A depleted
+    // deadline is not a new network glitch to retry for another ten seconds.
+    if (deadlineAt - performance.now() <= 400) throw err;
     await new Promise((r) => setTimeout(r, 400));
     console.warn(`[ManifestProxy] Upstream ${status || err.code || 'network glitch'} — retrying once: ${String(targetUrl).slice(0, 90)}`);
     return await attempt(); // a second failure propagates with statusCode intact
