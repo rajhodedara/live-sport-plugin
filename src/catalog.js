@@ -792,17 +792,18 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
 // personalized request hits the VPS. This bounded in-process LRU absorbs
 // repeat clicks for the same match across both workers, solving the main cause
 // of perceived "meta loading" slowness.
-// Key: id + timezone + replayFilter (the only config fields that affect meta output).
+// Key: response type + id + timezone + replayFilter. Replay hubs always
+// produce series responses; individual matches vary by the requested type.
 // TTL: 30s for LIVE (so score changes propagate within 30s),
 //       5min for upcoming / 24-7 networks,
 //      30min for replay hubs (static archive content).
 const META_CACHE_MAX = 1000;
 const _metaCache = new Map(); // key → { data, expiresAt }
 
-function _metaCacheKey(id, config) {
+function _metaCacheKey(id, config, responseType) {
   const tz = (config && config.timezone) || '';
   const rf = (config && config.replayFilter) || '';
-  return `${id}|${tz}|${rf}`;
+  return JSON.stringify([responseType, id, tz, rf]);
 }
 
 function _metaCacheGet(key) {
@@ -894,7 +895,7 @@ async function handleCatalog(type, id, extra, config) {
 
 async function buildReplayHubMeta(id, config = {}) {
   // Replay hubs generate 2.5 MB+ JSON payloads — cache them for 30 minutes.
-  const _rhmCacheKey = _metaCacheKey(id, config);
+  const _rhmCacheKey = _metaCacheKey(id, config, 'series');
   const _rhmCached = _metaCacheGet(_rhmCacheKey);
   if (_rhmCached) return _rhmCached;
 
@@ -1512,7 +1513,8 @@ async function handleMeta(type, id, config) {
   // Cloudflare bypasses its edge cache for /:config/meta/... URLs (unique per
   // user), so every personalized click hits the VPS. This in-process LRU means
   // repeat requests for the same match return in < 5ms instead of ~800ms.
-  const _hmCacheKey = _metaCacheKey(id, config);
+  const effectiveType = type === 'series' ? 'series' : 'tv';
+  const _hmCacheKey = _metaCacheKey(id, config, id.startsWith('nuvio_sport_replay_') ? 'series' : effectiveType);
   const _hmCached = _metaCacheGet(_hmCacheKey);
   if (_hmCached) return _hmCached;
 
@@ -1570,7 +1572,6 @@ async function handleMeta(type, id, config) {
     }
   } catch (_) {}
 
-  const effectiveType = type === 'series' ? 'series' : 'tv';
   const live = isMatchLive(match);
 
   // TTL: live 30s (score can change), upcoming/network 5min, everything else 10min
