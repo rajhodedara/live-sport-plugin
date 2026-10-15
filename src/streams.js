@@ -418,6 +418,17 @@ function repairRefererFor(targetUrl) {
   return `https://${host}/`;
 }
 
+// Preserve provider request headers; canonicalize known names once.
+function verificationHeaders(stream) {
+  const canonical = new Map([
+    ['referer', 'Referer'], ['origin', 'Origin'], ['user-agent', 'User-Agent'],
+    ['authorization', 'Authorization'], ['cookie', 'Cookie'],
+  ]);
+  const request = stream.behaviorHints?.proxyHeaders?.request || {};
+  return Object.fromEntries(Object.entries(request).map(([key, value]) =>
+    [canonical.get(key.toLowerCase()) || key, value]));
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
@@ -438,18 +449,20 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
     }
 
     try {
-      if (!referer && s.behaviorHints && s.behaviorHints.proxyHeaders && s.behaviorHints.proxyHeaders.request) {
-        referer = s.behaviorHints.proxyHeaders.request.Referer || '';
-      }
+      const providerHeaders = verificationHeaders(s);
+      if (!referer) referer = providerHeaders.Referer || '';
+      if (!origin) origin = providerHeaders.Origin || '';
       if (!origin && referer) {
         try { origin = new URL(referer).origin; } catch (_) {}
       }
 
       let res;
       let bodySample = '';
+      let repairedHeaders = null;
 
       const reqHeaders = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        ...providerHeaders,
         'Referer': referer
       };
       if (origin) reqHeaders['Origin'] = origin;
@@ -526,16 +539,20 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
             const r2 = await _safeFetch(targetUrl, {
               method: 'GET',
               headers: {
-                'User-Agent': reqHeaders['User-Agent'],
+                ...reqHeaders,
                 'Referer': guess,
-                'Origin': guess.replace(/\/$/, ''),
+                'Origin': new URL(guess).origin,
               },
               timeoutMs: VERIFY_TIMEOUT_MS,
               attempts: 1,
             });
             res = { status: r2.status };
             bodySample = await r2.text();
-            if (res.status === 200) referer = guess; // so a later noteFailure/keep decision is accurate
+            if (res.status === 200) {
+              referer = guess;
+              origin = new URL(guess).origin;
+              repairedHeaders = { ...reqHeaders, Referer: referer, Origin: origin };
+            }
           }
         } catch (_) { /* fall through to the dead-stream handling below */ }
       }
@@ -562,6 +579,22 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
+      }
+
+      // Persist only an accepted repair, after playlist validation.
+      if (repairedHeaders) {
+        if (parseManifestProxyUrl(s.url)) {
+          const proxyUrl = new URL(s.url, 'http://localhost');
+          proxyUrl.searchParams.set('referer', referer);
+          proxyUrl.searchParams.set('origin', origin);
+          s.url = /^[a-z][a-z0-9+.-]*:/i.test(s.url)
+            ? proxyUrl.toString() : proxyUrl.pathname + proxyUrl.search + proxyUrl.hash;
+        }
+        const hints = s.behaviorHints || {};
+        s.behaviorHints = {
+          ...hints,
+          proxyHeaders: { ...hints.proxyHeaders, request: repairedHeaders },
+        };
       }
 
       // Parse Master Playlist quality, framerate (FPS), and bitrate in real-time
