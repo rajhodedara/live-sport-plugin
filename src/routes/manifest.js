@@ -26,9 +26,12 @@ router.get('/api/manifest', async (req, res) => {
 
   // Playlist-only proxy (same as WatchFooty / Streamed.pk .ts): this host fetches
   // the m3u8 with the CDN Referer, then the player pulls every media byte from the CDN.
-  const cacheKey = `${targetUrl}|${referer}|${origin}`;
   // Recovery key for this stream, if the URL was emitted by our own resolver.
   const rck = readRck(req);
+  // Recovery can select another upstream URL, and rewritten child playlists
+  // carry this key. Positive/negative entries and in-flight work must therefore
+  // share only within the same recovery identity. Keep tuple boundaries explicit.
+  const cacheKey = JSON.stringify([targetUrl, referer, origin, rck || '']);
   const rckSuffix = rck ? '&rck=' + encodeURIComponent(rck) : '';
   const entry = manifestCacheGet(cacheKey);
   if (entry && entry.negative) {

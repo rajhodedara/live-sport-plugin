@@ -11,7 +11,8 @@ const { safeFetch: _safeFetch } = require('./impitClient');
 // ─── Manifest proxy: short-TTL cache + request coalescing ───────────────────
 // Live HLS players reload /api/manifest every 2-6 s per viewer. A validated
 // short-TTL cache removes per-viewer TLS handshakes and repeated upstream
-// fetches. Key = url|referer|origin. Only bodies containing #EXT are cached.
+// fetches. The route keys cache/in-flight work by URL, Referer, Origin and
+// recovery identity (rck). Only bodies containing #EXT are cached.
 const MANIFEST_TTL_MS = 3000;
 const MANIFEST_CACHE_MAX = 100;
 const MANIFEST_NEGATIVE_TTL_MS = 15 * 1000;
