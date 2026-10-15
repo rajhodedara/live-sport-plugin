@@ -68,7 +68,7 @@ export async function route(req, res) {
       }
       if (req.method === 'GET') {
         if (searchParams.get('claim') === '1') {
-          json(res, 200, cacheClaim(key, Number(searchParams.get('ttl')) || undefined))
+          json(res, 200, cacheClaim(key, Number(searchParams.get('ttl')) || undefined, searchParams.get('fenced') === '1'))
           return
         }
         json(res, 200, cacheGet(key))
@@ -86,11 +86,11 @@ export async function route(req, res) {
           json(res, 200, cachePrune(body.activeIds))
           return
         }
-        json(res, 200, cacheSet(key, body ? body.streams : [], body ? body.ttlMs : undefined, body ? body.status : undefined))
+        json(res, 200, cacheSet(key, body ? body.streams : [], body ? body.ttlMs : undefined, body ? body.status : undefined, body ? body.ownerToken : undefined))
         return
       }
       if (req.method === 'DELETE') {
-        json(res, 200, cacheDelete(key))
+        json(res, 200, cacheDelete(key, searchParams.has('ownerToken') ? searchParams.get('ownerToken') : undefined))
         return
       }
       json(res, 405, { error: 'method not allowed' })
