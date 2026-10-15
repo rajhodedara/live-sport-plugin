@@ -160,6 +160,7 @@ async function safeFetch(url, opts = {}) {
           const impit403 = {
             ok: false,
             status: res.status,
+            url: res.url || url,
             headers: res.headers,
             text: async () => Buffer.from(buf).toString('utf8'),
             json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
@@ -179,6 +180,7 @@ async function safeFetch(url, opts = {}) {
         return {
           ok: res.status >= 200 && res.status < 300,
           status: res.status,
+          url: res.url || url,
           headers: res.headers,
           text: async () => Buffer.from(buf).toString('utf8'),
           json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
@@ -280,6 +282,7 @@ async function safeFetch(url, opts = {}) {
   return {
     ok: res.statusCode >= 200 && res.statusCode < 300,
     status: res.statusCode,
+    url: currentUrl,
     headers: res.headers,
     text: async () => Buffer.from(buf).toString('utf8'),
     json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
