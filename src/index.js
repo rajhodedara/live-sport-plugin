@@ -246,6 +246,7 @@ app.get('/api/matches', (req, res) => {
 // /img/placeholder?...  → generated poster card. Replaces the external
 //                         placehold.co dependency.
 const imageService = require('./services/ImageService');
+const { usesLiveEventArtwork } = require('./services/LiveEventArtwork');
 const { resolveEmbedBase } = require('./services/EmbedBase');
 
 /**
@@ -376,6 +377,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   const qs = (v) => (typeof v === 'string' ? v.trim() : '');
   const query = req.query || {};
   const shape = qs(query.shape) === 'poster' ? 'poster' : 'landscape';
+  const editorialCard = usesLiveEventArtwork({ artwork: qs(query.art), category: qs(query.cat), status: qs(query.st), shape });
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -384,7 +386,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   const memoKey = [
     qs(query.cat), qs(query.title), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
     qs(query.lg), qs(query.lb), qs(query.ch), qs(query.cb), qs(query.cm),
-    qs(query.st), qs(query.tm), qs(query.sc), shape
+    qs(query.st), qs(query.tm), qs(query.sc), shape, qs(query.art)
   ].join('|');
 
   const cached = matchCardMemo.get(memoKey);
@@ -542,9 +544,12 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
     return { badge1, badge2, leagueBadge, channelBadge, channelMark };
   };
 
-  const badges = await resolveAll();
+  const badges = editorialCard
+    ? { badge1: null, badge2: null, leagueBadge: null, channelBadge: null, channelMark: null }
+    : await resolveAll();
 
   const renderCard = (b) => imageService.generateMatchCardSvg({
+    artwork: qs(query.art),
     category: qs(query.cat),
     title: qs(query.title),
     team1: qs(query.t1),
@@ -612,7 +617,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
   // so they memoize as-is.
   const hasNameSlot = !!(qs(query.t1) || qs(query.t2) || qs(query.title));
   const hasArtwork = !!(badgesToUse.badge1 || badgesToUse.badge2 || badgesToUse.leagueBadge || badgesToUse.channelBadge || badgesToUse.channelMark);
-  const memoWorthy = droppedForSize || !hasNameSlot || hasArtwork;
+  const memoWorthy = editorialCard || droppedForSize || !hasNameSlot || hasArtwork;
 
   if (matchCardMemo.size >= MATCH_CARD_MEMO_MAX) matchCardMemo.clear();
 
