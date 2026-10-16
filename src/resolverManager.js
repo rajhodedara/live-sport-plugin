@@ -68,6 +68,8 @@ async function spawnResolver() {
 
   // Check if an existing healthy resolver is already listening (e.g. from reload or prior worker)
   const alive = await isResolverAlive(RESOLVER_PORT);
+  // Shutdown may have started while the asynchronous health probe was pending.
+  if (isShuttingDown) return;
   if (alive) {
     console.log(`[Resolver] Verified healthy stream resolver active on 127.0.0.1:${RESOLVER_PORT}`);
     return;
