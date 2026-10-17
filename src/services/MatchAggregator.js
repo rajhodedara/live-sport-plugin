@@ -40,26 +40,6 @@ function _parseEventDate(raw) {
 }
 
 /**
- * Strips diacritics and maps non-combining Latin characters to plain ASCII
- * so international team spellings (e.g. "Lech Poznań" vs "Lech Poznan",
- * "Beşiktaş" vs "Besiktas", "Ferencváros" vs "Ferencvaros") merge reliably.
- */
-function _foldText(s) {
-  if (s == null) return '';
-  return String(s)
-    .replace(/[đĐ]/g, 'dj')
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[łŁ]/g, 'l')
-    .replace(/[øØ]/g, 'o')
-    .replace(/[æÆ]/g, 'ae')
-    .replace(/[œŒ]/g, 'oe')
-    .replace(/[ß]/g, 'ss')
-    .replace(/[ðÐ]/g, 'd')
-    .replace(/[þÞ]/g, 'th');
-}
-
-/**
  * Normalizes team/event names by collapsing well-known multi-word clubs and
  * popular abbreviations into single collision-safe compound tokens so that
  * Jaccard / subset matching cannot accidentally merge different teams that share
@@ -87,30 +67,11 @@ function _compoundify(t) {
     [/\bbayern(\s*m[uü]nchen)?\b|\bbayern\s*munich\b/g, 'bayernmunich'],
     [/\batl(etico)?\s*madrid\b/g, 'atleticomadrid'],
     [/\breal\s*madrid\b|\br\s*madrid\b/g, 'realmadrid'],
-    // Basketball Milano (must precede generic Milan rule)
-    [/\bolimpia\s*milan[o]?\b/g, 'olimpiamilano'],
     // inter variants must precede the bare-inter rule below
     [/\binter\s*miami\b/g, 'intermiami'],
     [/\binter\s*turku\b/g, 'interturku'],
     [/\binter(\s*milan)?\b|\binternazionale\b/g, 'intermilan'],
-    [/\b(ac\s*)?milan\b/g, 'acmilan'],
-    [/\bolympique\s*(de\s*)?lyonn?ais\b|\blyon\b/g, 'lyon'],
-    [/\bolympique\s*(de\s*)?marseille\b|\bmarseille\b/g, 'marseille'],
-    [/\bsparta\s*prah[ae]\b|\bsparta\s*prague\b/g, 'spartaprague'],
-    [/\bslavia\s*prah[ae]\b|\bslavia\s*prague\b/g, 'slaviaprague'],
-    [/\baz(\s*alkmaar)?\b/g, 'azalkmaar'],
-    [/\bhapoel\s*be['’]?er(\s*sheva)?\b/g, 'hapoelbeersheva'],
-    [/\brb\s*salzburg\b|\bred\s*bull\s*salzburg\b|\bsalzburg\b/g, 'salzburg'],
-    [/\bsporting\s*gijon\b/g, 'sportinggijon'],
-    [/\bsporting\s*(?:cp|clube\s*de\s*portugal|lisbon)\b/g, 'sportingcp'],
-    [/\bathletic\s*(club|bilbao)\b/g, 'athleticbilbao'],
-    [/\bbayer(\s*04)?\s*leverkusen\b/g, 'bayerleverkusen'],
-    [/\bborussia\s*m[oö]nchengladbach\b|\bm['’]?gladbach\b/g, 'monchengladbach'],
-    [/\bpsv(\s*eindhoven)?\b/g, 'psveindhoven'],
-    [/\bfeyenoord(\s*rotterdam)?\b/g, 'feyenoord'],
-    [/\b(red\s*star(\s*belgrade)?|crvena\s*zvezda)\b/g, 'crvenazvezda'],
-    [/\bshakhtar(\s*donetsk)?\b/g, 'shakhtardonetsk'],
-    [/\bdynamo\s*k[yi]ev\b/g, 'dynamokyiv'],
+    [/\bac\s*milan\b/g, 'acmilan'],
     [/\bborussia\s*dortmund\b|\bbvb\b|\bdortmund\b/g, 'borussiadortmund'],
     [/\brb\s*leipzig\b/g, 'rbleipzig'],
     [/\baston\s*villa\b/g, 'astonvilla'],
@@ -166,19 +127,19 @@ function _compoundify(t) {
     [/\bdenver\s*nuggets\b|\bnuggets\b/g, 'denvernuggets'],
     [/\bmilwaukee\s*bucks\b|\bbucks\b/g, 'milwaukeebucks'],
   ];
-  let r = _foldText(t).toLowerCase();
+  let r = t.toLowerCase();
   for (const [regex, rep] of aliases) r = r.replace(regex, rep);
   return r;
 }
 
 function _stripNoise(t) {
-  return _foldText(t)
+  return t
     .replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\b(live|stream|streaming|free|hd|fhd|4k|hq|web|online|tv|match|fixture|round|week|day|game|league|cup|tournament|season|fc|cf|sc|cd|ca|afc|fk|sk|bk|rsc|vfb|tsv|tsg)\b/gi, ' ');
+    .replace(/\b(live|stream|streaming|free|hd|fhd|4k|hq|web|online|tv|match|fixture|round|week|day|game|league|cup|tournament|season|fc|cf|sc|cd|ca|afc|fk|sk|bk|rsc|vfb|tsv)\b/gi, ' ');
 }
 
 function _tokenize(t) {
-  return _foldText(t).replace(/[^a-z0-9]/g, ' ').split(/\s+/)
+  return t.replace(/[^a-z0-9]/g, ' ').split(/\s+/)
     .filter(w => w.length > 2)
     .map(w => (w.length > 3 && w.endsWith('s')) ? w.slice(0, -1) : w); // naive singular: newells->newell, sports->sport
 }
@@ -207,7 +168,7 @@ function _teamsSimilar(a, b) {
  * Returns null if the title doesn't look like a "team1 vs team2" fixture.
  */
 function _tryExtractTeams(title) {
-  const clean = _compoundify(_stripNoise(_foldText(title)));
+  const clean = _compoundify(_stripNoise(title));
   const parts = clean.split(/\s(?:vs?\.?|@|[-–—])\s/i);
   if (parts.length === 2) {
     return [_tokenize(parts[0]).join(' '), _tokenize(parts[1]).join(' ')];
@@ -235,7 +196,7 @@ class MatchAggregator {
    * of inside every comparison removes ~50x of repeated work on large catalogs.
    */
   _precompute(e) {
-    const title = e && e.title ? _foldText(e.title) : '';
+    const title = e && e.title ? String(e.title) : '';
     const id = e && e.id != null ? String(e.id) : '';
     const normalized = _compoundify(_stripNoise(title));
     return {
