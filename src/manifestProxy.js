@@ -85,7 +85,7 @@ function playlistHasContent(text) {
 
 // Fetch + validate the upstream manifest. Throws on failure so coalesced
 // waiters share the same outcome; successful bodies are cached by the caller.
-async function fetchUpstreamManifest(targetUrl, referer, origin) {
+async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseUrl = false } = {}) {
   const headers = {
     'Referer': referer,
     'Origin': origin,
@@ -102,7 +102,10 @@ async function fetchUpstreamManifest(targetUrl, referer, origin) {
       err.statusCode = result.status;
       throw err;
     }
-    return await result.text();
+    const body = await result.text();
+    // Keep the historical string API for callers that do not need metadata.
+    // The route must resolve HLS references against the final redirect URL.
+    return withResponseUrl ? { body, url: result.url || targetUrl } : body;
   };
 
   try {

@@ -59,9 +59,9 @@ router.get('/api/manifest', async (req, res) => {
           }
         }
 
-        let out;
+        let upstream;
         try {
-          out = await fetchUpstreamManifest(effectiveUrl, referer, origin);
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
         } catch (firstErr) {
           const fresh = (isExpiryStatus(firstErr) && rck) ? await attemptRemint(rck, effectiveUrl || targetUrl) : null;
           if (!fresh || fresh === effectiveUrl) throw firstErr;
@@ -74,8 +74,10 @@ router.get('/api/manifest', async (req, res) => {
           // Preserve the variant the player asked for (see mergeRemintedUrl).
           effectiveUrl = mergeRemintedUrl(targetUrl, fresh, rck);
           reminted = true;
-          out = await fetchUpstreamManifest(effectiveUrl, referer, origin);
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
         }
+        const out = upstream.body;
+        effectiveUrl = upstream.url || effectiveUrl;
         if (!out.includes('#EXT')) {
           console.error('[ManifestProxy] Upstream returned non-m3u8 body for', effectiveUrl);
           throw new Error('Upstream returned non-m3u8 body');
@@ -121,15 +123,25 @@ router.get('/api/manifest', async (req, res) => {
           if (!l) return resultLine;
           
           if (l.startsWith('#')) {
-              // Handle EXT-X-MAP:URI="relative.mp4"
-              if (l.startsWith('#EXT-X-MAP:')) {
-                  const uriMatch = l.match(/URI="([^"]+)"/);
-                  if (uriMatch) {
-                      try {
-                          const absUri = new URL(uriMatch[1], effectiveUrl).toString();
-                          resultLine = l.replace(uriMatch[1], absUri);
-                      } catch(e) {}
-                  }
+              // URI attributes resolve against the upstream playlist, not this
+              // addon's /api/manifest URL. Parse whole attributes so commas in
+              // quoted NAME/VALUE strings cannot be mistaken for another URI.
+              if (/^#EXT-X-(?:KEY|SESSION-KEY|MEDIA|I-FRAME-STREAM-INF|MAP|SESSION-DATA):/.test(l)) {
+                  const colon = line.indexOf(':');
+                  const attributes = line.slice(colon + 1).replace(
+                      /(?:^|,)([A-Z0-9-]+)=("[^"]*"|[^,]*)/g,
+                      (attribute, name, value) => {
+                          if (name !== 'URI' || !/^".+"$/.test(value)) return attribute;
+                          try {
+                              const uri = new URL(value.slice(1, -1), effectiveUrl);
+                              // Preserve non-HTTP key systems (e.g. FairPlay),
+                              // embedded data and provider-owned token policy.
+                              if (uri.protocol !== 'http:' && uri.protocol !== 'https:') return attribute;
+                              return attribute.replace(value, '"' + uri.toString() + '"');
+                          } catch (_) { return attribute; }
+                      }
+                  );
+                  resultLine = line.slice(0, colon + 1) + attributes;
               }
               return resultLine;
           }
