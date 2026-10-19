@@ -7,6 +7,7 @@ const { parseTimezone } = require('./timezone');
 const { getMatchTier } = require('./services/MainstreamRankingService');
 const { extractTeamsFromTitle } = require('./services/TeamNameExtractor');
 const { filterReplayMatches } = require('./services/ReplayFilterService');
+const { usesLiveEventArtwork } = require('./services/LiveEventArtwork');
 
 function getKickoff(d) {
   if (!d) return 0;
@@ -380,6 +381,9 @@ function normalizeImageUrl(url, defaultHost = '') {
 function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   const isLive = isMatchLive(match);
   const isReplay = !isLive && isReplayMatch(match);
+  const artworkStatus = isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming'));
+  const eventArtwork = getKickoff(match.date) > 0 && !['finished', 'ended', 'postponed', 'cancelled'].includes(match.status)
+    && usesLiveEventArtwork({ category: match.category, status: artworkStatus, shape: reqType === 'series' ? 'poster' : 'landscape', artwork: 'event-v3' });
   const titleStr = match.title || (isLive ? 'Live Match' : 'Upcoming Match');
   const safeTitle = encodeURIComponent(Array.from(titleStr).slice(0, 30).join(''));
   
@@ -495,8 +499,8 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     providerThumb = null; // Discard the ugly provider thumb
   }
 
-  const needsLogo = !providerLogo && !providerTeamLogo && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
-  const needsPoster = !providerPoster && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
+  const needsLogo = !eventArtwork && !providerLogo && !providerTeamLogo && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
+  const needsPoster = !eventArtwork && !providerPoster && (!providerThumb || isChannelThumbnail || isMatchup || isMotorsport);
 
   // A provider thumbnail that is really a crest/icon (rather than landscape
   // artwork) cannot serve as a poster; it only suits the embedded single-crest
@@ -570,7 +574,8 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   }
 
   // ─── Resolve Effective Poster ───
-  // Precedence: PROVIDER artwork wins outright. Anything the provider gives us
+  // Dated tennis/golf landscape events opt into the event-first design below.
+  // Otherwise PROVIDER artwork wins outright. Anything the provider gives us
   // (poster, thumbnail, logo) is used as-is. Only when the provider supplies no
   // artwork at all do we fall back to the composed cinematic card — and our own
   // crest/league/channel lookups are fed INTO that card as ingredients rather
@@ -580,11 +585,11 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // card with the team crests and show the channel logo in the corner.
   let poster;
 
-  if (providerPoster) {
+  if (providerPoster && !eventArtwork) {
     poster = buildImg(providerPoster, posterText, color) || fallbackPoster;
-  } else if (providerThumb && !isMatchup && !isChannelThumbnail) {
+  } else if (providerThumb && !isMatchup && !isChannelThumbnail && !eventArtwork) {
     poster = buildImg(providerThumb, posterText, color, isThumbLogo) || fallbackPoster;
-  } else if (providerLogo && !isMatchup) {
+  } else if (providerLogo && !isMatchup && !eventArtwork) {
     poster = buildImg(providerLogo, posterText, color, true) || fallbackPoster;
   } else {
     // No provider artwork at all (typical for 24/7 networks from CdnLive and
@@ -596,19 +601,20 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     const channelMark = broadcasterLogo || channelLogo;
 
     poster = imageService.matchCardUrl(BASE_URL, {
+      artwork: eventArtwork ? 'event-v3' : null,
       category: match.category,
       title: match.title,
       team1: team1Name,
       team2: team2Name,
       // For channel entries the logo becomes the hero mark.
-      badge1: isChannelLike ? null : (providerTeamLogo || fallbackTeamLogo),
-      badge2: isChannelLike ? null : (providerTeamLogo2 || fallbackTeamLogo2),
-      channelMark: isChannelLike ? channelMark : null,
+      badge1: eventArtwork || isChannelLike ? null : (providerTeamLogo || fallbackTeamLogo),
+      badge2: eventArtwork || isChannelLike ? null : (providerTeamLogo2 || fallbackTeamLogo2),
+      channelMark: eventArtwork ? null : (isChannelLike ? channelMark : null),
       league: match.league,
-      leagueBadge: leagueEmblem,
-      channel: broadcasterName || (isChannelLike ? match.title : null),
-      channelBadge: channelMark,
-      status: isReplay ? 'replay' : (isLive ? 'live' : ((match.category === 'networks' || !match.date || match.date === '0') ? '247' : 'upcoming')),
+      leagueBadge: eventArtwork ? null : leagueEmblem,
+      channel: broadcasterName || (eventArtwork && Array.isArray(match.sources) ? (match.sources.find(source => source && source.channelName) || {}).channelName : null) || (isChannelLike ? match.title : null),
+      channelBadge: eventArtwork ? null : channelMark,
+      status: artworkStatus,
       score: match.score,
       time: formatKickoffForCard(match.date, config),
       shape: reqType === 'series' ? 'poster' : 'landscape'

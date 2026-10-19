@@ -10,6 +10,8 @@
  * clean, balanced, aesthetic streaming platform designs.
  */
 
+const { usesLiveEventArtwork } = require('./LiveEventArtwork');
+
 const SPORT_CONFIGS = {
   football: {
     title: 'FOOTBALL',
@@ -749,7 +751,79 @@ function generateCombatCardSvg(spec, w, h, isPoster) {
   </svg>`;
 }
 
+function generateLiveEventCardSvg(spec) {
+  const golf = String(spec.category).trim().toLowerCase() === 'golf';
+  const live = String(spec.status).trim().toLowerCase() === 'live';
+  const clean = value => String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+  const fit = (value, size, width = 720) => {
+    const chars = Array.from(clean(value).toUpperCase());
+    const fs = Math.max(Math.min(size, 30), Math.min(size, Math.floor(width / Math.max(1, chars.length))));
+    const cap = Math.max(1, Math.floor(width / fs));
+    const label = chars.length > cap ? chars.slice(0, cap - 1).join('') + '…' : chars.join('');
+    return { label, fs };
+  };
+  const text = (x, y, value, size = 24, color = '#f7f9fc', weight = 600, width = 720) => {
+    const fitted = fit(value, size, width);
+    return '<text x="' + x + '" y="' + y + '" font-family="Arial,Helvetica,sans-serif" font-size="' + fitted.fs + '" font-weight="' + weight + '" fill="' + color + '">' + escapeXml(fitted.label) + '</text>';
+  };
+  // Keep every name token, including compound surnames. Never select only the last word.
+  const player = (name, givenY, mainY, size) => {
+    const words = clean(name).split(' ');
+    if (words.length < 2) return text(34, mainY, name, size, '#ffffff', 700);
+    return text(34, givenY, words[0], 20, '#a9bdd4', 500)
+      + text(32, mainY, words.slice(1).join(' '), size, '#ffffff', 700);
+  };
+  const rows = [];
+  const league = clean(spec.league);
+  const side1 = clean(spec.team1).split(/\s*\/\s*/).filter(Boolean);
+  const side2 = clean(spec.team2).split(/\s*\/\s*/).filter(Boolean);
+  const hasPlayers = !golf && side1.length && side2.length && side1.length <= 2 && side2.length <= 2;
+  const doubles = (hasPlayers && (side1.length === 2 || side2.length === 2)) || /\bdoubles\b/i.test(clean(spec.title));
+  const tour = /\b(WTA|ATP|ITF)\b/i.exec(league + ' ' + clean(spec.title));
+  const heading = golf ? (league || 'GOLF · EVENT') : ((tour ? tour[1] : 'TENNIS') + ' · ' + (doubles ? 'DOUBLES' : 'SINGLES'));
+  const decoration = golf
+    ? '<g fill="none" stroke="#6cba93" stroke-opacity=".28" stroke-width="2"><path d="M525 450Q440 300 625 260T810 60"/><path d="M560 450Q470 300 645 288T845 80"/><path d="M600 450Q510 310 680 318T885 110"/></g><path d="M660 176V299" stroke="#e3eecb" stroke-opacity=".35" stroke-width="3"/><path d="M662 176l54 17-54 20z" fill="#c7ed6f" opacity=".45"/>'
+    : '<g stroke="#81b9c5" stroke-opacity=".16" stroke-width="2" fill="none" transform="translate(630 110) rotate(12 60 110)"><rect width="108" height="240"/><rect x="16" width="76" height="240"/><path d="M0 120H108M16 60H92M16 180H92M54 60V180"/></g>';
+  rows.push('<rect width="800" height="450" fill="url(#eventBg)"/>', decoration);
+  rows.push('<rect x="34" y="36" width="4" height="24" rx="2" fill="#c7ed6f"/>');
+  rows.push(text(50, 55, heading, 22, '#c7ed6f', 700, 550));
+  rows.push('<rect x="623" y="30" width="145" height="36" rx="7" fill="' + (live ? '#d64049' : '#253349') + '"/>');
+  rows.push('<text x="695" y="54" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-size="16" font-weight="700" fill="#ffffff">' + (live ? 'LIVE' : 'UPCOMING') + '</text>');
+  if (hasPlayers && !doubles) {
+    rows.push(player(side1[0], 132, 203, 66), text(34, 246, 'vs', 18, '#c7ed6f'), player(side2[0], 290, 361, 66));
+  } else if (hasPlayers) {
+    for (const [side, offset] of [[side1, 0], [side2, 157]]) {
+      if (side.length === 1) rows.push(player(side[0], 145 + offset, 190 + offset, 48));
+      else side.forEach((name, i) => rows.push(player(name, 107 + offset + i * 55, 143 + offset + i * 55, 40)));
+    }
+    rows.push(text(34, 244, 'vs', 18, '#c7ed6f'));
+  } else {
+    // Event metadata only: no invented opponents, rounds, venues or scores.
+    const title = clean(spec.title) || league || (golf ? 'GOLF EVENT' : 'TENNIS EVENT');
+    const sections = golf ? title.split(/\s+[-–—]\s+/) : [title];
+    if (sections.length > 1) {
+      rows.push(text(34, 164, sections[0], 54, '#ffffff', 700));
+      rows.push(text(34, 245, sections.slice(1).join(' · '), 32, '#c7ed6f', 600));
+    } else {
+    const words = title.split(' '), lines = [''];
+    for (const word of words) {
+      const last = lines.length - 1;
+      if ((lines[last] + ' ' + word).trim().length > 24 && last < 2 && lines[last]) lines.push(word);
+      else lines[last] = (lines[last] + ' ' + word).trim();
+    }
+    lines.forEach((line, i) => rows.push(text(34, 164 + i * 66, line, 54, '#ffffff', 700)));
+    }
+  }
+  rows.push('<line x1="34" x2="766" y1="393" y2="393" stroke="#ffffff" stroke-opacity=".16"/>');
+  const footer = [clean(spec.time) || clean(spec.channel), golf && clean(spec.time) ? clean(spec.channel) : '', live && clean(spec.score) ? 'Score ' + clean(spec.score) : ''].filter(Boolean).join(' · ');
+  const footerSize = Math.min(24, Math.max(12, Math.floor(490 / Math.max(1, Array.from(footer).length))));
+  if (footer) rows.push(text(34, 429, footer, footerSize, '#f3f6fb', 600, 490));
+  rows.push('<text x="766" y="429" text-anchor="end" font-family="Arial,Helvetica,sans-serif" font-size="19" fill="#9baec7" font-weight="600">' + (golf ? 'GOLF' : 'TENNIS') + '</text>');
+  return '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450" viewBox="0 0 800 450" data-artwork="live-event-v3"><defs><linearGradient id="eventBg" x2="1" y2="1"><stop stop-color="' + (golf ? '#123c32' : '#142238') + '"/><stop offset="1" stop-color="' + (golf ? '#081e1c' : '#090f1b') + '"/></linearGradient><clipPath id="eventClip"><rect width="800" height="450" rx="18"/></clipPath></defs><g clip-path="url(#eventClip)">' + rows.join('') + '</g><rect x=".5" y=".5" width="799" height="449" rx="18" stroke="#ffffff" stroke-opacity=".14" fill="none"/></svg>';
+}
+
 function generateMatchCardSvg(spec = {}) {
+  if (usesLiveEventArtwork(spec)) return generateLiveEventCardSvg(spec);
   const isPoster = spec.shape === 'poster';
   // Canvas ratios follow the Stremio meta spec: posterShape "landscape" = 1:1.77
   // (16:9) and "poster" = 1:0.675. Resolution is free, so we keep it modest.
