@@ -29,6 +29,7 @@
 
 const dns = require('dns');
 const net = require('net');
+const adaptiveDnsResolver = require('./AdaptiveDnsResolver');
 
 const ALLOWLIST_ENV = 'STREAM_PROXY_ALLOWED_HOSTS';
 const ALLOWED_PROTOCOLS = new Set(['http:', 'https:']);
@@ -275,8 +276,15 @@ function isReservedHostname(hostname) {
 // ─── Default resolver ────────────────────────────────────────────────────────
 
 async function defaultResolve(hostname) {
-  const records = await dns.promises.lookup(hostname, { all: true, verbatim: true });
-  return records.map(record => record.address);
+  return new Promise((resolve, reject) => {
+    adaptiveDnsResolver.lookup(hostname, { all: true, verbatim: true }, (err, records) => {
+      if (err) return reject(err);
+      if (Array.isArray(records)) {
+        return resolve(records.map(record => (typeof record === 'string' ? record : record.address)));
+      }
+      return resolve([typeof records === 'string' ? records : records.address]);
+    });
+  });
 }
 
 // ─── The gate ────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ const undici = require('undici');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { getImpit } = require('../impitClient');
+const { safeFetch } = require('../impitClient');
 const { parseTimezone } = require('../timezone');
 
 function b64Decode(str) {
@@ -59,28 +59,15 @@ class FullRacesProvider extends BaseProvider {
    * Fetches an HTML document using impitClient to bypass Cloudflare Turnstile.
    */
   async _fetchHtml(url) {
-    const impit = getImpit();
-    if (impit) {
-      try {
-        const res = await impit.fetch(url, { headers: this.defaultHeaders });
-        if (res.status === 200) {
-          return await res.text();
-        }
-      } catch (err) {
-        console.warn(`[FullRaces] impit fetch failed for ${url}: ${err.message}`);
-      }
-    }
-
-    // Fallback to undici if impit is unavailable
-    const res = await undici.request(url, {
+    const res = await safeFetch(url, {
       headers: this.defaultHeaders,
-      headersTimeout: 10000,
-      bodyTimeout: 10000
+      timeoutMs: 12000,
+      attempts: 2
     });
-    if (res.statusCode !== 200) {
-      throw new Error(`HTTP ${res.statusCode}`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
     }
-    return await res.body.text();
+    return await res.text();
   }
 
   /**

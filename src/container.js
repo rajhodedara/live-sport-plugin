@@ -38,6 +38,7 @@ const LeafProvider = require('./providers/LeafProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
+const adaptiveDnsResolver = require('./services/AdaptiveDnsResolver');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -58,6 +59,7 @@ container.register({
   providerHealthService: asClass(ProviderHealthService).singleton(),
   teamLogoService: asClass(TeamLogoService).singleton(),
   broadcasterMatchService: asValue(new BroadcasterMatchService()),
+  adaptiveDnsResolver: asValue(adaptiveDnsResolver),
   // Self-healing iframe-domain knowledge base (DaddyLive family). Singleton so
   // runtime discoveries accumulate for the process lifetime.
   iframeDomainRegistry: asValue(new IframeDomainRegistry())
