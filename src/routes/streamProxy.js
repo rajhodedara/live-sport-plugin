@@ -8,6 +8,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const { checkOutboundUrl, rejectBlockedUrl } = require('../services/OutboundUrlGuard');
+const adaptiveDnsResolver = require('../services/AdaptiveDnsResolver');
 const router = express.Router();
 
 const hlsChunkHttpsAgent = new https.Agent({
@@ -15,14 +16,16 @@ const hlsChunkHttpsAgent = new https.Agent({
   keepAliveMsecs: 30000,
   maxSockets: 100,
   maxFreeSockets: 20,
-  timeout: 15000
+  timeout: 15000,
+  lookup: (hostname, opts, cb) => adaptiveDnsResolver.lookup(hostname, opts, cb)
 });
 const hlsChunkHttpAgent = new http.Agent({
   keepAlive: true,
   keepAliveMsecs: 30000,
   maxSockets: 100,
   maxFreeSockets: 20,
-  timeout: 15000
+  timeout: 15000,
+  lookup: (hostname, opts, cb) => adaptiveDnsResolver.lookup(hostname, opts, cb)
 });
 
 // Range-aware MP4 proxy for ok.ru direct video files
