@@ -2,6 +2,8 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../impitClient');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
+const { getChannelLogo } = require('../services/ChannelLogoService');
 
 class LeafProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -22,8 +24,7 @@ class LeafProvider extends BaseProvider {
   }
 
   /**
-   * Fetch live sporting matches from Highfly live catalog.
-   * Strictly filters OUT all 24/7 TV channels.
+   * Fetch live sporting matches and 24/7 sports channels from Highfly catalog.
    *
    * @returns {Promise<Array<MatchEntity>>}
    */
@@ -60,26 +61,61 @@ class LeafProvider extends BaseProvider {
     for (const item of metas) {
       if (!item || !item.id || !item.name) continue;
 
-      // Strictly exclude 24/7 channels (IDs starting with leaf: or networks category)
-      if (item.id.startsWith('leaf:') || item.category === 'networks' || item.isChannel) {
-        continue;
+      const isChannel = item.id.startsWith('leaf:') || item.category === 'networks' || item.isChannel;
+
+      if (isChannel) {
+        const ident = ChannelIdentityService.parseChannel(item.name);
+        const canonicalTitle = ident.canonicalTitle || item.name;
+        const identityKey = ident.identityKey;
+        const channelNumber = ident.channelNumber;
+        const slug = canonicalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const logoUrl = getChannelLogo(canonicalTitle) || getChannelLogo(item.name);
+
+        const entity = new MatchEntity({
+          id: `leaf_ch_${item.id.replace(/^leaf:/, '')}_${slug}`,
+          title: canonicalTitle,
+          baseTitle: canonicalTitle,
+          category: 'networks',
+          date: '0',
+          popular: '1',
+          league: ident.country || 'Live TV',
+          logo: logoUrl || item.poster || undefined,
+          thumbnail_url: logoUrl || item.poster || undefined,
+          sources: [{
+            source: 'leaf',
+            id: item.id,
+            channelName: item.name,
+            canonicalChannel: canonicalTitle,
+            country: ident.country || '',
+            countryCode: ident.countryCode || '',
+            countryFlag: ident.countryFlag || '',
+            language: ident.language || '',
+            resolution: ident.resolution || '',
+            isBackup: ident.isBackup || false,
+            isTimeshift: ident.isTimeshift || false,
+            type: 'channel'
+          }]
+        });
+        entity.channelIdentityKey = identityKey;
+        entity.channelNumber = channelNumber;
+        matches.push(entity);
+      } else {
+        const cleanId = item.id.replace(/^streamed:/, '');
+        const category = this.normalizeCategory(item.category || (Array.isArray(item.genres) ? item.genres[0] : 'other'));
+
+        matches.push(new MatchEntity({
+          id: `leaf_${cleanId}`,
+          aliasIds: [item.id, cleanId],
+          title: item.name,
+          category,
+          status: 'live',
+          sources: [{
+            source: 'leaf',
+            id: item.id,
+            name: item.name
+          }]
+        }));
       }
-
-      const cleanId = item.id.replace(/^streamed:/, '');
-      const category = this.normalizeCategory(item.category || (Array.isArray(item.genres) ? item.genres[0] : 'other'));
-
-      matches.push(new MatchEntity({
-        id: `leaf_${cleanId}`,
-        aliasIds: [item.id, cleanId],
-        title: item.name,
-        category,
-        status: 'live',
-        sources: [{
-          source: 'leaf',
-          id: item.id,
-          name: item.name
-        }]
-      }));
     }
 
     return matches;
@@ -87,8 +123,8 @@ class LeafProvider extends BaseProvider {
 
   /**
    * Resolve live streams for a match.
-   * Strictly isolates Leaf (papacito.cfd) streams and replaces temporary tokens
-   * with the master bearer token for direct, 4K/FHD unthrottled playback.
+   * Strictly isolates Leaf (papacito.cfd) streams, preserves upstream dynamically signed JWT tokens,
+   * and falls back to master token for bare URLs.
    *
    * @param {string} sourceId
    * @param {string} matchCategory
@@ -140,8 +176,12 @@ class LeafProvider extends BaseProvider {
       if (!slugMatch || !slugMatch[1]) continue;
       const slug = slugMatch[1];
 
-      // Mint direct playback URL using our master token
-      const directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
+      // Preserve dynamic signed JWT (?ft=...) which returns HTTP 200 OK.
+      // Fall back to master token only if upstream provides an unsigned bare URL.
+      let directUrl = st.url;
+      if (!directUrl.includes('ft=') && !directUrl.includes('token=')) {
+        directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
+      }
 
       const rawName = st.name || '';
       const rawTitle = st.title || '';

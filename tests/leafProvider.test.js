@@ -16,7 +16,7 @@ describe('LeafProvider Unit Tests', () => {
   });
 
   describe('getMatches()', () => {
-    test('filters out 24/7 channels and returns only live sporting fixtures', async () => {
+    test('ingests live sporting fixtures and 24/7 sports channels', async () => {
       const mockCatalogResponse = {
         metas: [
           {
@@ -50,15 +50,27 @@ describe('LeafProvider Unit Tests', () => {
 
       const matches = await provider.getMatches();
 
-      // Only the 2 live fixtures should be returned; the 2 24/7 channels must be omitted
-      expect(matches).toHaveLength(2);
-      expect(matches.map(m => m.title)).toEqual([
-        'Golden State Warriors vs Memphis Grizzlies',
-        'Arsenal vs Chelsea'
-      ]);
+      // All 4 items should be returned (2 channels + 2 live fixtures)
+      expect(matches).toHaveLength(4);
 
-      // Check MatchEntity structure
-      const match1 = matches[0];
+      // Verify 24/7 channel structure
+      const channel1 = matches[0];
+      expect(channel1.category).toBe('networks');
+      expect(channel1.date).toBe('');
+      expect(channel1.popular).toBe('1');
+      expect(channel1.title).toBe('Sky Sports Premier League');
+      expect(channel1.channelIdentityKey).toBe('skysportpremierleague');
+      expect(channel1.sources).toHaveLength(1);
+      expect(channel1.sources[0].source).toBe('leaf');
+      expect(channel1.sources[0].id).toBe('leaf:334343434');
+
+      const channel2 = matches[1];
+      expect(channel2.category).toBe('networks');
+      expect(channel2.title).toBe('Sky Sports F1');
+      expect(channel2.channelIdentityKey).toBe('skysportf1');
+
+      // Verify live fixture structure
+      const match1 = matches[2];
       expect(match1.id).toBe('leaf_golden-state-warriors-vs-memphis-grizzlies-2601690');
       expect(match1.aliasIds).toContain('streamed:golden-state-warriors-vs-memphis-grizzlies-2601690');
       expect(match1.category).toBe('basketball');
@@ -69,6 +81,10 @@ describe('LeafProvider Unit Tests', () => {
         id: 'streamed:golden-state-warriors-vs-memphis-grizzlies-2601690',
         name: 'Golden State Warriors vs Memphis Grizzlies'
       });
+
+      const match2 = matches[3];
+      expect(match2.title).toBe('Arsenal vs Chelsea');
+      expect(match2.category).toBe('football');
     });
 
     test('returns empty array when network fails', async () => {
@@ -88,7 +104,7 @@ describe('LeafProvider Unit Tests', () => {
   });
 
   describe('resolveStream()', () => {
-    test('strictly isolates papacito.cfd streams and swaps in master token', async () => {
+    test('strictly isolates papacito.cfd streams and preserves dynamic signed JWT tokens', async () => {
       const mockStreamsResponse = {
         streams: [
           {
@@ -129,8 +145,8 @@ describe('LeafProvider Unit Tests', () => {
       // Must strictly filter out google.com (paywall redirect) and embed.st (streamed.su)
       expect(streams).toHaveLength(2);
 
-      // Stream 1: 1080p FHD
-      expect(streams[0].url).toBe('https://papacito.cfd/m3u/1820218/live.m3u8?token=E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi');
+      // Stream 1: 1080p FHD preserving dynamic signed JWT
+      expect(streams[0].url).toBe('https://papacito.cfd/m3u/1820218/live.m3u8?ft=temporary_jwt_token');
       expect(streams[0].resolution).toBe('1080p');
       expect(streams[0].quality).toBe('FHD');
       expect(streams[0].bitrate).toBe('6.2 Mbps');
@@ -139,8 +155,8 @@ describe('LeafProvider Unit Tests', () => {
       expect(streams[0].behaviorHints.notWebReady).toBe(true);
       expect(streams[0]._source).toBe('leaf');
 
-      // Stream 2: 720p HD
-      expect(streams[1].url).toBe('https://papacito.cfd/m3u/1413072/live.m3u8?token=E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi');
+      // Stream 2: 720p HD preserving dynamic signed JWT
+      expect(streams[1].url).toBe('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt');
       expect(streams[1].resolution).toBe('720p');
       expect(streams[1].quality).toBe('HD');
       expect(streams[1].bitrate).toBe('3.5 Mbps');
@@ -148,6 +164,29 @@ describe('LeafProvider Unit Tests', () => {
       expect(streams[1].title).toBe('(GSW Feed) HD');
       expect(streams[1].behaviorHints.notWebReady).toBe(true);
       expect(streams[1]._source).toBe('leaf');
+    });
+
+    test('falls back to master token if upstream returns bare URL without tokens', async () => {
+      const mockStreamsResponse = {
+        streams: [
+          {
+            name: 'Leaf (Strong) · Raw Channel',
+            title: '1920x1080 · ~5.0 Mbps',
+            url: 'https://papacito.cfd/m3u/bare_channel_1/live.m3u8',
+            behaviorHints: { notWebReady: true }
+          }
+        ]
+      };
+
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => mockStreamsResponse
+      });
+
+      const streams = await provider.resolveStream('leaf:bare_channel_1', 'networks', 'Raw Channel');
+      expect(streams).toHaveLength(1);
+      expect(streams[0].url).toBe(`https://papacito.cfd/m3u/bare_channel_1/live.m3u8?token=${provider.masterToken}`);
     });
 
     test('returns empty array when upstream stream resolution fails', async () => {
