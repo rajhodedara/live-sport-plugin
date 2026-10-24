@@ -1,6 +1,6 @@
 const container = require('./container');
 const { getChannelLogo } = require('./services/ChannelLogoService');
-const { prewarmMatch } = require('./streams');
+const { prewarmMatch, mintUnderPressure } = require('./streams');
 const { BASE_URL } = require('./config');
 const imageService = require('./services/ImageService');
 const { parseTimezone } = require('./timezone');
@@ -1731,7 +1731,7 @@ async function handleMeta(type, id, config) {
   //     top-ranked sources mint ahead of the click; the rest resolve on demand.
   try {
     const prewarmEnabled = Number(process.env.PREWARM_MAX_MATCHES || 12) > 0;
-    if (prewarmEnabled && isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
+    if (prewarmEnabled && !mintUnderPressure() && isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
       const metaTopN = Number(process.env.PREWARM_META_TOPN || 8);
       setImmediate(() => prewarmMatch(match, config || {}, metaTopN).catch(() => {}));
     }

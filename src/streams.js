@@ -813,6 +813,19 @@ function prewarmSkipProvidersSet() {
 const PREWARM_MAX_CONCURRENT = Number(process.env.PREWARM_MAX_CONCURRENT || 40);
 let _prewarmActive = 0;
 
+// True when the mint semaphore is mostly consumed by on-demand work. The meta
+// fire-ahead (catalog.js) checks this before dispatching so prefetch never
+// competes head-on with clicks during peaks — it runs when the system is idle
+// instead, which still keeps the cache warm between bursts.
+function mintUnderPressure() {
+  try {
+    const cache = container.resolve('streamResolveCache');
+    return Boolean(cache && typeof cache.isMintPressureHigh === 'function' && cache.isMintPressureHigh());
+  } catch (_) {
+    return false;
+  }
+}
+
 async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
@@ -1653,6 +1666,7 @@ function suppressPreMatchTeamChannels(streams, match) {
 module.exports = {
   handleStream,
   prewarmMatch,
+  mintUnderPressure,
   prewarmSkipProvidersSet,
   selectSources,
   // Exported so the manifest proxy can transparently re-mint a single expired
