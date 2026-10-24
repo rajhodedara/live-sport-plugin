@@ -964,7 +964,11 @@ async function buildReplayHubMeta(id, config = {}) {
   if (rawMatches.length === 0 || !rawMatches.some(m => isReplayMatch(m))) {
     try {
       const aggregator = container.resolve('matchAggregator');
-      const synced = await aggregator.syncMatches();
+      // Cooldown-guarded: a permanently-empty replay set must not re-trigger
+      // a full provider sweep on every hub request.
+      const synced = await (aggregator.syncMatchesIfStale
+        ? aggregator.syncMatchesIfStale()
+        : aggregator.syncMatches());
       if (synced && synced.length > 0) rawMatches = synced;
     } catch (_) {}
   }
@@ -1214,7 +1218,11 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
   if (rawMatches.length === 0 || !hasSportReplays) {
     try {
       const aggregator = container.resolve('matchAggregator');
-      const synced = await aggregator.syncMatches();
+      // Cooldown-guarded: a sport with no replay coverage is a stable
+      // condition — every request to its shelf must not start a full sweep.
+      const synced = await (aggregator.syncMatchesIfStale
+        ? aggregator.syncMatchesIfStale()
+        : aggregator.syncMatches());
       if (synced && synced.length > 0) rawMatches = synced;
     } catch (_) {}
   }

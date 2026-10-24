@@ -413,6 +413,13 @@ class MatchAggregator {
     this.providerHealthService = providerHealthService;
     this.vavooProvider = vavooProvider;
     this.broadcasterMatchService = broadcasterMatchService;
+    // Single-flight guard: concurrent callers (cron, SWR, catalog-triggered)
+    // share one in-flight sync instead of each running a full provider sweep.
+    this._syncInFlight = null;
+    // Catalog-triggered syncs additionally respect this cooldown — a sport
+    // with zero replays is a stable condition, and without it every request
+    // to that shelf re-triggered a full provider scrape.
+    this._lastSyncCompletedAt = 0;
     if (this.providerHealthService) this.providerHealthService.registerProviders(this.providers);
   }
 
@@ -840,7 +847,42 @@ class MatchAggregator {
     }
   }
 
+  /**
+   * Single-flight wrapper: N concurrent callers (cron tick, SWR revalidate,
+   * catalog-triggered) share ONE provider sweep. Without this, simultaneous
+   * requests hitting an empty replay shelf each started a full provider sync
+   * in the same worker — every one holding a full previous-catalog clone and
+   * writing the disk cache — stacking straight to the PM2 memory ceiling.
+   */
   async syncMatches() {
+    if (this._syncInFlight) return this._syncInFlight;
+    this._syncInFlight = this._syncMatchesInner();
+    try {
+      return await this._syncInFlight;
+    } finally {
+      // Completed is completed, success or failure: a cooldown after a failed
+      // sweep keeps request traffic from machine-gunning retries into an
+      // upstream outage. Cron/SWR cadence is unaffected either way.
+      this._lastSyncCompletedAt = Date.now();
+      this._syncInFlight = null;
+    }
+  }
+
+  /**
+   * Catalog-triggered entry point. Identical to syncMatches, but refuses to
+   * START a new sweep within `minIntervalMs` of the last completed one (an
+   * in-flight sweep is always joined). A sport with zero replays is a stable
+   * condition — the cooldown stops every request to that shelf from
+   * re-triggering a full scrape. Cron and SWR paths call syncMatches()
+   * directly and are not rate-limited.
+   */
+  async syncMatchesIfStale(minIntervalMs = Number(process.env.CATALOG_SYNC_MIN_INTERVAL_MS) || 5 * 60 * 1000) {
+    if (this._syncInFlight) return this._syncInFlight;
+    if (Date.now() - this._lastSyncCompletedAt < minIntervalMs) return null;
+    return this.syncMatches();
+  }
+
+  async _syncMatchesInner() {
     console.log('[MatchAggregator] Fetching from all providers...');
     if (this.providerHealthService) this.providerHealthService.startSync();
     const finalMatches = [];
