@@ -798,6 +798,15 @@ function prewarmSkipProvidersSet() {
 async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
+    // 24/7 channels never prewarm — regardless of how the caller classified
+    // the card. Channels are evergreen (no kickoff to anticipate), and each
+    // channel prewarm re-verifies a stack of streams for content nobody is
+    // "about to click" the way a live fixture is. This guards every prewarm
+    // path (cron tick, meta-detail fire-ahead) against mis-categorized channel
+    // cards slipping through the caller's own category filter.
+    if (match.category === 'networks' || match.isChannel === true || /_ch_/.test(String(match.id || ''))) {
+      return;
+    }
     const resolveCache = container.resolve('streamResolveCache');
     const activeSources = selectSources(match.sources, config || null, match);
     const skip = prewarmSkipProvidersSet();

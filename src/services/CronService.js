@@ -65,11 +65,19 @@ class CronService {
   // Catalog stale-while-revalidate: serve the cached list immediately and
   // refresh in the background once the cache passes REVALIDATE_AFTER_MS.
   // Traffic-driven, so idle instances stay quiet; the 4-hour cron is the floor.
+  // PM2 runs N cluster workers sharing one socket; every worker used to run
+  // every cron, so provider syncs and prewarm ticks executed 2x (N workers)
+  // against the same upstreams. Background churn is owned by the primary
+  // worker; secondary workers pick up results via the disk snapshot (matches)
+  // and the shared resolver L2 (stream mints, write-through adopted on read).
+  _isPrimaryWorker() {
+    return (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0') &&
+           (process.env.pm_id === undefined || process.env.pm_id === '0');
+  }
+
   ensureFresh() {
     try {
-      const isPrimary = (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0') &&
-                        (process.env.pm_id === undefined || process.env.pm_id === '0');
-      if (!isPrimary) return;
+      if (!this._isPrimaryWorker()) return;
       if (this.syncing) return;
       if (!this.cacheService || !this.cacheService.isStale(REVALIDATE_AFTER_MS)) return;
       console.log('[CronService] Catalog stale, triggering background re-sync (SWR)...');
@@ -81,9 +89,10 @@ class CronService {
 
   start() {
     console.log('[CronService] Starting background jobs...');
-    
-    // Fetch and cache matches every 4 hours
+
+    // Fetch and cache matches every 4 hours (primary only — see _isPrimaryWorker)
     cron.schedule('0 */4 * * *', async () => {
+      if (!this._isPrimaryWorker()) return;
       console.log('[CronService] Running match sync job...');
       try {
         await this.runSync();
@@ -102,6 +111,7 @@ class CronService {
     //   - this tick also skips any match whose sources are already cached, so a
     //     warm instance does no work at all.
     cron.schedule(process.env.PREWARM_CRON_SCHEDULE || '*/3 * * * *', async () => {
+      if (!this._isPrimaryWorker()) return;
       try {
         await this.prewarmPopular();
       } catch (err) {
@@ -109,8 +119,11 @@ class CronService {
       }
     });
 
-    // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately
+    // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately.
+    // Primary only: a secondary worker starting simultaneously would duplicate
+    // the full provider scrape; it loads the primary's snapshot from disk instead.
     setImmediate(async () => {
+      if (!this._isPrimaryWorker()) return;
       try {
         console.log('[CronService] Initiating startup match sync...');
         await this.runSync();
@@ -133,8 +146,9 @@ class CronService {
       });
     }
 
-    // Run first sync immediately on boot
+    // Run first sync immediately on boot (primary only — see startup note above)
     setTimeout(async () => {
+      if (!this._isPrimaryWorker()) return;
       try {
         console.log('[CronService] Running initial match sync...');
         await this.runSync();

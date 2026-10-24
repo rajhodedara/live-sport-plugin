@@ -123,18 +123,21 @@ describe('Bluetier Remint & Token Lifecycle', () => {
       });
     });
 
-    it('caps DaddyLive learned TTL to 150 seconds even after multiple noteSuccess calls', () => {
+    it('caps DaddyLive learned TTL above the prewarm tick (300s) after noteSuccess calls', () => {
       const key = `daddylive:match_clamping_${Date.now()}:33`;
       cache.ttl.set('daddylive', 60000);
 
       cache.noteSuccess(key); // doubles to 120s
       expect(cache._ttlFor('daddylive')).toBe(120000);
 
-      cache.noteSuccess(key); // would double to 240s, but capped to 150s
-      expect(cache._ttlFor('daddylive')).toBe(150000);
+      cache.noteSuccess(key); // doubles to 240s — still under the ceiling
+      expect(cache._ttlFor('daddylive')).toBe(240000);
 
-      cache.noteSuccess(key); // stays capped at 150s
-      expect(cache._ttlFor('daddylive')).toBe(150000);
+      cache.noteSuccess(key); // would double to 480s, capped at 300s
+      expect(cache._ttlFor('daddylive')).toBe(300000);
+
+      cache.noteSuccess(key); // stays capped at 300s
+      expect(cache._ttlFor('daddylive')).toBe(300000);
     });
 
     it('clamps stream entry TTL if Bluetier token expires sooner', async () => {

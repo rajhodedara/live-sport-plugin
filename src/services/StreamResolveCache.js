@@ -15,8 +15,26 @@
 const DEFAULT_TTL_MS = 60 * 1000;
 const MIN_TTL_MS = 60 * 1000;
 const MAX_TTL_MS = 10 * 60 * 1000;
-const NEGATIVE_TTL_MS = 30 * 1000;
-const MAX_ENTRIES = 200;
+// Dead-source negative cache. 30s re-scraped dead mirrors on nearly every
+// prewarm cycle (Vavoo/sunshine 403-502s dominate the verify logs); 5 minutes
+// matches how long an upstream outage actually lasts without letting a
+// transient blip hide a source for too long.
+const NEGATIVE_TTL_MS = Number(process.env.STREAM_NEGATIVE_TTL_MS || 5 * 60 * 1000);
+// One prewarm tick (12 matches x ~20 aggregated sources) is ~240 keys — the
+// old 200 cap made each tick LRU-evict the previous tick's entries, so the
+// warm-check always missed and everything re-minted every 3 minutes.
+const MAX_ENTRIES = Number(process.env.STREAM_CACHE_MAX_ENTRIES || 600);
+// DaddyLive entry ceiling. Must EXCEED the prewarm tick period (180s): a
+// ceiling shorter than the tick expires every entry right before each tick's
+// warm-check, forcing a full re-mint of every priority-1 match on every tick —
+// measured on the live VPS as ~2MB/s of resolveStream .text() allocations in
+// each worker. Bluetier-token URLs are still clamped tighter by their actual
+// embedded expiry (see _extractTokenRemainingMs), so this is a ceiling, not a
+// lifetime.
+const DADDYLIVE_MAX_TTL_MS = Math.max(
+  240 * 1000,
+  Number(process.env.DADDYLIVE_MAX_TTL_MS || 5 * 60 * 1000)
+);
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
 
 function cloneStream(stream) {
@@ -133,7 +151,7 @@ class StreamResolveCache {
   _ttlFor(sourceName) {
     const val = this.ttl.get(sourceName) || this.defaultTtlMs;
     if (sourceName === 'daddylive') {
-      return Math.min(val, 150 * 1000);
+      return Math.min(val, DADDYLIVE_MAX_TTL_MS);
     }
     return val;
   }
@@ -349,7 +367,7 @@ class StreamResolveCache {
   noteSuccess(key) {
     if (!key) return;
     const sourceName = key.split(':')[0];
-    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : this.maxTtlMs;
+    const maxTtl = sourceName === 'daddylive' ? DADDYLIVE_MAX_TTL_MS : this.maxTtlMs;
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);
