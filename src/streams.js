@@ -826,6 +826,15 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts 
       return;
     }
     if (_prewarmActive >= PREWARM_MAX_CONCURRENT) return;
+    // Yield to clicks: when mint slots are mostly consumed by on-demand
+    // traffic, prewarm stands down entirely. Measured live: prefetch running
+    // head-on against clicks left popular matches with 1 of 25 streams at the
+    // 6 s soft deadline (mint=64/64, sheds climbing). Prewarm resumes as soon
+    // as pressure drops, so idle periods still warm the cache fully.
+    const resolveCache = container.resolve('streamResolveCache');
+    if (resolveCache && typeof resolveCache.isMintPressureHigh === 'function' && resolveCache.isMintPressureHigh()) {
+      return;
+    }
     _prewarmActive++;
     try {
       await _prewarmMatchInner(match, config, topN, opts);
