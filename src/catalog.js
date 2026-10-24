@@ -1719,14 +1719,21 @@ async function handleMeta(type, id, config) {
   // near-instant. Fire-and-forget, and deliberately scoped:
   //   - LIVE matches only (replays / upcoming / 24/7 networks are skipped), so we
   //     never mint tokens for content nobody is about to watch;
-  //   - ALL sources, not just the top few. Minting only the top 3 meant the
-  //     remaining providers (WatchFooty is commonly 4th) were minted while the
-  //     user was already waiting - which is exactly where the delay came from.
+  //   - top-ranked sources only (PREWARM_META_TOPN, default 8). Minting ALL of
+  //     a match's 26-43 sources on every detail view was measured saturating
+  //     both workers (250+ concurrent mints); the tail resolves on demand and
+  //     lands in the shared cache for everyone after it.
   //   - setImmediate defers the work one event-loop tick so the meta JSON is
   //     fully flushed to the socket before stream-token minting begins.
+  //   - PREWARM_MAX_MATCHES=0 is the master switch for ALL prewarm paths —
+  //     gating the cron alone left this fire-ahead running (measured: 116
+  //     mints after the env kill-switch). topN bounds per-view width: the
+  //     top-ranked sources mint ahead of the click; the rest resolve on demand.
   try {
-    if (isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
-      setImmediate(() => prewarmMatch(match, config || {}, Number.MAX_SAFE_INTEGER).catch(() => {}));
+    const prewarmEnabled = Number(process.env.PREWARM_MAX_MATCHES || 12) > 0;
+    if (prewarmEnabled && isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
+      const metaTopN = Number(process.env.PREWARM_META_TOPN || 8);
+      setImmediate(() => prewarmMatch(match, config || {}, metaTopN).catch(() => {}));
     }
   } catch (_) {}
 

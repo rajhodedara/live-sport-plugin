@@ -35,6 +35,16 @@ const DADDYLIVE_MAX_TTL_MS = Math.max(
   240 * 1000,
   Number(process.env.DADDYLIVE_MAX_TTL_MS || 5 * 60 * 1000)
 );
+// Global cap on concurrent mint executions (the mintFn inside getOrCreate).
+// Measured on the live VPS: 250+ simultaneous mints — each holding scraper-page
+// strings plus a 15-25 socket fan-out — saturated the box, and V8 heap tracked
+// in-flight mints 1:1. On-demand callers WAIT up to MINT_QUEUE_WAIT_MS for a
+// slot (their request's own soft deadline returns whatever arrived; late mints
+// land in the cache for the next request); prewarm callers (opts.skipIfBusy)
+// are shed instantly with NO entry written — not even negative — so the next
+// view retries naturally.
+const MINT_MAX_CONCURRENT = Number(process.env.MINT_MAX_CONCURRENT || 24);
+const MINT_QUEUE_WAIT_MS = Number(process.env.MINT_QUEUE_WAIT_MS || 8000);
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
 
 function cloneStream(stream) {
@@ -110,12 +120,61 @@ class StreamResolveCache {
     this.maxTtlMs = opts.maxTtlMs ?? MAX_TTL_MS;
     this.negativeTtlMs = opts.negativeTtlMs ?? NEGATIVE_TTL_MS;
     this.maxEntries = opts.maxEntries ?? MAX_ENTRIES;
+    this.mintMaxConcurrent = opts.mintMaxConcurrent ?? MINT_MAX_CONCURRENT;
+    this.mintQueueWaitMs = opts.mintQueueWaitMs ?? MINT_QUEUE_WAIT_MS;
 
     this.entries = new Map();   // key -> { streams, matchId, status, resolvedAt, expiresAt, lastAccess }
     this.inFlight = new Map();  // key -> Promise (mint in progress)
     this.pendingOperations = new Map(); // key -> locally prunable operation
     this.ttl = new Map();       // sourceName -> learned TTL ms
-    this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, evictions: 0 };
+    this._mintActive = 0;       // mintFn executions holding a slot right now
+    this._mintWaiters = [];     // on-demand callers parked for a slot
+    this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, evictions: 0, shedMints: 0 };
+  }
+
+  /** True when mint slots are mostly consumed — callers shed cheap work. */
+  isMintPressureHigh() {
+    return this._mintActive >= Math.ceil(this.mintMaxConcurrent * 0.75);
+  }
+
+  /**
+   * Run `fn` while holding one of mintMaxConcurrent slots.
+   *  - opts.skipIfBusy → return null immediately when full (prewarm sheds).
+   *  - otherwise wait up to mintQueueWaitMs for a slot; still full → null.
+   * A null result means "shed": callers must not cache anything.
+   * On release, a waiting caller is handed the slot directly (no gap, no
+   * over-cap race); a timed-out waiter removes itself from the queue.
+   */
+  async _withMintSlot(fn, opts = {}) {
+    if (this._mintActive >= this.mintMaxConcurrent) {
+      if (opts.skipIfBusy) {
+        this.statsCounters.shedMints++;
+        return null;
+      }
+      const granted = await new Promise((resolve) => {
+        const entry = () => { clearTimeout(timer); resolve(true); };
+        const timer = setTimeout(() => {
+          const i = this._mintWaiters.indexOf(entry);
+          if (i !== -1) this._mintWaiters.splice(i, 1);
+          resolve(false);
+        }, this.mintQueueWaitMs);
+        this._mintWaiters.push(entry);
+      });
+      if (!granted) {
+        this.statsCounters.shedMints++;
+        return null;
+      }
+      // Slot ownership was transferred by the releaser.
+    } else {
+      this._mintActive++;
+    }
+    try {
+      return await fn();
+    } finally {
+      const wake = this._mintWaiters.shift();
+      if (wake) wake(); // hand the slot straight to the next waiter
+      else this._mintActive--;
+    }
   }
 
   _extractTokenRemainingMs(url) {
@@ -210,7 +269,7 @@ class StreamResolveCache {
     return null;
   }
 
-  async getOrCreate(key, mintFn) {
+  async getOrCreate(key, mintFn, opts = {}) {
     const now = Date.now();
     const existing = this.entries.get(key);
 
@@ -241,7 +300,7 @@ class StreamResolveCache {
     // Defer the work so even a synchronous mint failure cleans up only after
     // the promise has been registered.
     const p = Promise.resolve()
-      .then(() => this._resolveAndStore(key, mintFn, operation))
+      .then(() => this._resolveAndStore(key, mintFn, operation, opts))
       .finally(() => {
         this.inFlight.delete(key);
         this.pendingOperations.delete(key);
@@ -251,7 +310,7 @@ class StreamResolveCache {
     return this.get(key) || [];
   }
 
-  async _resolveAndStore(key, mintFn, operation) {
+  async _resolveAndStore(key, mintFn, operation, opts = {}) {
 
     // ── Shared L2: another worker may have minted (or be minting) this key ──
     let claimed = false;
@@ -300,7 +359,17 @@ class StreamResolveCache {
     const matchId = parts[1];
     const p = (async () => {
       try {
-        const streams = await mintFn();
+        // The mint itself runs under the global concurrency cap. A null
+        // result means the caller was shed (cap full) — nothing may be
+        // cached (not even negative), and any shared L2 claim is released
+        // so other workers retry instead of polling to their 30s expiry.
+        const streams = await this._withMintSlot(mintFn, opts);
+        if (streams === null) {
+          if (claimed && _sharedAvailable()) {
+            _sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
+          }
+          return;
+        }
         // Pruning can run while the provider is resolving. Discard both
         // positive and negative late answers before touching either cache.
         if (operation.pruned) return;
@@ -427,9 +496,12 @@ class StreamResolveCache {
     return {
       entries: this.entries.size,
       inFlight: this.inFlight.size,
+      mintActive: this._mintActive,
+      mintCap: this.mintMaxConcurrent,
       hits: this.statsCounters.hits,
       misses: this.statsCounters.misses,
       negativeHits: this.statsCounters.negativeHits,
+      shedMints: this.statsCounters.shedMints,
       evictions: this.statsCounters.evictions,
       learnedTtls: Object.fromEntries(this.ttl)
     };

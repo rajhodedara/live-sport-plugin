@@ -28,7 +28,7 @@ let _impitBornAt = 0;
 // instance is dropped and re-probed periodically; the Rust side is freed when
 // V8 collects the old object (global.gc() right after, when --expose-gc is on).
 // In-flight fetches keep their reference and finish safely on the old instance.
-const IMPIT_RECYCLE_MS = Math.max(10 * 60 * 1000, Number(process.env.IMPIT_RECYCLE_MS) || 90 * 60 * 1000);
+const IMPIT_RECYCLE_MS = Math.max(3 * 60 * 1000, Number(process.env.IMPIT_RECYCLE_MS) || 90 * 60 * 1000);
 
 function getImpit() {
   if (_impitInstance && Date.now() - _impitBornAt > IMPIT_RECYCLE_MS) {

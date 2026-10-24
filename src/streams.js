@@ -603,6 +603,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // negative-cache it. Retry the transient answers, within a budget that
       // keeps the whole verification inside handleStream's soft deadline.
       const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
+      // Load-shed: when the mint semaphore is mostly consumed, single-attempt
+      // verification keeps each mint short so slots turn over faster. A stream
+      // that dies to a transient blip during a peak window is re-verified on
+      // the next request instead of stalling every queued mint behind retries.
+      const verifyAttempts = resolveCache && typeof resolveCache.isMintPressureHigh === 'function' && resolveCache.isMintPressureHigh()
+        ? 1
+        : VERIFY_ATTEMPTS;
       try {
         const result = await withRetry(
           async () => {
@@ -627,7 +634,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
             }
           },
           {
-            attempts: VERIFY_ATTEMPTS,
+            attempts: verifyAttempts,
             deadlineAt: verifyDeadlineAt,
             label: 'verify',
             shouldRetryResult: (r) => isTransientStatus(r.status),
@@ -726,7 +733,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
         }
 
-        if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe) {
+        if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe && !(resolveCache && typeof resolveCache.isMintPressureHigh === 'function' && resolveCache.isMintPressureHigh())) {
           await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
         }
       }
@@ -846,7 +853,7 @@ async function _prewarmMatchInner(match, config, topN, opts) {
       const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
       const key = `${src.source}:${match.id}:${src.id}${subKey}`;
       if (resolveCache.get(key)) return null;
-      return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
+        return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options), { skipIfBusy: true });
     }));
   }
 }
