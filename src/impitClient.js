@@ -107,6 +107,49 @@ function isDamitvTarget(url) {
   return url.includes('damitv.st');
 }
 
+// -- Dead-host blocklist -------------------------------------------------------
+// Hosts confirmed dead in production (live-VPS evidence 2026-10-24): prewarm /
+// verify / re-mint fetched them on every cycle and they can never answer.
+//   welovetocare.shop — Vavoo-family out-N mirror; the domain now presents a
+//     dns.google certificate (repointed to a sink), so every fetch pays a full
+//     TLS handshake to fail certificate validation, 3 impit attempts + 1
+//     undici fallback, and a multi-KB cert-dump log line.
+//   ksohls.ru — DaddyLive-family embed mirror (/premiumtv/daddyhd.php);
+//     refuses connections outright.
+// Both are re-harvested from upstream pages at runtime, so deleting them from
+// any static config cannot purge them. Blocking at this fetch choke point
+// kills every path (prewarm, verify, re-mint, ingestion) at once.
+const DEAD_HOSTS = new Set([
+  'welovetocare.shop',
+  'ksohls.ru',
+]);
+// Deploy-time extension without a code change: DEAD_HOSTS="a.com,b.org"
+for (const extra of String(process.env.DEAD_HOSTS || '').split(',')) {
+  const host = extra.trim().toLowerCase();
+  if (host) DEAD_HOSTS.add(host);
+}
+
+/**
+ * Returns the matched dead registrable domain for a URL (subdomains like
+ * out-3.welovetocare.shop count), or null when the URL is not dead. Suffix
+ * walking is anchored at the hostname's own labels, so
+ * welovetocare.shop.evil.com can never match.
+ */
+function isDeadHost(url) {
+  if (!url || typeof url !== 'string') return null;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    const parts = host.split('.');
+    for (let i = 0; i < parts.length; i++) {
+      const candidate = parts.slice(i).join('.');
+      if (DEAD_HOSTS.has(candidate)) return candidate;
+    }
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function isDembedTarget(url) {
   if (!url || typeof url !== 'string') return false;
   return url.includes('dembed.st');
@@ -136,6 +179,17 @@ const MAX_REDIRECT_HOPS = 5;
  * @returns {{ ok, status, text: () => string, json: () => object }}
  */
 async function safeFetch(url, opts = {}) {
+  // Dead hosts are rejected before any client selection, socket or TLS work:
+  // no impit attempts, no undici fallback, no log line. The error is
+  // deliberately non-transient (unknown code, calm message) so the shared
+  // retry policy treats it as a verdict, not a blip, and never re-fires it.
+  const deadHost = isDeadHost(url);
+  if (deadHost) {
+    throw Object.assign(
+      new Error(`dead host blocked: ${deadHost}`),
+      { code: 'ERR_DEAD_HOST', deadHost }
+    );
+  }
   const { signal, timeoutMs = 15000, attempts = 3 } = opts;
   // Method, headers and body are reassigned per redirect hop on the undici path
   // (see the redirect loop below), so they cannot be destructured as const.
@@ -340,4 +394,4 @@ function isImpitAvailable() {
   return getImpit() !== null;
 }
 
-module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget };
+module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget, isDeadHost };
