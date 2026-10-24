@@ -116,6 +116,47 @@ describe('Shared resolve cache (worker 0 + worker 1 via resolver)', () => {
     expect(r[0].url).toBe('https://cdn.example/claim.m3u8');
   });
 
+  test.each(['streams', 'error'])('late owner cannot alter another worker’s result over HTTP (%s)', async outcome => {
+    const originalFetch = global.fetch;
+    const key = `provider:ownership_${outcome}:source`;
+    let ownerToken;
+    let started, finish, fail, releaseDone;
+    const mintStarted = new Promise(resolve => { started = resolve; });
+    const work = new Promise((resolve, reject) => { finish = resolve; fail = reject; });
+    const released = new Promise(resolve => { releaseDone = resolve; });
+    global.fetch = async (url, opts = {}) => {
+      const response = await originalFetch(url, opts);
+      if (url.includes('claim=1&fenced=1') && !ownerToken) {
+        const claim = await response.clone().json();
+        if (claim.ok) ownerToken = claim.ownerToken;
+      }
+      if (opts.method === 'DELETE' && url.includes('ownerToken=')) releaseDone();
+      return response;
+    };
+    try {
+      const a = new StreamResolveCache();
+      const aResponse = a.getOrCreate(key, () => { started(); return work; });
+      await mintStarted;
+      expect(typeof ownerToken).toBe('string');
+      // Explicitly release A's reservation, then reacquire it as B. Controlled
+      // clock unit tests cover natural expiry; this tests the same ownership
+      // replacement and worker POST/DELETE wiring against the real HTTP server.
+      const release = await (await originalFetch(`${BASE}/api/cache/${encodeURIComponent(key)}?ownerToken=${encodeURIComponent(ownerToken)}`, { method: 'DELETE' })).json();
+      expect(release.ok).toBe(true);
+      const b = new StreamResolveCache();
+      await b.getOrCreate(key, async () => [{ url: 'https://cdn.example/new.m3u8' }]);
+      if (outcome === 'error') fail(new Error('late provider failure'));
+      else finish([{ url: 'https://cdn.example/old.m3u8' }]);
+      await aResponse;
+      if (outcome === 'error') await released;
+      const current = await (await originalFetch(`${BASE}/api/cache/${encodeURIComponent(key)}`)).json();
+      expect(current.status).toBe('ok');
+      expect(current.streams).toEqual([{ url: 'https://cdn.example/new.m3u8' }]);
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+
   test('empty active set clears shared match entries but keeps evergreen channels', async () => {
     const cache = new StreamResolveCache();
     const endedKey = 'provider:ended_prune:s1';
