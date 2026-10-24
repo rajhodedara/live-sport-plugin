@@ -5,7 +5,7 @@ module.exports = {
       script: 'dist/index.js',
       instances: 2,
       exec_mode: 'cluster',
-      max_memory_restart: '1300M',
+      max_memory_restart: '1500M',
       node_args: '--expose-gc',
       env: {
         NODE_ENV: 'production',
@@ -20,7 +20,7 @@ module.exports = {
         // - not the request rate - sets the peak. At the 90 min code default with
         // two active instances that is ~750 MB/worker, which is what drove the
         // RSS sawtooth up into the restart ceiling. 10 min caps it near ~85 MB.
-        IMPIT_RECYCLE_MS: '600000',
+        IMPIT_RECYCLE_MS: '240000',
         PREWARM_MAX_MATCHES: '12',
         PREWARM_CRON_SCHEDULE: '*/3 * * * *',
         WARP_PROXY_URL: 'socks5://127.0.0.1:40000',
