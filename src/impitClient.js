@@ -123,6 +123,25 @@ const _undiciAgent = new Agent({
 // redirect loop costs about what a single timed-out request costs.
 const MAX_REDIRECT_HOPS = 5;
 
+// A redirected origin must not inherit caller credentials or an overridden
+// Host. Preserve supported undici header shapes without mutating caller input.
+function withoutRedirectCredentials(headers) {
+  if (!headers) return headers;
+  const sensitive = new Set(['authorization', 'cookie', 'cookie2', 'proxy-authorization', 'host']);
+  const keep = name => !sensitive.has(String(name).toLowerCase());
+  if (Array.isArray(headers) && headers.every(value => typeof value === 'string')) {
+    const filtered = [];
+    for (let i = 0; i < headers.length; i += 2) {
+      if (keep(headers[i])) filtered.push(headers[i], headers[i + 1]);
+    }
+    return filtered;
+  }
+  if (typeof headers[Symbol.iterator] === 'function') {
+    return Array.from(headers).filter(([name]) => keep(name)).flat();
+  }
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => keep(name)));
+}
+
 // -- Core helper --------------------------------------------------------------
 /**
  * safeFetch - fetches a URL using impit when available, falls back to undici.
@@ -305,6 +324,12 @@ async function safeFetch(url, opts = {}) {
       nextUrl = new URL(rawLocation, currentUrl);
     } catch (_) { break; }
     if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') break;
+
+    // Origins include scheme and port, not just hostname. Once removed, these
+    // credentials stay removed even if a later hop returns to the first origin.
+    if (nextUrl.origin !== new URL(currentUrl).origin) {
+      headers = withoutRedirectCredentials(headers);
+    }
 
     if (method !== 'HEAD' && res.statusCode !== 307 && res.statusCode !== 308) {
       method = 'GET';
