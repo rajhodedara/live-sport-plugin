@@ -128,7 +128,8 @@ class StreamResolveCache {
     this.pendingOperations = new Map(); // key -> locally prunable operation
     this.ttl = new Map();       // sourceName -> learned TTL ms
     this._mintActive = 0;       // mintFn executions holding a slot right now
-    this._mintWaiters = [];     // on-demand callers parked for a slot
+    this._mintWaitersHi = [];   // priority waiters (real user resolve — jumps the line)
+    this._mintWaitersLo = [];   // background waiters (prewarm)
     this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, evictions: 0, shedMints: 0 };
   }
 
@@ -147,18 +148,19 @@ class StreamResolveCache {
    */
   async _withMintSlot(fn, opts = {}) {
     if (this._mintActive >= this.mintMaxConcurrent) {
-      if (opts.skipIfBusy) {
+      if (opts.skipIfBusy && !opts.priority) {
         this.statsCounters.shedMints++;
         return null;
       }
       const granted = await new Promise((resolve) => {
         const entry = () => { clearTimeout(timer); resolve(true); };
         const timer = setTimeout(() => {
-          const i = this._mintWaiters.indexOf(entry);
-          if (i !== -1) this._mintWaiters.splice(i, 1);
+          const q = opts.priority ? this._mintWaitersHi : this._mintWaitersLo;
+          const i = q.indexOf(entry);
+          if (i !== -1) q.splice(i, 1);
           resolve(false);
         }, this.mintQueueWaitMs);
-        this._mintWaiters.push(entry);
+        (opts.priority ? this._mintWaitersHi : this._mintWaitersLo).push(entry);
       });
       if (!granted) {
         this.statsCounters.shedMints++;
@@ -171,7 +173,10 @@ class StreamResolveCache {
     try {
       return await fn();
     } finally {
-      const wake = this._mintWaiters.shift();
+      // Priority handoff: a waiting user resolve gets the slot before any
+      // parked prewarm. Slots only fall through to background when no
+      // priority caller is waiting.
+      const wake = this._mintWaitersHi.shift() || this._mintWaitersLo.shift();
       if (wake) wake(); // hand the slot straight to the next waiter
       else this._mintActive--;
     }

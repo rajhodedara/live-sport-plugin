@@ -59,21 +59,21 @@ describe('mint semaphore (StreamResolveCache.getOrCreate)', () => {
       return [{ url: 'y' }];
     });
     await sleep(5); // let getOrCreate reach the parking spot (microtask chain)
-    expect(cache._mintWaiters.length).toBe(1); // parked, not running
+    expect(cache._mintWaitersLo.length).toBe(1); // parked, not running
 
     setTimeout(() => {
       released = true;
       // Simulate the slot holder finishing: with slot-transfer semantics the
       // release hands ownership straight to the waiter (count stays 1 — the
       // waiter's own finally decrements when its mint completes).
-      cache._mintWaiters.shift()?.();
+      cache._mintWaitersLo.shift()?.();
     }, 20);
 
     const res = await waiter;
     expect(res).toHaveLength(1);
     expect(cache.entries.get('k2').status).toBe('ok');
     expect(cache._mintActive).toBe(0);                  // drained cleanly
-    expect(cache._mintWaiters.length).toBe(0);
+    expect(cache._mintWaitersLo.length).toBe(0);
   });
 
   test('on-demand caller sheds after the wait window (no entry written)', async () => {
@@ -109,11 +109,11 @@ describe('mint semaphore (StreamResolveCache.getOrCreate)', () => {
 
     const p3 = c.getOrCreate('w3', async () => [{ url: '3' }]);
     await sleep(5);
-    expect(c._mintWaiters.length).toBe(1);  // w3 parked
+    expect(c._mintWaitersLo.length).toBe(1);  // w3 parked
 
     hold1();                                // release → slot hands off to w3
     const r1 = await p1;
-    expect(c._mintWaiters.length).toBe(0);
+    expect(c._mintWaitersLo.length).toBe(0);
     hold2();
     const [r2, r3] = await Promise.all([p2, p3]);
 

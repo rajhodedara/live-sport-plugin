@@ -30,8 +30,15 @@ let _impitBornAt = 0;
 // In-flight fetches keep their reference and finish safely on the old instance.
 const IMPIT_RECYCLE_MS = Math.max(3 * 60 * 1000, Number(process.env.IMPIT_RECYCLE_MS) || 90 * 60 * 1000);
 
+const IMPIT_RSS_RECYCLE_MB = Number(process.env.IMPIT_RSS_RECYCLE_MB || 900);
+
 function getImpit() {
-  if (_impitInstance && Date.now() - _impitBornAt > IMPIT_RECYCLE_MS) {
+  // Recycle on schedule, or early when the process crosses an RSS budget
+  // (native pools grow with fetch volume; recycling frees them without
+  // waiting for the full interval). Minimum 60s age prevents churn.
+  const rssOverBudget = process.memoryUsage().rss / 1048576 > IMPIT_RSS_RECYCLE_MB;
+  const ageOk = Date.now() - _impitBornAt > 60000;
+  if (_impitInstance && (Date.now() - _impitBornAt > IMPIT_RECYCLE_MS || (rssOverBudget && ageOk))) {
     console.log('[impitClient] recycling impit instance (native memory hygiene)');
     _impitInstance = undefined;
     if (typeof global.gc === 'function') {

@@ -543,6 +543,37 @@ function repairRefererFor(targetUrl) {
   return `https://${host}/`;
 }
 
+// Read at most maxBytes of a response body without materializing the whole
+// thing. Verification only needs the playlist head (EXT tags, takedown
+// markers, quality attributes) — full bodies were the #1 heap allocator
+// (91% of live allocations were Buffer.toString over full responses).
+async function readBodySample(response, maxBytes = 64 * 1024) {
+  try {
+    if (response.body && typeof response.body.getReader === 'function') {
+      const reader = response.body.getReader();
+      const chunks = [];
+      let total = 0;
+      try {
+        while (total < maxBytes) {
+          const { done, value } = await reader.read();
+          if (done || !value) break;
+          chunks.push(value);
+          total += value.byteLength;
+        }
+      } finally {
+        reader.cancel().catch(() => {});
+      }
+      return Buffer.concat(chunks).toString('utf8');
+    }
+    if (typeof response.arrayBuffer === 'function') {
+      const buf = await response.arrayBuffer();
+      return Buffer.from(buf.byteLength > maxBytes ? buf.slice(0, maxBytes) : buf).toString('utf8');
+    }
+    if (typeof response.text === 'function') return String(await response.text()).slice(0, maxBytes);
+  } catch (_) { /* fall through to text() */ }
+  try { return String(await response.text()).slice(0, maxBytes); } catch (_) { return ''; }
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
   // Drop-kind tracking: an empty mint whose drops were ALL transient (timeouts,
   // 5xx, resets) is a load symptom, not proof of death — it gets a SHORT negative
@@ -632,14 +663,16 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
               // _safeFetch handles impit -> undici fallback automatically on all platforms.
               // attempts:1 — retrying is this layer's job, so the two do not compound
               // into a multi-minute stall.
+              // Range keeps the CDN from handing us megabyte bodies; the cap
+              // bounds what we decode even when an origin ignores Range.
               const r = await _safeFetch(targetUrl, {
                 method: 'GET',
-                headers: reqHeaders,
+                headers: { ...reqHeaders, Range: 'bytes=0-65535' },
                 signal: attemptController.signal,
                 timeoutMs: VERIFY_TIMEOUT_MS,
                 attempts: 1,
               });
-              return { status: r.status, body: await r.text() };
+              return { status: r.status, body: await readBodySample(r, 64 * 1024) };
             } finally {
               clearTimeout(attemptTimer);
             }
@@ -693,13 +726,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
             if (reqHeaders['Cookie']) retryHeaders['Cookie'] = reqHeaders['Cookie'];
             const r2 = await _safeFetch(targetUrl, {
               method: 'GET',
-              headers: retryHeaders,
+              headers: { ...retryHeaders, Range: 'bytes=0-65535' },
               timeoutMs: VERIFY_TIMEOUT_MS,
               attempts: 1,
             });
             res = { status: r2.status };
-            bodySample = await r2.text();
-            if (res.status === 200) referer = guess; // so a later noteFailure/keep decision is accurate
+            bodySample = await readBodySample(r2, 64 * 1024);
+            if (res.status === 200 || res.status === 206) referer = guess; // so a later noteFailure/keep decision is accurate
           }
         } catch (_) { /* fall through to the dead-stream handling below */ }
       }
@@ -1155,7 +1188,7 @@ async function handleStream(type, id, config) {
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
     const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
     const promise = resolveCache
-      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key))
+      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key), { priority: true })
       .then((minted) => {
         state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
         state.settled = true;
