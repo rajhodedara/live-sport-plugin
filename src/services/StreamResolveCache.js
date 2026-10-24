@@ -43,7 +43,7 @@ const DADDYLIVE_MAX_TTL_MS = Math.max(
 // land in the cache for the next request); prewarm callers (opts.skipIfBusy)
 // are shed instantly with NO entry written — not even negative — so the next
 // view retries naturally.
-const MINT_MAX_CONCURRENT = Number(process.env.MINT_MAX_CONCURRENT || 24);
+const MINT_MAX_CONCURRENT = Number(process.env.MINT_MAX_CONCURRENT || 64);
 const MINT_QUEUE_WAIT_MS = Number(process.env.MINT_QUEUE_WAIT_MS || 8000);
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
 
