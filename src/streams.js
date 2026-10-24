@@ -544,6 +544,12 @@ function repairRefererFor(targetUrl) {
 }
 
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
+  // Drop-kind tracking: an empty mint whose drops were ALL transient (timeouts,
+  // 5xx, resets) is a load symptom, not proof of death — it gets a SHORT negative
+  // TTL (45s) so the source recovers as soon as pressure drops. Hard answers
+  // (404, takedown slates, invalid bodies) keep the full negative TTL.
+  let transientDrops = 0;
+  let hardDrops = 0;
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
     if (!s || !s.url) return null;
@@ -613,7 +619,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // that dies to a transient blip during a peak window is re-verified on
       // the next request instead of stalling every queued mint behind retries.
       const verifyAttempts = resolveCache && typeof resolveCache.isMintPressureHigh === 'function' && resolveCache.isMintPressureHigh()
-        ? 1
+        ? 2 // never 1: one sample of a flaky path drops working streams
         : VERIFY_ATTEMPTS;
       try {
         const result = await withRetry(
@@ -653,6 +659,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         bodySample = result.body;
       } catch (fetchErr) {
         const kind = isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
+        if (kind === 'unreachable after retries') transientDrops++; else hardDrops++;
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -708,6 +715,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           console.log(`[Filter] Keeping stream despite 403 (no referer available): ${targetUrl}`);
           return s;
         }
+        if (res.status === 404 || res.status === 410) hardDrops++; else transientDrops++;
+        if (res.status === 404 || res.status === 410) hardDrops++; else transientDrops++;
         console.log(`[Filter] Dropped dead stream (${res.status}): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -717,6 +726,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
       if (!isMpd && !isMp4 && !bodySample.includes('#EXT')) {
+        hardDrops++;
+        hardDrops++;
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -724,6 +735,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
       // Reject Pluto TV takedown slates ("That's a wrap" / "no longer available on this device" loops)
       if (/takedownslate|ptv_takedownslates/i.test(bodySample)) {
+        hardDrops++;
+        hardDrops++;
         console.log(`[Filter] Dropped Pluto takedown slate: ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -764,12 +777,18 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
+      transientDrops++;
+      transientDrops++;
       console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${err.message}`);
       return null;
     }
   }));
 
-  return checkedStreams.filter(Boolean);
+  const result = checkedStreams.filter(Boolean);
+  if (result.length === 0 && transientDrops > 0 && hardDrops === 0) {
+    result.negativeTtlMs = 45000; // transient-only: recover as soon as pressure drops
+  }
+  return result;
 }
 
 // Mint streams for a single source and health-verify them before they enter the

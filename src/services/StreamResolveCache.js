@@ -429,7 +429,9 @@ class StreamResolveCache {
         // positive and negative late answers before touching either cache.
         if (operation.pruned) return;
         let status = 'failed';
-        let ttl = this.negativeTtlMs;
+        // A mint can suggest a shorter negative TTL when its drops were
+        // transient-only (load symptoms recover in seconds, not minutes).
+        let ttl = (Array.isArray(streams) && streams.negativeTtlMs) || this.negativeTtlMs;
         if (Array.isArray(streams) && streams.length > 0) {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
