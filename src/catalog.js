@@ -857,7 +857,15 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
 //       5min for upcoming / 24-7 networks,
 //      30min for replay hubs (static archive content).
 const META_CACHE_MAX = 1000;
-const _metaCache = new Map(); // key → { data, expiresAt }
+const _metaCache = new Map(); // key → { data, expiresAt, revision }
+
+function _metaCacheRevision() {
+  const cacheService = container.resolve('cacheService');
+  // Poll for cross-worker snapshots before trusting a memo hit. This returns
+  // the internal read-only array without cloning or projecting any matches.
+  if (typeof cacheService.getMatchesReadOnly === 'function') cacheService.getMatchesReadOnly();
+  return cacheService.rev || 0;
+}
 
 function _metaCacheKey(id, config) {
   const tz = (config && config.timezone) || '';
@@ -865,22 +873,28 @@ function _metaCacheKey(id, config) {
   return `${id}|${tz}|${rf}`;
 }
 
-function _metaCacheGet(key) {
+function _metaCacheGet(key, revision) {
   const entry = _metaCache.get(key);
   if (!entry) return null;
-  if (Date.now() > entry.expiresAt) { _metaCache.delete(key); return null; }
+  if (Date.now() > entry.expiresAt || entry.revision !== revision) {
+    _metaCache.delete(key);
+    return null;
+  }
   // Promote to end (keep-alive semantics on repeated access)
   _metaCache.delete(key);
   _metaCache.set(key, entry);
   return entry.data;
 }
 
-function _metaCacheSet(key, data, ttlMs) {
+function _metaCacheSet(key, data, ttlMs, revision) {
   if (_metaCache.size >= META_CACHE_MAX) {
     // Evict the oldest entry (Map preserves insertion order)
     _metaCache.delete(_metaCache.keys().next().value);
   }
-  _metaCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+  // Retain the revision observed before building. A sync awaited by a hub
+  // may advance it; the next request will then rebuild instead of treating
+  // an older response as belonging to the new snapshot.
+  _metaCache.set(key, { data, expiresAt: Date.now() + ttlMs, revision });
 }
 
 // ─── Catalog page memo ────────────────────────────────────────────────────────
@@ -955,7 +969,8 @@ async function handleCatalog(type, id, extra, config) {
 async function buildReplayHubMeta(id, config = {}) {
   // Replay hubs generate 2.5 MB+ JSON payloads — cache them for 30 minutes.
   const _rhmCacheKey = _metaCacheKey(id, config);
-  const _rhmCached = _metaCacheGet(_rhmCacheKey);
+  const _rhmRevision = _metaCacheRevision();
+  const _rhmCached = _metaCacheGet(_rhmCacheKey, _rhmRevision);
   if (_rhmCached) return _rhmCached;
 
   const cacheService = container.resolve('cacheService');
@@ -1071,7 +1086,7 @@ async function buildReplayHubMeta(id, config = {}) {
       cacheMaxAge: 1800,
       staleRevalidate: 3600
     };
-    _metaCacheSet(_rhmCacheKey, _datehubResult, 30 * 60 * 1000);
+    _metaCacheSet(_rhmCacheKey, _datehubResult, 30 * 60 * 1000, _rhmRevision);
     return _datehubResult;
   }
 
@@ -1188,7 +1203,7 @@ async function buildReplayHubMeta(id, config = {}) {
     cacheMaxAge: 1800,
     staleRevalidate: 3600
   };
-  _metaCacheSet(_rhmCacheKey, _sporthubResult, 30 * 60 * 1000);
+  _metaCacheSet(_rhmCacheKey, _sporthubResult, 30 * 60 * 1000, _rhmRevision);
   return _sporthubResult;
 }
 
@@ -1660,16 +1675,17 @@ async function handleMeta(type, id, config) {
     return { meta: null };
   }
 
+  // Memo hits must not starve the background schedule refresh.
+  container.resolve('cronService').ensureFresh();
+
   // ─── Server-side cache lookup ─────────────────────────────────────────────
   // Cloudflare bypasses its edge cache for /:config/meta/... URLs (unique per
   // user), so every personalized click hits the VPS. This in-process LRU means
   // repeat requests for the same match return in < 5ms instead of ~800ms.
   const _hmCacheKey = _metaCacheKey(id, config);
-  const _hmCached = _metaCacheGet(_hmCacheKey);
+  const _hmRevision = _metaCacheRevision();
+  const _hmCached = _metaCacheGet(_hmCacheKey, _hmRevision);
   if (_hmCached) return _hmCached;
-
-  // Fire-and-forget stale-while-revalidate, same as handleCatalog.
-  container.resolve('cronService').ensureFresh();
 
   // Individual match meta or Replay Hub meta
   if (!id.startsWith('nuvio_sport_')) {
@@ -1733,7 +1749,7 @@ async function handleMeta(type, id, config) {
     cacheMaxAge: live ? 120 : 600,
     staleRevalidate: live ? 300 : 1800
   };
-  _metaCacheSet(_hmCacheKey, _hmResult, _hmTtl);
+  _metaCacheSet(_hmCacheKey, _hmResult, _hmTtl, _hmRevision);
   return _hmResult;
 }
 
