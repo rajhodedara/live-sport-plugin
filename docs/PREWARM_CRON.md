@@ -26,7 +26,7 @@ but it deliberately does **not** cover everything:
 | Limitation | Effect on DaddyLive |
 | :--- | :--- |
 | `if (m.category === 'networks') return false;` | Every DaddyLive **24/7 channel** (`dlv_ch_*`) is never prewarmed. |
-| `PREWARM_MAX_MATCHES` (default **12**) per tick | Only the first 12 live fixtures get warmed. |
+| `PREWARM_MAX_MATCHES` (default **12**) per tick | Only the first 12 live fixtures get warmed. Setting `0` acts as a master switch disabling all prewarm jobs and fire-aheads. |
 | Runs only on worker 0 (`src/index.js`) | The other workers' caches stay cold. |
 
 `scripts/prewarm-cron.js` closes those gaps: it warms **fixtures and 24/7 network

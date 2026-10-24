@@ -195,7 +195,7 @@ Configure the addon by editing `.env` or setting environment variables:
 | `CF_PROXY_URL` | `""` | Optional Cloudflare Worker proxy endpoint (see [cloudflare-worker.js](file:///c:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/cloudflare-worker.js)) |
 | `WARP_PROXY_URL` | `""` | Optional Cloudflare WARP SOCKS5 proxy (`socks5://127.0.0.1:40000`) |
 | `PREWARM_CRON_SCHEDULE` | `*/3 * * * *` | Cron schedule for pre-warming in-flight stream resolutions |
-| `PREWARM_MAX_MATCHES` | `12` | Max number of concurrent live matches to pre-warm |
+| `PREWARM_MAX_MATCHES` | `12` | Max number of live matches to pre-warm per tick (`0` disables all prewarm jobs and fire-aheads) |
 
 ### Interactive Configuration UI (`/configure`)
 Visit `http://localhost:7000/configure` to customize:

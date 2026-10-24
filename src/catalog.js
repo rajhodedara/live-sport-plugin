@@ -1730,7 +1730,7 @@ async function handleMeta(type, id, config) {
   //     mints after the env kill-switch). topN bounds per-view width: the
   //     top-ranked sources mint ahead of the click; the rest resolve on demand.
   try {
-    const prewarmEnabled = Number(process.env.PREWARM_MAX_MATCHES || 12) > 0;
+    const prewarmEnabled = Number(process.env.PREWARM_MAX_MATCHES !== undefined ? process.env.PREWARM_MAX_MATCHES : 12) > 0;
     if (prewarmEnabled && !mintUnderPressure() && isMatchLive(match) && match.category !== 'networks' && !isReplayMatch(match)) {
       const metaTopN = Number(process.env.PREWARM_META_TOPN || 8);
       setImmediate(() => prewarmMatch(match, config || {}, metaTopN).catch(() => {}));

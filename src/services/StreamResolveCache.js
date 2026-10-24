@@ -215,6 +215,61 @@ class StreamResolveCache {
     return val;
   }
 
+  /**
+   * Canonical cache key constructor shared by streams.js, CronService, and resolvers.
+   * Format: `${src.source}:${matchId}:${src.id}${subKey}`
+   * where subKey is `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}`.
+   */
+  static resolveKey(src, matchId) {
+    if (!src) return '';
+    const mId = (matchId && typeof matchId === 'object') ? matchId.id : (matchId || src.matchId || '');
+    const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
+    return `${src.source}:${mId}:${src.id}${subKey}`;
+  }
+
+  resolveKey(src, matchId) {
+    return StreamResolveCache.resolveKey(src, matchId);
+  }
+
+  /**
+   * O(1) check if a key has a fresh, positive (status === 'ok') entry.
+   * Avoids cloning stream arrays or mutating LRU access order.
+   */
+  has(key, minRemainingMs = 0) {
+    const e = this.entries.get(key);
+    if (!e) return false;
+    const now = Date.now();
+    if (now + minRemainingMs >= e.expiresAt) {
+      if (now >= e.expiresAt) this.entries.delete(key);
+      return false;
+    }
+    return e.status === 'ok';
+  }
+
+  /**
+   * O(1) check if a key is currently resolved (either positive 'ok' or negative 'failed')
+   * and unexpired, preventing duplicate prewarm re-minting of already processed sources.
+   */
+  isResolved(key, minRemainingMs = 0) {
+    const e = this.entries.get(key);
+    if (!e) return false;
+    const now = Date.now();
+    if (now + minRemainingMs >= e.expiresAt) {
+      if (now >= e.expiresAt) this.entries.delete(key);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Remaining TTL in milliseconds for an entry, or 0 if missing/expired.
+   */
+  getRemainingTtl(key) {
+    const e = this.entries.get(key);
+    if (!e) return 0;
+    return Math.max(0, e.expiresAt - Date.now());
+  }
+
   /** Fresh positive entry? Returns streams with isolated behavior hints, else null. */
   get(key) {
     const e = this.entries.get(key);

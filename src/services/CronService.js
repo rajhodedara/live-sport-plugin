@@ -178,9 +178,10 @@ class CronService {
    */
   async prewarmPopular() {
     try {
-      const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES || 12);
+      const PREWARM_MAX = Number(process.env.PREWARM_MAX_MATCHES !== undefined ? process.env.PREWARM_MAX_MATCHES : 12);
+      if (PREWARM_MAX <= 0) return;
       const { isMatchLive, isReplayMatch } = require('../catalog');
-      const { prewarmMatch, prewarmSkipProvidersSet } = require('../streams');
+      const { prewarmMatch, prewarmSkipProvidersSet, resolveKey } = require('../streams');
       const resolveCache = this.streamResolveCache;
       const skip = prewarmSkipProvidersSet();
       const matches = this.cacheService ? this.cacheService.getMatches() : [];
@@ -212,11 +213,22 @@ class CronService {
         if (todo.length >= PREWARM_MAX) break;
         let warm = false;
         if (resolveCache) {
-          const prioritySources = m.sources.filter(s => ['daddylive', 'ppvst'].includes(s.source) && !skip.has(String(s.source || '').toLowerCase()));
+          const eligibleSources = m.sources.filter(s => s && !skip.has(String(s.source || '').toLowerCase()));
+          const prioritySources = eligibleSources.filter(s => ['daddylive', 'ppvst', 'leaf'].includes(s.source));
+          const isSourceWarm = (s) => {
+            const key = resolveKey(s, m.id);
+            if (typeof resolveCache.isResolved === 'function') {
+              return resolveCache.isResolved(key);
+            }
+            if (typeof resolveCache.has === 'function') {
+              return resolveCache.has(key);
+            }
+            return !!resolveCache.get(key);
+          };
           if (prioritySources.length > 0) {
-            warm = prioritySources.every(s => resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+            warm = prioritySources.every(isSourceWarm);
           } else {
-            warm = m.sources.some((s) => !skip.has(String(s.source || '').toLowerCase()) && resolveCache.get(`${s.source}:${m.id}:${s.id}`));
+            warm = eligibleSources.some(isSourceWarm);
           }
         }
         if (!warm) todo.push(m);
