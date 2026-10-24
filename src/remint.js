@@ -20,7 +20,22 @@ const REMINT_TIMEOUT_MS = 12000;
 // After a re-mint, hold the rewritten manifest at least this long so we do not
 // re-mint on every 3-6 s player poll (that would hammer the provider).
 const REMINT_MIN_CACHE_MS = 45 * 1000;
-const remintCache = new Map(); // rck -> { freshUrl, expiresAt }
+const MAX_REMINT_CACHE_ENTRIES = 5000;
+
+class BoundedRemintMap extends Map {
+  set(key, value) {
+    if (this.size >= MAX_REMINT_CACHE_ENTRIES && !this.has(key)) {
+      const oldestKey = this.keys().next().value;
+      if (oldestKey !== undefined) this.delete(oldestKey);
+    }
+    return super.set(key, value);
+  }
+}
+
+const remintCache = new BoundedRemintMap(); // rck -> { freshUrl, expiresAt }
+
+// Single-flight coalescing: concurrent viewers of the same stream share one in-flight scrape
+const mintInFlight = new Map(); // rck -> Promise<Array>
 
 // Periodically clean up expired entries to prevent unbounded memory growth
 setInterval(() => {
@@ -183,10 +198,15 @@ async function attemptRemint(rck, heldUrl = '') {
     const candidates = rckCandidates(rck);
     if (candidates.length === 0) return null;
 
-    const matches = container.resolve('cacheService').getMatches();
+    const cacheService = container.resolve('cacheService');
     let resolved = null;
     for (const c of candidates) {
-      const match = matches.find(m => m && m.id === c.matchId);
+      // O(1) indexed lookup via findMatch: prevents full-catalog deep clone (~60 MB heap churn)
+      const match = (cacheService && typeof cacheService.findMatch === 'function')
+        ? cacheService.findMatch(c.matchId)
+        : ((cacheService && typeof cacheService.getMatchesReadOnly === 'function')
+          ? cacheService.getMatchesReadOnly()
+          : (cacheService ? cacheService.getMatches() : [])).find(m => m && m.id === c.matchId);
       if (!match) continue;
       const src = (match.sources || []).find(s => {
         if (!s) return false;
@@ -213,11 +233,20 @@ async function attemptRemint(rck, heldUrl = '') {
 
     const { resolveSource } = require('./streams');
     const remintSrc = { ...resolved.src, forceRefresh: true, skipCache: true };
-    const minted = await Promise.race([
-      resolveSource(remintSrc, resolved.match, null),
-      new Promise((_, rej) =>
-        setTimeout(() => rej(new Error('re-mint timeout')), REMINT_TIMEOUT_MS)),
-    ]);
+
+    // Single-flight coalescing: concurrent viewers of the same stream share one in-flight scrape
+    let mintPromise = mintInFlight.get(rck);
+    if (!mintPromise) {
+      mintPromise = Promise.race([
+        resolveSource(remintSrc, resolved.match, null),
+        new Promise((_, rej) =>
+          setTimeout(() => rej(new Error('re-mint timeout')), REMINT_TIMEOUT_MS)),
+      ]).finally(() => {
+        mintInFlight.delete(rck);
+      });
+      mintInFlight.set(rck, mintPromise);
+    }
+    const minted = await mintPromise;
     if (!Array.isArray(minted) || minted.length === 0) return null;
 
     // Collect all candidate fresh URLs from minted streams.
@@ -317,6 +346,6 @@ async function attemptRemint(rck, heldUrl = '') {
 
 
 module.exports = {
-  REMINT_TIMEOUT_MS, REMINT_MIN_CACHE_MS, remintCache,
+  REMINT_TIMEOUT_MS, REMINT_MIN_CACHE_MS, MAX_REMINT_CACHE_ENTRIES, remintCache, mintInFlight,
   mergeRemintedUrl, getRemintCacheKey, readRck, isExpiryStatus, rckCandidates, attemptRemint
 };
