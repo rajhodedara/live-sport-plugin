@@ -31,16 +31,22 @@ export async function route(req, res) {
     return
   }
 
-  const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()
-  const host = req.headers['x-forwarded-host'] || req.headers.host
-  
-  let baseOrigin = process.env.BASE_URL || `${proto}://${host}`
-  if (req.headers['x-forwarded-host']) {
-    const fwHost = req.headers['x-forwarded-host'].split(',')[0].trim()
-    baseOrigin = `${proto}://${fwHost}`
-  }
+  let loc
+  try {
+    const proto = (req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim()
+    const host = req.headers['x-forwarded-host'] || req.headers.host
 
-  const loc = new URL(req.url ?? '/', baseOrigin)
+    let baseOrigin = process.env.BASE_URL || `${proto}://${host}`
+    if (req.headers['x-forwarded-host']) {
+      const fwHost = req.headers['x-forwarded-host'].split(',')[0].trim()
+      baseOrigin = `${proto}://${fwHost}`
+    }
+
+    loc = new URL(req.url ?? '/', baseOrigin)
+  } catch {
+    json(res, 400, { ok: false, error: 'invalid request URL' })
+    return
+  }
   const { pathname, searchParams, origin } = loc
 
   try {
