@@ -795,6 +795,17 @@ function prewarmSkipProvidersSet() {
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 
+// Global concurrency cap for prewarm mints. Measured on the live VPS: each
+// in-flight mint holds ~1.4 MB of heap (verify scratch: scraper-page strings,
+// parsed playlists) plus its socket fan-out, and unbounded concurrency (250+
+// simultaneous mints under browse traffic) saturated the CPU, ballooned native
+// memory and tripped the PM2 restart ceiling every ~10 minutes. The cap bounds
+// the working set; overflow is skipped, never queued — the next meta view
+// retries, and on-demand resolution is not gated by this. The counter is per
+// worker (module state), so a 2-worker fleet runs up to 2x the cap.
+const PREWARM_MAX_CONCURRENT = Number(process.env.PREWARM_MAX_CONCURRENT || 40);
+let _prewarmActive = 0;
+
 async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match || !match.sources || !match.sources.length) return;
@@ -807,26 +818,36 @@ async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts 
     if (match.category === 'networks' || match.isChannel === true || /_ch_/.test(String(match.id || ''))) {
       return;
     }
-    const resolveCache = container.resolve('streamResolveCache');
-    const activeSources = selectSources(match.sources, config || null, match);
-    const skip = prewarmSkipProvidersSet();
-    const eligible = skip.size ? activeSources.filter((s) => !skip.has(String(s.source || '').toLowerCase())) : activeSources;
-    const targets = eligible.slice(0, topN);
-    if (targets.length === 0) return;
-    const options = opts || { skipSpeedProbe: true };
-    console.log(`[Prewarm] minting ${targets.length} sources for ${match.id} (in batches of 3)`);
-    const BATCH_SIZE = 3;
-    for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-      const batch = targets.slice(i, i + BATCH_SIZE);
-      await Promise.allSettled(batch.map(async (src) => {
-        const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
-        const key = `${src.source}:${match.id}:${src.id}${subKey}`;
-        if (resolveCache.get(key)) return null;
-        return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
-      }));
+    if (_prewarmActive >= PREWARM_MAX_CONCURRENT) return;
+    _prewarmActive++;
+    try {
+      await _prewarmMatchInner(match, config, topN, opts);
+    } finally {
+      _prewarmActive--;
     }
   } catch (err) {
     console.warn('[Prewarm] failed:', err.message);
+  }
+}
+
+async function _prewarmMatchInner(match, config, topN, opts) {
+  const resolveCache = container.resolve('streamResolveCache');
+  const activeSources = selectSources(match.sources, config || null, match);
+  const skip = prewarmSkipProvidersSet();
+  const eligible = skip.size ? activeSources.filter((s) => !skip.has(String(s.source || '').toLowerCase())) : activeSources;
+  const targets = eligible.slice(0, topN);
+  if (targets.length === 0) return;
+  const options = opts || { skipSpeedProbe: true };
+  console.log(`[Prewarm] minting ${targets.length} sources for ${match.id} (in batches of 3)`);
+  const BATCH_SIZE = 3;
+  for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+    const batch = targets.slice(i, i + BATCH_SIZE);
+    await Promise.allSettled(batch.map(async (src) => {
+      const subKey = src.streamSource ? `:${src.streamSource}${src.streamId ? ':' + src.streamId : ''}` : '';
+      const key = `${src.source}:${match.id}:${src.id}${subKey}`;
+      if (resolveCache.get(key)) return null;
+      return resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config || null, key, options));
+    }));
   }
 }
 
