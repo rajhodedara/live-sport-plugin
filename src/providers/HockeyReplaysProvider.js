@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('crypto');
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -96,8 +96,16 @@ class HockeyReplaysProvider extends BaseProvider {
       if (!isMatchLink) continue;
       if (/-{2,}$/.test(rawUrl)) continue;
 
-      const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${this.baseUrl}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
-      seenUrls.add(rawUrl);
+      let fullUrl;
+      try {
+        const parsed = new URL(rawUrl, `${this.baseUrl}/`);
+        if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+        fullUrl = parsed.href;
+      } catch (_) {
+        continue;
+      }
+      if (seenUrls.has(fullUrl)) continue;
+      seenUrls.add(fullUrl);
 
       // Extract match date from title (e.g. October 15, 2026 or September 29, 2026)
       let parsedDate = '';

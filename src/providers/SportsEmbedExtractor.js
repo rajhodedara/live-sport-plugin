@@ -92,9 +92,7 @@ async function extractSportsEmbed(embedUrl) {
     exports.ovpc12b4fa4bac(16);
     ctx = exports.ovpc12b4fa4bac(-16);
     
-    const { getImpit } = require('../impitClient');
-    const impit = getImpit();
-    let resp;
+    const { fetch: guardedFetch } = require('../services/ProviderOutbound');
     const fetchArgs = {
         method: 'POST',
         headers: {
@@ -109,16 +107,8 @@ async function extractSportsEmbed(embedUrl) {
         body: protoBytes
     };
     
-    if (impit) {
-        resp = await impit.fetch('https://sportsembed.su/api/get', fetchArgs);
-    } else {
-        const https = require('https');
-        const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 10000 });
-        const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
-        fetchArgs.agent = keepAliveAgent;
-        resp = await fetch('https://sportsembed.su/api/get', fetchArgs);
-    }
-    
+    const resp = await guardedFetch('https://sportsembed.su/api/get', fetchArgs);
+
     const resBuf = Buffer.from(await resp.arrayBuffer());
     if (resBuf.length < 50) throw new Error('API Blocked / Forbidden: ' + resBuf.toString());
     

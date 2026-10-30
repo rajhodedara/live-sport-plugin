@@ -17,36 +17,49 @@ class PpvStProvider extends BaseProvider {
   async getMatches() {
     const matches = [];
     try {
-      const res = await this.proxyFetch('https://api.ppv.st/api/streams', {
+      const signal = AbortSignal.timeout(15000);
+      const requestOptions = {
         headers: {
           'User-Agent': UA,
           'Referer': 'https://ppv.st/',
           'Origin': 'https://ppv.st'
         },
-        signal: AbortSignal.timeout(10000)
-      });
+        signal,
+        diagnosticOwner: 'catalog'
+      };
+      let res;
+      try {
+        res = await this.proxyFetch('https://api.ppv.st/api/streams', requestOptions);
+      } catch (error) {
+        if (error?.code !== 'ERR_OUTBOUND_CAPACITY' || signal.aborted) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        signal.throwIfAborted();
+        res = await this.proxyFetch('https://api.ppv.st/api/streams', requestOptions);
+      }
       if (!res.ok) return matches;
       const data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
-      if (!data.success || !data.streams) return matches;
+      if (!data?.success || !Array.isArray(data.streams)) return matches;
 
       for (const cat of data.streams) {
+        if (!cat || typeof cat.category !== 'string' || !Array.isArray(cat.streams)) continue;
         let category = cat.category.toLowerCase();
         if (category === 'combat sports') category = 'fighting';
         if (category === 'australian football') category = 'american_football';
         if (category === '24/7 streams') category = 'networks';
         for (const stream of cat.streams) {
-          if (!stream.iframe) continue;
+          if (!stream || typeof stream.name !== 'string' || !stream.name.trim()) continue;
           const slug = stream.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '');
-          const sources = [{
+          const sources = [];
+          if (stream.iframe) sources.push({
             source: 'ppvst',
             id: stream.id,
             channelName: stream.source_tag || stream.name,
             embedUrl: stream.iframe
-          }];
+          });
 
           if (Array.isArray(stream.substreams)) {
             stream.substreams.forEach(sub => {
-              if (sub.iframe) {
+              if (sub && sub.iframe) {
                 sources.push({
                   source: 'ppvst',
                   id: sub.id,
@@ -57,6 +70,8 @@ class PpvStProvider extends BaseProvider {
               }
             });
           }
+
+          if (!sources.length) continue;
 
           const is247 = Boolean(
             stream.tag === '24/7 channel' ||

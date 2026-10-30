@@ -1,13 +1,24 @@
 'use strict';
 
 const crypto = require('crypto');
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const { findBridgeIframe, matchesHost, isByseHost, playerHostname } = require('./bridgeIframe');
 
 function b64Decode(str) {
   return Buffer.from(str, 'base64');
+}
+
+function isNbaOnTvUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password &&
+      (url.hostname === 'nbaontv.com' || url.hostname.endsWith('.nbaontv.com'));
+  } catch (_) {
+    return false;
+  }
 }
 
 /**
@@ -216,7 +227,7 @@ class BasketballVideoProvider extends BaseProvider {
       const watchLinks = linkMatches.filter(l => {
         const dest = l[1] || '';
         const text = l[2].replace(/<[^>]+>/g, '').trim();
-        const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || dest.includes('nbaontv.com') || /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+        const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || isNbaOnTvUrl(dest, targetUrl) || /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
         const isVideoText = /watch|part|server|quarter|half|replay|full game/i.test(text);
         return isVideoDest || isVideoText;
       });
@@ -235,20 +246,22 @@ class BasketballVideoProvider extends BaseProvider {
         const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
         const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
 
-        // Unwrap nbaontv.com bridge wrappers
-        if (dest.includes('nbaontv.com')) {
-          try {
-            const bridgeHtml = await this.fetchPage.fire(dest);
-            const iframeMatch = bridgeHtml.match(/<iframe[^>]+src="([^"]+)"/i);
-            if (iframeMatch) {
-              dest = iframeMatch[1];
-            }
-          } catch (_) {}
+        try {
+          const parsed = new URL(dest, targetUrl);
+          if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+          dest = parsed.href;
+        } catch (_) {
+          continue;
         }
 
-        // Normalize protocol-relative URLs
-        if (dest.startsWith('//')) {
-          dest = `https:${dest}`;
+        // Unwrap nbaontv.com bridge wrappers
+        if (isNbaOnTvUrl(dest)) {
+          try {
+            const bridgeHtml = await this.fetchPage.fire(dest);
+            const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
+              /\.(m3u8|mp4)$/i.test(url.pathname) || isByseHost(url.hostname) || matchesHost(url.hostname, 'ok.ru'));
+            if (iframeUrl) dest = iframeUrl;
+          } catch (_) {}
         }
 
         // 1. Byse AES-256-GCM Payload Extraction (Top Priority - SprintCDN Edge)
@@ -261,7 +274,7 @@ class BasketballVideoProvider extends BaseProvider {
         }
 
         // 2. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
-        if (dest.includes('ok.ru')) {
+        if (matchesHost(playerHostname(dest), 'ok.ru')) {
           const extracted = await this._extractOkRu(dest, partName);
           if (extracted && extracted.length > 0) {
             okStreams.push(...extracted);
@@ -398,8 +411,7 @@ class BasketballVideoProvider extends BaseProvider {
   }
 
   _isByseUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    return /byse[a-z0-9]*\.[a-z]+/i.test(url);
+    return isByseHost(playerHostname(url));
   }
 
   _decryptBysePlayback(playback) {

@@ -13,6 +13,11 @@ jest.mock('undici', () => {
     constructor(...args) { super(...args); agents.push(this); }
   } };
 });
+// This fixture exercises local HTTP header handling; guard behavior is covered separately.
+jest.mock('../src/services/SharedOutboundFetch', () => ({
+  fetchSharedOutbound: (url, options) => require('../src/impitClient').safeFetch(url, { ...options, guardExternal: false }),
+  closeSharedOutbound: async () => {}
+}));
 const { safeFetch } = require('../src/impitClient');
 const { verifyStreams } = require('../src/streams');
 const Parser = require('../src/services/M3U8ParserService');

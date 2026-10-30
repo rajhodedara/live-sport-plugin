@@ -1,4 +1,4 @@
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const crypto = require('crypto');
 const { unpack } = require('./deanEdwardsUnpack');
 const { BASE_URL: CONFIG_BASE_URL } = require('../config');
@@ -26,13 +26,15 @@ class ReplayZoneProvider {
 
     async getMatches() {
         try {
-            const { body } = await undici.request(this.replaysUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0' }
+            const { body, bodyTruncated } = await undici.request(this.replaysUrl, {
+                headers: { 'User-Agent': 'Mozilla/5.0' },
+                maxBodyBytes: 8 * 1024 * 1024
             });
+            if (bodyTruncated) throw new Error('Replay index exceeds its 8 MiB limit');
             const text = await body.text();
             
             const matches = [];
-            const blocks = text.split('\n\n').filter(b => b.trim());
+            const blocks = text.split(/\r?\n[ \t]*\r?\n/).filter(b => b.trim());
 
             for (const block of blocks) {
                 const lines = block.split('\n').map(l => l.trim()).filter(l => l);

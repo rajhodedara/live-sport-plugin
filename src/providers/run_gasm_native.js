@@ -124,7 +124,8 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
   return global.WebAssembly.instantiate(buffer, importObject);
 };
 
-const originalFetch = global.fetch;
+const { fetchUndici: originalFetch } = require(fs.existsSync(path.join(__dirname, 'services', 'ProviderOutbound.js'))
+  ? './services/ProviderOutbound' : '../services/ProviderOutbound');
 
 global.fetch = async (url, opts) => {
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);

@@ -227,7 +227,7 @@ class CdnLiveProvider extends BaseProvider {
         const events = sportsData[sportKey];
         if (!Array.isArray(events)) continue;
         for (const item of events) {
-          if (!item.channels || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+          if (!item || !Array.isArray(item.channels) || item.channels.length === 0) continue;
           
           let title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();
           if (!title || title === 'vs') continue;
@@ -266,7 +266,7 @@ class CdnLiveProvider extends BaseProvider {
     }
 
     try {
-      const { safeFetch } = require('../impitClient');
+      const { safeFetch } = require('../services/ProviderOutbound');
 
       // Primary URL and automatic mirror fallback (.tv <-> .is)
       const urlsToTry = [playerUrl];
@@ -456,19 +456,22 @@ class CdnLiveProvider extends BaseProvider {
       let item = null;
       for (const [key, events] of Object.entries(sportsData)) {
         if (Array.isArray(events)) {
-          item = events.find(e => 
-            (e.gameID === sourceId) || 
+          item = events.find(e => e && (
+            (e.gameID === sourceId) ||
             (`${e.homeTeam}-vs-${e.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-') === sourceId)
-          );
+          ));
           if (item) break;
         }
       }
 
       if (item && item.channels && Array.isArray(item.channels)) {
         for (const [idx, ch] of item.channels.entries()) {
-          if (ch.url) {
+          if (!ch || typeof ch.url !== 'string' || !ch.url) continue;
+          try {
             const playerStreams = await this.resolvePlayer(ch.url, ch.channel_name || `CDNLive Stream ${idx + 1}`);
             streams.push(...playerStreams);
+          } catch (err) {
+            console.warn(`[${this.name}] Failed to resolve channel ${idx + 1}:`, err.message);
           }
         }
       }

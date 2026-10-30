@@ -85,32 +85,34 @@ function playlistHasContent(text) {
 
 // Fetch + validate the upstream manifest. Throws on failure so coalesced
 // waiters share the same outcome; successful bodies are cached by the caller.
-async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseUrl = false } = {}) {
+async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseUrl = false, userAgent: requestedUserAgent = '' } = {}) {
   const deadlineAt = performance.now() + 10000;
   const isVavoo = Boolean(
     (targetUrl && (targetUrl.includes('/sunshine/') || targetUrl.includes('vavoo.') || targetUrl.includes(':8008'))) ||
     (referer && referer.includes('vavoo.'))
   );
-  const userAgent = isVavoo
+  const userAgent = requestedUserAgent || (isVavoo
     ? 'MediaHubMX/2'
-    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
 
   const headers = {
     'Referer': referer || (isVavoo ? 'https://vavoo.to/' : 'https://embed.st/'),
     'Origin': origin || (isVavoo ? 'https://vavoo.to' : 'https://embed.st'),
     'User-Agent': userAgent
   };
-  // _safeFetch: impit (browser TLS fingerprint) with automatic undici fallback.
+  // Public targets use the guarded socket transport. Never fall back to a
+  // separately resolved native connection after a guard rejection.
   // A hard 10 s timeout ensures a hung upstream can never hold the viewer's poll.
   const attempt = async () => {
     const remainingMs = Math.ceil(deadlineAt - performance.now());
     if (remainingMs <= 0) throw Object.assign(new Error('Manifest timeout 10000ms'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
-    const result = await _safeFetch(targetUrl, { headers, timeoutMs: remainingMs });
+    const result = await _safeFetch(targetUrl, { headers, timeoutMs: remainingMs, guardExternal: true, diagnosticOwner: 'manifest' });
     if (!result.ok) {
       // Carry the upstream status so the caller can tell "the token/CDN said no"
       // apart from "our proxy is broken" — they need different HTTP responses.
       const err = new Error(`HTTP ${result.status}`);
       err.statusCode = result.status;
+      err.upstreamStatus = result.status;
       throw err;
     }
     const body = await result.text();
@@ -125,6 +127,7 @@ async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseU
     // Transient upstream trouble: these load balancers (lb*.wfty.st, strmd.st) are
     // observed to throw 500/502/503/504 intermittently or reset connections (ECONNRESET)
     // during high load. A single retry after a short pause recovers the large majority.
+    if (err && err.code === 'ERR_OUTBOUND_CAPACITY') throw err;
     const status = err && err.statusCode;
     const isNetworkTransient = err && (
       err.code === 'ECONNRESET' ||
@@ -139,7 +142,13 @@ async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseU
     if (deadlineAt - performance.now() <= 400) throw err;
     await new Promise((r) => setTimeout(r, 400));
     console.warn(`[ManifestProxy] Upstream ${status || err.code || 'network glitch'} — retrying once: ${String(targetUrl).slice(0, 90)}`);
-    return await attempt(); // a second failure propagates with statusCode intact
+    try { return await attempt(); }
+    catch (retryError) {
+      if (retryError && retryError.code === 'ERR_OUTBOUND_CAPACITY' && Number.isInteger(err.upstreamStatus)) {
+        retryError.previousUpstreamStatus = err.upstreamStatus;
+      }
+      throw retryError;
+    }
   }
 }
 

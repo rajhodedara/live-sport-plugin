@@ -1,8 +1,11 @@
 jest.mock('../src/services/OutboundUrlGuard', () => ({ checkOutboundUrl: jest.fn(async () => ({ ok: true })) }));
 jest.mock('../src/container',()=>{const Registry=jest.requireActual('../src/services/IframeDomainRegistry');const registry=new Registry();return {resolve:name=>name==='iframeDomainRegistry'?registry:undefined};});
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: (...args) => require('../src/impitClient').safeFetch(...args), streamingFetch: (...args) => global.fetch(...args) }));
 jest.mock('../src/impitClient',()=>({safeFetch:jest.fn(),isImpitAvailable:()=>false,getImpit:()=>null}));
 const {safeFetch}=require('../src/impitClient');
+process.env.ENABLE_SPEED_PROBE = 'true';
 const {verifyStreams}=require('../src/streams');
+delete process.env.ENABLE_SPEED_PROBE;
 const M3U8ParserService=require('../src/services/M3U8ParserService');
 const parser=new M3U8ParserService();
 const good='#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:5,\nsegment.ts\n';
@@ -52,6 +55,12 @@ test('known headers are read case-insensitively without duplicate spellings',asy
 test('proxy query Referer and Origin take precedence over contradictory hints',async()=>{
  safeFetch.mockResolvedValue(res(200));const s=stream({Referer:'https://hint.example/',Origin:'https://hint.example',Authorization:'Bearer audit'},true);
  expect(await run(s)).toHaveLength(1);expect(safeFetch.mock.calls[0][1].headers).toEqual(expect.objectContaining({Referer:wrong,Origin:'https://wrong.example',Authorization:'Bearer audit'}));
+});
+test('verification uses the validated HLS user agent from the proxy URL',async()=>{
+ safeFetch.mockResolvedValue(res(200));const s=stream({'User-Agent':'OldClient/1.0'},true);
+ const u=new URL(s.url);u.searchParams.set('hlsua','FixtureClient/1.0');s.url=u.href;
+ expect(await run(s)).toHaveLength(1);
+ expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toBe('FixtureClient/1.0');
 });
 test('repair keeps Authorization Cookie UA and custom header on the second request',async()=>{
  const h={Referer:wrong,Authorization:'Bearer audit',Cookie:'session=audit','User-Agent':'Provider-UA','X-Playback-Key':'custom'};

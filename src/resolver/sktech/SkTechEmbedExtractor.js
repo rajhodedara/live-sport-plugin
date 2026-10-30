@@ -1,4 +1,5 @@
 'use strict';
+const { fetchUndici: fetch } = require('../../services/ProviderOutbound');
 
 /**
  * SkTechEmbedExtractor
@@ -18,7 +19,7 @@ class SkTechEmbedExtractor {
    * @param {string} rawString
    * @returns {{ url: string, headers: Object, drmScheme: string|null, drmLicense: string|null }}
    */
-  parseDelimited(rawString) {
+  parseDelimited(rawString, { defaultUserAgent = true } = {}) {
     if (!rawString || typeof rawString !== 'string') {
       return { url: '', headers: {}, drmScheme: null, drmLicense: null };
     }
@@ -61,7 +62,7 @@ class SkTechEmbedExtractor {
       }
     }
 
-    if (!headers['User-Agent']) {
+    if (defaultUserAgent && !headers['User-Agent']) {
       headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
     }
 

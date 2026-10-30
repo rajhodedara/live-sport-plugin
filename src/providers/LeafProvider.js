@@ -1,7 +1,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const impitClient = require('../impitClient');
+const impitClient = require('../services/ProviderOutbound');
 
 class LeafProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -58,7 +58,7 @@ class LeafProvider extends BaseProvider {
     const matches = [];
 
     for (const item of metas) {
-      if (!item || !item.id || !item.name) continue;
+      if (!item || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string' || !item.name) continue;
 
       // Strictly exclude 24/7 channels (IDs starting with leaf: or networks category)
       if (item.id.startsWith('leaf:') || item.category === 'networks' || item.isChannel) {
@@ -145,10 +145,15 @@ class LeafProvider extends BaseProvider {
     const resolved = [];
 
     for (const st of streamsList) {
-      if (!st || !st.url) continue;
+      if (!st || typeof st.url !== 'string' || !st.url) continue;
 
-      // STRICT ISOLATION: Discard any stream that is not papacito.cfd (no streamed.pk, no paywalled redirects)
-      if (!st.url.includes('papacito.cfd')) continue;
+      // Match the actual host rather than a domain-looking substring in a
+      // path, query, credentials, or an unrelated hostname.
+      let sourceUrl;
+      try { sourceUrl = new URL(st.url); } catch (_) { continue; }
+      const host = sourceUrl.hostname.toLowerCase();
+      if (!['http:', 'https:'].includes(sourceUrl.protocol) || sourceUrl.username || sourceUrl.password ||
+          (host !== 'papacito.cfd' && !host.endsWith('.papacito.cfd'))) continue;
 
       // Preserve upstream signed playback URL (which includes the valid ?ft= JWT).
       // Fallback to minted master token only if upstream URL has no query parameters.
@@ -160,8 +165,8 @@ class LeafProvider extends BaseProvider {
         directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
       }
 
-      const rawName = st.name || '';
-      const rawTitle = st.title || '';
+      const rawName = typeof st.name === 'string' ? st.name : '';
+      const rawTitle = typeof st.title === 'string' ? st.title : '';
 
       // Determine resolution & quality
       let resolution = '1080p';

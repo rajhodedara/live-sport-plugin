@@ -100,48 +100,13 @@ global.sessionStorage = { getItem: () => null, setItem: () => {}, removeItem: ()
 global.btoa = (str) => Buffer.from(str).toString('base64');
 global.atob = (b64Encoded) => Buffer.from(b64Encoded, 'base64').toString();
 
-let impit = null;
-try {
-  const { Impit } = require('impit');
-  impit = new Impit();
-} catch (e) {}
-const { request: undiciRequest } = require('undici');
-
-async function gasmSafeFetch(url, opts) {
-  if (impit) {
-    try {
-      const res = await impit.fetch(url, opts);
-      const buf = await res.arrayBuffer();
-      if (res.status === 403) {
-         return await doUndici(url, opts);
-      }
-      return {
-        ok: res.status >= 200 && res.status < 300,
-        status: res.status,
-        headers: res.headers,
-        text: async () => Buffer.from(buf).toString('utf8'),
-        json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
-        arrayBuffer: async () => buf,
-      };
-    } catch(e) {
-      return await doUndici(url, opts);
-    }
-  }
-  return await doUndici(url, opts);
-}
-
-async function doUndici(url, opts) {
-  const res = await undiciRequest(url, opts);
-  const buf = await res.body.arrayBuffer();
-  return {
-        ok: res.statusCode >= 200 && res.statusCode < 300,
-        status: res.statusCode,
-        headers: res.headers,
-        text: async () => Buffer.from(buf).toString('utf8'),
-        json: async () => JSON.parse(Buffer.from(buf).toString('utf8')),
-        arrayBuffer: async () => buf,
-  };
-}
+// The build copies this script to the output root, alongside services/;
+// in the source tree it lives under providers/, one level below services/.
+const outboundPath = fs.existsSync(path.join(__dirname, 'services', 'ProviderOutbound.js'))
+  ? './services/ProviderOutbound'
+  : '../services/ProviderOutbound';
+const { fetch: guardedFetch } = require(outboundPath);
+const gasmSafeFetch = (url, options = {}) => guardedFetch(url, { ...options, profile: 'vanilla', attempts: 1 });
 const OriginalRequest = global.Request;
 global.Request = function(input, init) {
   if (typeof input === 'string' && input.startsWith('/')) {
@@ -205,7 +170,13 @@ global.Clappr = { Player: class { constructor() {} } };
 global.window.jwplayer = function() {
     return {
         setup: function(config) {
-            console.log('JWPLAYER SETUP CALLED WITH:', JSON.stringify(config, null, 2));
+            const file = config && config.file;
+            const hasPlaylist = typeof file === 'string' && /^https?:\/\/[^"\s]+\.m3u8/.test(file);
+            // Flush the configuration before exiting: callers parse stdout, and
+            // the WASM environment can leave timers or connections alive.
+            process.stdout.write('JWPLAYER SETUP CALLED WITH: ' + JSON.stringify(config, null, 2) + '\n', (err) => {
+                if (!err && hasPlaylist) process.exit(0);
+            });
         },
         once: function() {},
         on: function() {}
@@ -317,7 +288,7 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
     }
   }
   
-  return safeFetch(url, opts);
+  return gasmSafeFetch(url, opts);
 };
 
 (async () => {

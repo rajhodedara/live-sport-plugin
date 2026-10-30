@@ -99,12 +99,12 @@ function isTikTokCloakedStream(url) {
  */
 function resolveSyncTimeoutMs() {
   const fixed = parseInt(process.env.DADDYLIVE_SYNC_TIMEOUT_MS, 10);
-  if (Number.isFinite(fixed) && fixed > 0) return fixed;
+  if (Number.isFinite(fixed) && fixed > 0) return Math.min(fixed, 30000);
 
   // 12000 is the value these fetches used before f15846b lowered them to
   // 6000. Restored rather than replaced: the original budget was known-good,
   // and 6000 is what made DaddyLive fail first under load.
-  const baseMs = parseInt(process.env.SYNC_TIMEOUT_BASE_MS, 10) || 12000;
+  const baseMs = Math.max(1, parseInt(process.env.SYNC_TIMEOUT_BASE_MS, 10) || 12000);
   // The circuit breaker aborts a wrapped call at BREAKER_TIMEOUT_MS, so an
   // inner timeout at or above it is silently truncated - the configured
   // ceiling would be unreachable and the breaker, not this setting, would
@@ -125,7 +125,7 @@ function resolveSyncTimeoutMs() {
   // The floor stays at the restored baseline, so an idle box is never worse
   // off than the pre-regression behaviour.
   const scaled = Math.round(baseMs + Math.max(0, load) * 2000);
-  return Math.max(baseMs, Math.min(scaled, maxMs));
+  return Math.min(30000, Math.max(baseMs, Math.min(scaled, maxMs)));
 }
 
 class DaddyLiveProvider extends BaseProvider {
@@ -189,10 +189,15 @@ class DaddyLiveProvider extends BaseProvider {
             },
             signal: AbortSignal.timeout(homeBudgetMs),
             timeoutMs: homeBudgetMs,
+            maxBodyBytes: 8 * 1024 * 1024,
+            diagnosticOwner: 'catalog',
             attempts: 1
           });
+          if (homeRes && homeRes.bodyTruncated) throw new Error('DaddyLive schedule exceeds its 8 MiB limit');
           if (homeRes && homeRes.ok) {
             const homeHtml = typeof homeRes.text === 'function' ? await homeRes.text() : homeRes.text;
+            const sizeBytes = typeof homeHtml === 'string' ? Buffer.byteLength(homeHtml, 'utf8') : 0;
+            if (sizeBytes > 5 * 1024 * 1024) console.warn(`[${this.name}] Schedule exceeds 5 MiB`, JSON.stringify({ sizeBytes }));
             const parsed = this.parseScheduleHtml(homeHtml);
             if (parsed) return parsed;
           }
@@ -217,6 +222,7 @@ class DaddyLiveProvider extends BaseProvider {
             },
             signal: AbortSignal.timeout(budgetMs),
             timeoutMs: budgetMs,
+            diagnosticOwner: 'catalog',
             attempts: 1
           });
           if (res.ok) {
@@ -942,61 +948,66 @@ class DaddyLiveProvider extends BaseProvider {
           }
 
           for (const iframeUrl of candidateUrls.slice(0, 3)) {
-            let embedOrigin = '';
             try {
-              embedOrigin = new URL(iframeUrl).origin;
-            } catch (_) {
-              embedOrigin = base;
-            }
-            let embedReferer = `${embedOrigin}/`;
-
-            // Fetch the embed page
-            const embedRes = await this.proxyFetch(iframeUrl, {
-              headers: {
-                'User-Agent': UA,
-                'Referer': playerUrl,
-                'Origin': base,
-                'Sec-Fetch-Dest': 'iframe',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'cross-site',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-              },
-              signal: AbortSignal.timeout(6000)
-            });
-
-            if (!embedRes || !embedRes.ok) continue;
-
-            const embedHtml = typeof embedRes.text === 'function' ? await embedRes.text() : embedRes.text;
-            let m3u8Url = null;
-
-            // Resolve via the shared helper: _econfig -> chain -> direct m3u8
-            // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
-            const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
-            if (resolved && resolved.url && !isTikTokCloakedStream(resolved.url)) {
-              m3u8Url = resolved.url;
+              let embedOrigin = '';
               try {
-                embedOrigin = new URL(resolved.referer || iframeUrl).origin;
+                embedOrigin = new URL(iframeUrl).origin;
               } catch (_) {
                 embedOrigin = base;
               }
-              embedReferer = `${embedOrigin}/`;
-            }
+              let embedReferer = `${embedOrigin}/`;
 
-            if (m3u8Url) {
-              const registryReferer = this._terminalRefererFor(m3u8Url);
-              const candidate = this._buildManifestStream(
-                m3u8Url,
-                registryReferer || embedReferer,
-                sourceId,
-                channelName
-              );
+              // Fetch the embed page
+              const embedRes = await this.proxyFetch(iframeUrl, {
+                headers: {
+                  'User-Agent': UA,
+                  'Referer': playerUrl,
+                  'Origin': base,
+                  'Sec-Fetch-Dest': 'iframe',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'cross-site',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                },
+                signal: AbortSignal.timeout(6000)
+              });
 
-              if (registryReferer) {
-                streams.push(candidate);
-                foundDirect = true;
-                break;
+              if (!embedRes || !embedRes.ok) continue;
+
+              const embedHtml = typeof embedRes.text === 'function' ? await embedRes.text() : embedRes.text;
+              let m3u8Url = null;
+
+              // Resolve via the shared helper: _econfig -> chain -> direct m3u8
+              // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
+              const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
+              if (resolved && resolved.url && !isTikTokCloakedStream(resolved.url)) {
+                m3u8Url = resolved.url;
+                try {
+                  embedOrigin = new URL(resolved.referer || iframeUrl).origin;
+                } catch (_) {
+                  embedOrigin = base;
+                }
+                embedReferer = `${embedOrigin}/`;
               }
-              if (!fallbackStream) fallbackStream = candidate;
+
+              if (m3u8Url) {
+                const registryReferer = this._terminalRefererFor(m3u8Url);
+                const candidate = this._buildManifestStream(
+                  m3u8Url,
+                  registryReferer || embedReferer,
+                  sourceId,
+                  channelName
+                );
+
+                if (registryReferer) {
+                  streams.push(candidate);
+                  foundDirect = true;
+                  break;
+                }
+                if (!fallbackStream) fallbackStream = candidate;
+              }
+            } catch (_) {
+              // A single iframe failure must not skip the other candidates.
+              continue;
             }
           }
         } catch (_) {

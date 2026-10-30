@@ -18,6 +18,8 @@ const MAX_TTL_MS = 10 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 1000;
 const MAX_ENTRIES = 200;
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
+const { withTimingWork } = require('./TimingContext');
+const resolverConflictState = require('./ResolverConflictState');
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
 // generic structuredClone serializer by 5-15x on these shapes, and cloneStream
@@ -74,13 +76,17 @@ function _sharedDown() {
   _sharedFailStreak = 0;
 }
 
-async function _sharedJson(path, opts = {}, timeoutMs = 1500) {
+async function _sharedJson(path, opts = {}, timeoutMs = 1500, requester = fetch, conflictSignal = null) {
   const base = _sharedBase();
   if (!base) return null;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(base + path, { signal: ctrl.signal, ...opts });
+    const signals = [ctrl.signal, ...(conflictSignal ? [conflictSignal] : []), ...(opts.signal ? [opts.signal] : [])];
+    // Do not invoke an adapter at all when cancellation already happened; it
+    // may not honor a pre-aborted signal and could otherwise send a request.
+    if (signals.some(signal => signal.aborted)) return null;
+    const res = await requester(base + path, { ...opts, signal: AbortSignal.any(signals) });
     if (!res.ok) return null;
     const out = await res.json();
     _sharedFailStreak = 0;
@@ -109,6 +115,13 @@ class StreamResolveCache {
     this.maxTtlMs = opts.maxTtlMs ?? MAX_TTL_MS;
     this.negativeTtlMs = opts.negativeTtlMs ?? NEGATIVE_TTL_MS;
     this.maxEntries = opts.maxEntries ?? MAX_ENTRIES;
+    // Experimental opt-in observer; absent in normal operation. An operation
+    // may end in an L2 hit, so it is not proof that a provider was invoked.
+    this.timingRelations = opts.timingRelations ?? null;
+    // Optional prototype seam only. A real adapter must bind each request to
+    // a verified resolver connection. Merely returning true is not proof.
+    this.sharedResolver = opts.sharedResolver ?? null;
+    this.resolverConflictState = opts.resolverConflictState ?? resolverConflictState;
 
     this.entries = new Map();   // key -> { streams, matchId, status, resolvedAt, expiresAt, lastAccess }
     this.inFlight = new Map();  // key -> Promise (mint in progress)
@@ -250,20 +263,45 @@ class StreamResolveCache {
     return true;
   }
 
+  _sharedAvailable() {
+    try { if (this.resolverConflictState.hasConflict() !== false) return false; }
+    catch (_) { return false; }
+    if (!_sharedAvailable()) return false;
+    if (this.sharedResolver === null) return true; // legacy path; still unverified
+    try {
+      return typeof this.sharedResolver.available === 'function' &&
+        typeof this.sharedResolver.request === 'function' && this.sharedResolver.available() === true;
+    } catch (_) { return false; }
+  }
+
+  async _sharedJson(path, opts = {}, timeoutMs = 1500) {
+    if (!this._sharedAvailable()) return null;
+    const requester = this.sharedResolver === null ? fetch : this.sharedResolver.request.bind(this.sharedResolver);
+    let conflictSignal = null;
+    try { conflictSignal = this.resolverConflictState.signal?.() || null; } catch (_) { return null; }
+    const result = await _sharedJson(path, opts, timeoutMs, requester, conflictSignal);
+    // An adapter might ignore AbortSignal or finish concurrently with the
+    // conflict. Never accept its late response after this worker has revoked
+    // access. Cancellation cannot retract data already sent to the endpoint.
+    try { if (this.resolverConflictState.hasConflict() !== false || conflictSignal?.aborted) return null; }
+    catch (_) { return null; }
+    return result;
+  }
+
   // Poll the shared cache while another worker holds the mint claim.
   async _sharedWaitMinting(key) {
     const deadline = Date.now() + SHARED_POLL_MAX_MS;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, SHARED_POLL_INTERVAL_MS));
-      if (!_sharedAvailable()) return null;
-      const r = await _sharedJson(_sharedKey(key));
+      if (!this._sharedAvailable()) return null;
+      const r = await this._sharedJson(_sharedKey(key));
       if (!r || r.status === 'miss') return null;
       if (r.status === 'ok' || r.status === 'failed') return r;
     }
     return null;
   }
 
-  async getOrCreate(key, mintFn) {
+  async getOrCreate(key, mintFn, timingStream = null) {
     const now = Date.now();
     const existing = this.entries.get(key);
 
@@ -281,6 +319,7 @@ class StreamResolveCache {
 
     const pending = this.inFlight.get(key);
     if (pending) {
+      this._linkTiming(timingStream, this.pendingOperations.get(key)?.timingWork);
       await pending.catch(() => {});
       return this.get(key) || [];
     }
@@ -298,10 +337,37 @@ class StreamResolveCache {
       .finally(() => {
         this.inFlight.delete(key);
         this.pendingOperations.delete(key);
+        if (operation.timingWork) {
+          try { this.timingRelations?.endWork(operation.timingWork); } catch (_) { /* diagnostic only */ }
+        }
       });
     this.inFlight.set(key, p);
+    // Reserve before invoking any diagnostic callback: a synchronous sink can
+    // itself call getOrCreate and must observe this same in-flight operation.
+    if (this.timingRelations) {
+      try { operation.timingWork = this.timingRelations.work(key.split(':', 1)[0]); } catch (_) { /* diagnostic only */ }
+      this._linkTiming(timingStream, operation.timingWork);
+    }
     await p.catch(() => {});
     return this.get(key) || [];
+  }
+
+  _linkTiming(stream, work) {
+    if (!this.timingRelations || !stream || !work) return;
+    try { this.timingRelations.link(stream, work); } catch (_) { /* diagnostic only */ }
+  }
+
+  async _timedMint(operation, mintFn) {
+    const work = operation.timingWork;
+    if (work) { try { this.timingRelations?.startMint(work); } catch (_) { /* diagnostic only */ } }
+    let outcome = 'threw';
+    try {
+      const value = await withTimingWork(work, mintFn);
+      outcome = 'returned';
+      return value;
+    } finally {
+      if (work) { try { this.timingRelations?.endMint(work, outcome); } catch (_) { /* diagnostic only */ } }
+    }
   }
 
   async _resolveAndStore(key, mintFn, operation) {
@@ -310,9 +376,9 @@ class StreamResolveCache {
     let claimed = false;
     let ownerToken;
     let supportsVacantClaim = false;
-    if (_sharedAvailable()) {
+    if (this._sharedAvailable()) {
       const enc = _sharedKey(key);
-      let remote = await _sharedJson(enc);
+      let remote = await this._sharedJson(enc);
       if (operation.pruned) return;
       if (remote && remote.status === 'minting') remote = await this._sharedWaitMinting(key);
       if (operation.pruned) return;
@@ -327,8 +393,8 @@ class StreamResolveCache {
         }
         remote = null; // expired in transit: claim and mint instead
       }
-      if (_sharedAvailable() && (!remote || remote.status === 'miss')) {
-        const claim = await _sharedJson(`${enc}?claim=1&fenced=1`);
+      if (this._sharedAvailable() && (!remote || remote.status === 'miss')) {
+        const claim = await this._sharedJson(`${enc}?claim=1&fenced=1`);
         if (operation.pruned) return;
         if (claim && claim.ok === false && claim.reason !== 'claim-capacity') {
           // Another worker holds the claim — wait for its result.
@@ -359,7 +425,9 @@ class StreamResolveCache {
     const matchId = parts[1];
     const p = (async () => {
       try {
-        const streams = await mintFn();
+        const streams = await (operation.timingWork
+          ? this._timedMint(operation, mintFn)
+          : withTimingWork(null, mintFn));
         // Pruning can run while the provider is resolving. Discard both
         // positive and negative late answers before touching either cache.
         if (operation.pruned) return;
@@ -381,8 +449,8 @@ class StreamResolveCache {
           this._set(key, sourceName, matchId, [], 'failed', ttl);
         }
         // Write-through so the other worker inherits the mint instantly.
-        if (claimed && _sharedAvailable()) {
-          const publish = token => _sharedJson(
+        if (claimed && this._sharedAvailable()) {
+          const publish = token => this._sharedJson(
             _sharedKey(key),
             {
               method: 'POST',
@@ -396,8 +464,8 @@ class StreamResolveCache {
           // a fresh lease only if the resolver atomically confirms no cached
           // result or active owner would be displaced. Older resolvers must
           // explicitly advertise this protocol before we attempt recovery.
-          if (write && write.ok === false && write.reason === 'stale-owner' && supportsVacantClaim && !operation.pruned && _sharedAvailable()) {
-            const fresh = await _sharedJson(`${_sharedKey(key)}?claim=1&fenced=1&vacant=1`);
+          if (write && write.ok === false && write.reason === 'stale-owner' && supportsVacantClaim && !operation.pruned && this._sharedAvailable()) {
+            const fresh = await this._sharedJson(`${_sharedKey(key)}?claim=1&fenced=1&vacant=1`);
             if (!operation.pruned && fresh && fresh.ok && fresh.vacantOnly === true && typeof fresh.ownerToken === 'string' && fresh.ownerToken) {
               ownerToken = fresh.ownerToken;
               await publish(ownerToken);
@@ -412,8 +480,8 @@ class StreamResolveCache {
         // (Claims self-expire at 30s, but an immediate release lets the next
         // worker retry right away.) Releasing also restores retry diversity:
         // the other worker's attempt may succeed where ours failed.
-        if (claimed && _sharedAvailable()) {
-          _sharedJson(`${_sharedKey(key)}?ownerToken=${encodeURIComponent(ownerToken)}`, { method: 'DELETE' }, 1000).catch(() => {});
+        if (claimed && this._sharedAvailable()) {
+          this._sharedJson(`${_sharedKey(key)}?ownerToken=${encodeURIComponent(ownerToken)}`, { method: 'DELETE' }, 1000).catch(() => {});
         }
       }
     })();
@@ -454,8 +522,8 @@ class StreamResolveCache {
     const next = Math.max(Math.floor(this._ttlFor(sourceName) / 2), this.minTtlMs);
     this.ttl.set(sourceName, next);
     this.entries.delete(key);
-    if (_sharedAvailable()) {
-      _sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
+    if (this._sharedAvailable()) {
+      this._sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
     }
   }
 
@@ -473,8 +541,8 @@ class StreamResolveCache {
     }
     // Mirror the prune into the shared cache so ended matches don't linger
     // for the other worker either.
-    if (_sharedAvailable()) {
-      _sharedJson(
+    if (this._sharedAvailable()) {
+      this._sharedJson(
         '/api/cache/prune',
         {
           method: 'POST',

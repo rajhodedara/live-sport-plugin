@@ -18,6 +18,7 @@ const {
 const { rewriteHlsUri, rewriteHlsPlaylist, preprobeManifestSegments } = require('../services/HlsRewriteService');
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
+const { manifestUserAgent } = require('../services/ManifestUserAgent');
 
 // Variant BANDWIDTH declarations seen in master playlists, keyed by the
 // absolute upstream URL of the child media playlist. When that child is served
@@ -37,6 +38,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
   const defaultOrigin = isVavooTarget ? 'https://vavoo.to' : 'https://embed.st';
   const referer = req.query.referer || defaultReferer;
   const origin = req.query.origin || defaultOrigin;
+  const userAgent = manifestUserAgent(req.query.hlsua);
 
   if (!targetUrl) return res.status(400).send('Missing url');
   if (targetUrl.includes('.mpd')) return handleDashManifestProxy(req, res);
@@ -51,7 +53,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
   // Explicit tuple boundaries prevent collisions when URL/header values contain '|'.
   // This identity also fences remint outcomes, rewritten per-host URLs, negative
   // entries, and in-flight manifest requests from unrelated viewers.
-  const cacheKey = JSON.stringify([targetUrl, referer, origin, rck || '', requestBaseUrl]);
+  const cacheKey = JSON.stringify([targetUrl, referer, origin, userAgent, rck || '', requestBaseUrl]);
   const entry = manifestCacheGet(cacheKey);
   if (entry && entry.negative) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -83,7 +85,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
 
         let upstream;
         try {
-          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true, userAgent });
         } catch (firstErr) {
           const fresh = (isExpiryStatus(firstErr) && rck) ? await attemptRemint(rck, effectiveUrl || targetUrl) : null;
           if (!fresh || fresh === effectiveUrl) throw firstErr;
@@ -113,7 +115,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
           // Preserve the variant the player asked for (see mergeRemintedUrl).
           effectiveUrl = mergeRemintedUrl(targetUrl, fresh, rck);
           reminted = true;
-          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true, userAgent });
         }
         const out = upstream.body;
         // Re-fetch redirected bases on later polls; concurrent viewers still coalesce.
@@ -175,6 +177,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
         const rewrittenResult = rewriteHlsPlaylist(out, effectiveUrl, {
           referer,
           origin,
+          userAgent,
           rckSuffix,
           absoluteAddonBaseUrl: requestBaseUrl,
           bitrate: out.includes('#EXT-X-STREAM-INF') ? undefined : variantBitrateCache.get(effectiveUrl)
@@ -195,6 +198,16 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
     res.send(result.body);
   } catch (err) {
     // Preserve the old 404 semantics so players can fail over to another stream.
+    if (err.code === 'ERR_OUTBOUND_CAPACITY') {
+      if (Number.isInteger(err.previousUpstreamStatus)) {
+        console.warn(`[ManifestProxy] Local capacity exhausted on retry; previous upstream HTTP ${err.previousUpstreamStatus}`);
+      } else {
+        console.warn('[ManifestProxy] Local outbound capacity exhausted');
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).send('Outbound capacity temporarily exhausted');
+    }
+    if (err.code === 'ERR_OUTBOUND_BLOCKED') return res.status(403).json({ error: 'Blocked outbound URL', reason: err.reason });
     // Failures are negatively cached (15 s) so player polls stop hammering the dead upstream.
     // In parallel, drop the originating resolve-cache entry so the next click mints fresh.
     notifyResolveCacheOfDeadStream(req.originalUrl || req.url);
@@ -406,7 +419,7 @@ async function handleDashManifestProxy(req, res) {
   if (cookie) headers['Cookie'] = cookie;
 
   try {
-    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000 });
+    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000, guardExternal: true });
     if (!result.ok) {
       return res.status(result.status).send(`Upstream returned HTTP ${result.status}`);
     }
@@ -522,6 +535,11 @@ async function handleDashManifestProxy(req, res) {
     return res.send(mpd);
   } catch (err) {
     console.error('[ManifestProxy] DASH error:', err.message);
+    if (err.code === 'ERR_OUTBOUND_CAPACITY') {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).send('Outbound capacity temporarily exhausted');
+    }
+    if (err.code === 'ERR_OUTBOUND_BLOCKED') return res.status(403).json({ error: 'Blocked outbound URL', reason: err.reason });
     return res.status(502).send('Manifest proxy error: ' + err.message);
   }
 }

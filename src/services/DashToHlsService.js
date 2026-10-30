@@ -19,7 +19,7 @@
 'use strict';
 
 const { XMLParser } = require('fast-xml-parser');
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('./ProviderOutbound');
 
 // Akamai/CloudFront edges 403 Dalvik UAs on manifest paths; always present a
 // desktop browser UA unless the feed carries a more specific non-Dalvik UA.

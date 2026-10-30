@@ -266,6 +266,8 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
     let mockUpstreamPort;
     let mockUpstreamUrl;
 
+    afterEach(() => jest.restoreAllMocks());
+
     beforeAll((done) => {
       const mockApp = express();
       mockApp.get('/live/stream.mpd', (req, res) => {
@@ -306,6 +308,10 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
     });
 
     test('rewrites relative BaseURL, strips Widevine/PlayReady, overwrites cenc Widevine PSSH, and injects ExoPlayer af78d30e UUID + cenc:default_KID', async () => {
+      // This is a formatting test with a trusted local fixture. The real
+      // external transport now correctly rejects loopback, tested separately.
+      jest.spyOn(require('../src/services/GuardedOutbound'), 'guardedFetch')
+        .mockImplementation((url, opts) => fetch(url, { headers: opts.headers }));
       const keyObj = {
         keyId: 'a71918fcc2f12066f70b7c39b0e0dcf3',
         key: 'a5e35121d4f6f16694bea15334f14814'

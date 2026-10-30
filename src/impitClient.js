@@ -96,15 +96,7 @@ function getVanillaImpit() {
   return _impitVanillaInstance;
 }
 
-function isDamitvTarget(url) {
-  if (!url || typeof url !== 'string') return false;
-  return url.includes('damitv.st');
-}
-
-function isDembedTarget(url) {
-  if (!url || typeof url !== 'string') return false;
-  return url.includes('dembed.st');
-}
+const { isDamitvTarget, isDembedTarget, providerRequestHeaders } = require('./services/ProviderRequestHeaders');
 
 // -- impit TLS skip list ------------------------------------------------------
 // rustls (impit's TLS) validates certificates against a curated root store and
@@ -158,32 +150,7 @@ const _undiciAgent = new Agent({
 // redirect loop costs about what a single timed-out request costs.
 const MAX_REDIRECT_HOPS = 5;
 
-// Fixed-name credential filter for the manual undici redirect path. Custom
-// provider credentials (e.g. X-Api-Key) are not classified and remain intact.
-// Removed credentials stay removed even if a later hop returns to the source;
-// providers with authenticated A -> B -> A chains need compatibility review.
-const CROSS_ORIGIN_SENSITIVE_HEADERS = new Set([
-  'authorization', 'cookie', 'cookie2', 'proxy-authorization', 'host',
-]);
-
-function withoutRedirectCredentials(headers) {
-  if (!headers) return headers;
-  const keep = name => !CROSS_ORIGIN_SENSITIVE_HEADERS.has(String(name).toLowerCase());
-  // Undici accepts a flat [name, value, name, value] header list.
-  if (Array.isArray(headers) && headers.every(value => typeof value === 'string')) {
-    const kept = [];
-    for (let i = 0; i + 1 < headers.length; i += 2) {
-      if (keep(headers[i])) kept.push(headers[i], headers[i + 1]);
-    }
-    return kept;
-  }
-  // Headers, Maps and other pair iterables must be normalized to an
-  // undici-compatible flat list without mutating their caller-owned values.
-  if (typeof headers[Symbol.iterator] === 'function') {
-    return Array.from(headers).filter(([name]) => keep(name)).flat();
-  }
-  return Object.fromEntries(Object.entries(headers).filter(([name]) => keep(name)));
-}
+const { filterRedirectHeaders, removeBodyHeaders, shouldDropRedirectBody } = require('./services/RedirectHeaderPolicy');
 
 /**
  * Read at most maxBytes from a Fetch-style or Undici response body.
@@ -285,6 +252,11 @@ function isDeadHost(url) {
 }
 
 async function safeFetch(url, opts = {}) {
+  // Local integration candidate: public metadata callers share guarded native
+  // and Undici transports; neither fallback can bypass destination validation.
+  if (opts.guardExternal === true) {
+    return require('./services/SharedOutboundFetch').fetchSharedOutbound(url, opts);
+  }
   const deadMatch = isDeadHost(url);
   if (deadMatch) {
     return {
@@ -348,29 +320,7 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
     : (isDamitv ? (getVanillaImpit() || getImpit()) : (impitTlsBlocked(url) ? null : getImpit()));
   const maxAttempts = Math.max(1, attempts);
 
-  if (isDamitv) {
-    const headerKeys = Object.keys(headers || {});
-    const uaKey = headerKeys.find(k => k.toLowerCase() === 'user-agent');
-    const currentUa = uaKey ? headers[uaKey] : '';
-    const hasValidUa = currentUa && !currentUa.includes('Chrome/127');
-    const hasRef = headerKeys.some(k => k.toLowerCase() === 'referer');
-    headers = {
-      ...headers,
-      ...(hasValidUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
-      ...(hasRef ? {} : { 'Referer': 'https://damitv.st/' }),
-    };
-  } else if (isDembed) {
-    const headerKeys = Object.keys(headers || {});
-    const hasUa = headerKeys.some(k => k.toLowerCase() === 'user-agent');
-    const hasRef = headerKeys.some(k => k.toLowerCase() === 'referer');
-    const hasDest = headerKeys.some(k => k.toLowerCase() === 'sec-fetch-dest');
-    headers = {
-      ...(hasUa ? {} : { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36' }),
-      ...(hasRef ? {} : { 'Referer': 'https://dlive.sx/' }),
-      ...(hasDest ? {} : { 'Sec-Fetch-Dest': 'iframe', 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'cross-site' }),
-      ...headers,
-    };
-  }
+  headers = providerRequestHeaders(url, headers);
 
   // -- Path A: impit ---------------------------------------------------------
   if (impit) {
@@ -470,8 +420,8 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
   // dlive.sx is the observed case), so without following them the caller saw
   // `ok:false, status:301` and silently recorded a healthy primary domain as a
   // failure. Follow the chain here:
-  //   - 301/302/303 "moved": the request becomes a bodyless GET, as a browser
-  //     would send it (HEAD stays HEAD, since it has no body to drop);
+  //   - 301/302 convert POST to a bodyless GET; 303 converts every method
+  //     except HEAD. Other methods retain their method and body on 301/302.
   //   - 307/308 "relocated": method and body are preserved, the resource is
   //     still the same one;
   //   - missing/empty Location is not followable, so the redirect response is
@@ -513,19 +463,14 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
     // Compare full origins (scheme, host, effective port), not hostname alone.
     // Credentials remain removed if a later redirect returns to the old host.
     if (nextUrl.origin !== new URL(currentUrl).origin) {
-      headers = withoutRedirectCredentials(headers);
+      headers = filterRedirectHeaders(headers);
     }
 
-    if (method !== 'HEAD' && res.statusCode !== 307 && res.statusCode !== 308) {
+    if (shouldDropRedirectBody(res.statusCode, method)) {
       method = 'GET';
       body = undefined;
-      // A framing header describing a body that no longer exists corrupts the
-      // request, so drop it when the body is dropped. (Plain-object headers are
-      // what every caller in this codebase passes.)
-      if (headers && headers.constructor === Object && 'content-length' in headers) {
-        headers = Object.assign({}, headers);
-        delete headers['content-length'];
-      }
+      // Remove body-specific headers in every supported header representation.
+      headers = removeBodyHeaders(headers);
     }
     currentUrl = nextUrl.toString();
   }

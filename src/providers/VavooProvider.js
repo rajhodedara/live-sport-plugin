@@ -416,10 +416,12 @@ class VavooProvider extends BaseProvider {
       return [];
     }
 
-    const hasMirrorDomain = VAVOO_MIRROR_DOMAINS.some(d => vavooUrl.toLowerCase().includes(d));
-    if (!hasMirrorDomain) {
-      return [];
-    }
+    let parsedSource;
+    try { parsedSource = new URL(vavooUrl); } catch (_) { return []; }
+    if (!['http:', 'https:'].includes(parsedSource.protocol) || parsedSource.username || parsedSource.password) return [];
+    const host = parsedSource.hostname.toLowerCase();
+    const hasMirrorDomain = VAVOO_MIRROR_DOMAINS.some(d => host === d || host.endsWith('.' + d));
+    if (!hasMirrorDomain) return [];
 
     // Normalize /watch?live=X to canonical /vavoo-iptv/play/X
     if (vavooUrl.includes('/watch')) {

@@ -196,7 +196,10 @@ class SegmentLengthService {
             return this._cacheProbedLength(segmentUrl, gatedHead.total);
           }
         }
-      } catch (_) {}
+      } catch (error) {
+        // Local transport admission is not evidence that the CDN probe failed.
+        if (error.code === 'ERR_OUTBOUND_CAPACITY') return null;
+      }
 
       // Probe failed: cache NOTHING. A cached estimate would be served as
       // truth for the entry's whole TTL and never re-probed — the failure
@@ -243,6 +246,7 @@ class SegmentLengthService {
   async _rangedProbe(segmentUrl, headers) {
     const res = await safeFetch(segmentUrl, {
       method: 'GET',
+      guardExternal: true,
       headers: { ...headers, Range: 'bytes=0-0' },
       timeoutMs: 4000,
       attempts: 1,
@@ -268,6 +272,7 @@ class SegmentLengthService {
   async _headProbe(segmentUrl, headers) {
     const res = await safeFetch(segmentUrl, {
       method: 'HEAD',
+      guardExternal: true,
       headers,
       timeoutMs: 4000,
       attempts: 1,

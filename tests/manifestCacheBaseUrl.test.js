@@ -55,6 +55,55 @@ describe('/api/manifest cache identity includes the rewritten request base URL',
     });
   }
 
+  test('separates cached manifests by user agent and preserves it in the child URL', async () => {
+    const first = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-A/1.0' });
+    const second = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-B/1.0' });
+    const again = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-A/1.0' });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(again.headers['x-manifest-cache']).toBe('HIT');
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+    expect(safeFetch.mock.calls.map(call => call[1].headers['User-Agent'])).toEqual(['Fixture-A/1.0', 'Fixture-B/1.0']);
+    const child = first.body.split('\n').find(line => line.includes('/api/manifest?'));
+    expect(new URL(child).searchParams.get('hlsua')).toBe('Fixture-A/1.0');
+    const childQuery = Object.fromEntries(new URL(child).searchParams);
+    const childResponse = await requestWithHost('same.example', undefined, childQuery);
+    expect(childResponse.status).toBe(200);
+    expect(safeFetch.mock.calls[2][0]).toBe('https://cdn.example/live/child.m3u8');
+    expect(safeFetch.mock.calls[2][1].headers['User-Agent']).toBe('Fixture-A/1.0');
+  });
+
+  test('invalid user agent does not reach the upstream request', async () => {
+    const result = await requestWithHost('same.example', undefined, { hlsua: 'bad\r\nInjected: value' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).not.toContain('\r');
+    expect(result.body).not.toContain('hlsua=');
+  });
+
+  test('legacy HLS ua parameter keeps the existing default user agent', async () => {
+    const result = await requestWithHost('same.example', undefined, { ua: 'LegacyClient/131.0' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toContain('Chrome/127.0.0.0');
+    expect(result.body).not.toContain('hlsua=');
+  });
+
+  test('Vavoo keeps its historical default when no HLS user agent is supplied', async () => {
+    const result = await requestWithHost('same.example', undefined, { referer: 'https://vavoo.to/' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toBe('MediaHubMX/2');
+  });
+
+  test('a rejected user agent does not negatively cache a different user agent', async () => {
+    safeFetch.mockImplementation(async (_url, opts) => opts.headers['User-Agent'] === 'BadClient/1.0'
+      ? { ok: false, status: 403 }
+      : { ok: true, status: 200, text: async () => body });
+    const bad = await requestWithHost('same.example', undefined, { hlsua: 'BadClient/1.0' });
+    const good = await requestWithHost('same.example', undefined, { hlsua: 'GoodClient/1.0' });
+    expect(bad.status).toBe(404); // Existing proxy behavior maps upstream 403 to failover 404.
+    expect(good.status).toBe(200);
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+  });
+
   test('the published m3u8 alias preserves cache identity with the original route', async () => {
     const first = await requestWithHost('same.example', 'source-A');
     const alias = await requestWithHost('same.example', 'source-A', {}, '/api/manifest.m3u8');

@@ -73,10 +73,11 @@ class StreamedPkProvider extends BaseProvider {
       if (Array.isArray(allData)) {
         const now = Date.now();
         for (const item of allData) {
-          if (!item.id || !item.title) continue;
+          if (!item || typeof item !== 'object' || !item.id || !item.title) continue;
+          const itemSources = Array.isArray(item.sources) ? item.sources.filter(s => s && typeof s === 'object') : [];
 
           const is247Channel = !item.date || Number(item.date) <= 0;
-          const isGenuinelyLive = is247Channel || liveVerifiedIds.has(item.id) || (item.sources || []).some(s => liveVerifiedSourceIds.has(s.id));
+          const isGenuinelyLive = is247Channel || liveVerifiedIds.has(item.id) || itemSources.some(s => liveVerifiedSourceIds.has(s.id));
           const isUpcoming = !is247Channel && item.date && Number(item.date) > now;
 
           // If it is not a 24/7 channel, not actively live, and not upcoming, it is finished! Skip it.
@@ -87,7 +88,7 @@ class StreamedPkProvider extends BaseProvider {
           const status = is247Channel ? '' : (isGenuinelyLive ? 'live' : 'upcoming');
 
           // Map sources
-          const sources = (item.sources || []).map(s => ({
+          const sources = itemSources.map(s => ({
             source: 'streamedpk',
             id: item.id,
             streamSource: s.source,
@@ -131,8 +132,9 @@ class StreamedPkProvider extends BaseProvider {
       const streamSource = src.streamSource || 'admin';
       const streamId = src.streamId || sourceId;
 
-      const streamList = await this.fetchStreams.fire(streamSource, streamId);
+      let streamList = await this.fetchStreams.fire(streamSource, streamId);
       if (Array.isArray(streamList)) {
+        streamList = streamList.filter(item => item && typeof item === 'object' && typeof item.embedUrl === 'string' && item.embedUrl.trim());
         // Sort streams by viewer count (descending)
         streamList.sort((a, b) => (b.viewers || 0) - (a.viewers || 0));
 

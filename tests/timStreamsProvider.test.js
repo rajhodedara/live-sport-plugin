@@ -1,3 +1,9 @@
+// The unit fixture never executes provider WASM/network bootstrap.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
 
 process.env.NODE_ENV = 'test';

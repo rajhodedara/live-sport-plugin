@@ -21,13 +21,7 @@ const UA =
 
 const MIRRORS = ['https://livetv.sx', 'https://livetv904.me', 'https://m.livetv904.me'];
 
-// Reuse the plugin's browser-fingerprint fetch when present; fall back to fetch.
-let safeFetch = null;
-try {
-  ({ safeFetch } = require('../impitClient'));
-} catch (_) {
-  safeFetch = null;
-}
+const { safeFetch, fetchUndici: fetch } = require('../services/ProviderOutbound');
 
 async function httpGet(url, { timeoutMs = 15000, attempts = 3 } = {}) {
   let lastErr;
@@ -41,9 +35,7 @@ async function httpGet(url, { timeoutMs = 15000, attempts = 3 } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const res = safeFetch
-        ? await safeFetch(url, { headers, timeoutMs, signal: ctrl.signal })
-        : await fetch(url, { headers, signal: ctrl.signal });
+      const res = await safeFetch(url, { headers, timeoutMs, signal: ctrl.signal });
       if (!res || !res.ok) throw new Error('HTTP ' + (res && res.status));
       return await res.text();
     } catch (e) {
@@ -622,11 +614,15 @@ class LiveTVProvider {
                   
                   const iframeMatch = clipHtml.match(/<iframe[^>]+src=["']([^"']+)["']/i);
                   if (iframeMatch) {
-                      const iframeSrc = iframeMatch[1].startsWith('//') ? 'https:' + iframeMatch[1] : iframeMatch[1];
-                      // Filter out Google account / signin iframes
-                      if (!iframeSrc.includes('/v3/signin') && !iframeSrc.includes('accounts.google.com')) {
-                          currentUrl = await unshorten(iframeSrc);
-                          continue;
+                      let iframeUrl;
+                      try { iframeUrl = new URL(iframeMatch[1], currentUrl); } catch (_) {}
+                      if (iframeUrl) {
+                          const iframeSrc = iframeUrl.href;
+                          // Filter out Google account / signin iframes
+                          if (['http:', 'https:'].includes(iframeUrl.protocol) && !iframeSrc.includes('/v3/signin') && !iframeSrc.includes('accounts.google.com')) {
+                              currentUrl = await unshorten(iframeSrc);
+                              continue;
+                          }
                       }
                   }
                   

@@ -1,4 +1,5 @@
 'use strict';
+const { fetchUndici: fetch } = require('../../services/ProviderOutbound');
 
 const SkTechCrypto = require('./SkTechCrypto');
 const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
@@ -200,13 +201,15 @@ class SkTechMatchResolver {
         }
       } else if (line.startsWith('#EXTVLCOPT:')) {
         const opt = line.slice(11).trim();
-        const [k, v] = opt.split('=');
+        const separator = opt.indexOf('=');
+        const k = separator < 0 ? '' : opt.slice(0, separator);
+        const v = separator < 0 ? '' : opt.slice(separator + 1);
         if (k && v) {
           if (/referrer/i.test(k))    curOpts['Referer']    = v;
           if (/user-agent/i.test(k))  curOpts['User-Agent'] = v;
         }
       } else if (line.startsWith('http') && curMeta) {
-        const parsed = SkTechEmbedExtractor.parseDelimited(line);
+        const parsed = SkTechEmbedExtractor.parseDelimited(line, { defaultUserAgent: false });
         if (parsed.url) {
           const clean   = this.cleanEventTitle(curMeta.rawTitle, curMeta.tvgName);
           const isTestOrDemo = /^test\b|^demo\b|^placeholder\b|^sample\b/i.test(clean) ||
@@ -246,7 +249,7 @@ class SkTechMatchResolver {
             resolution:    resTag,
             type:          'fancode_direct',
             streamUrl:     parsed.url,
-            streamHeaders: { ...curOpts, ...parsed.headers },
+            streamHeaders: { 'User-Agent': DEFAULT_UA, ...curOpts, ...parsed.headers },
             streamTitle
           };
 

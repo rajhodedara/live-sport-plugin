@@ -1,4 +1,5 @@
 'use strict';
+const { fetchUndici: fetch } = require('../../services/ProviderOutbound');
 
 const SkTechCrypto = require('./SkTechCrypto');
 const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
@@ -304,11 +305,11 @@ class SkTechChannelResolver {
       } else if (line.startsWith('#KODIPROP:inputstream.adaptive.license_key=')) {
         currentDrmLicense = line.split('=')[1].trim();
       } else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
-        currentHeaders['User-Agent'] = line.split('=')[1].trim();
+        currentHeaders['User-Agent'] = line.slice(line.indexOf('=') + 1).trim();
       } else if (line.startsWith('#EXTVLCOPT:http-referer=') || line.startsWith('#EXTVLCOPT:http-referrer=')) {
-        currentHeaders['Referer'] = line.split('=')[1].trim();
+        currentHeaders['Referer'] = line.slice(line.indexOf('=') + 1).trim();
       } else if (line.startsWith('#EXTVLCOPT:http-origin=')) {
-        currentHeaders['Origin'] = line.split('=')[1].trim();
+        currentHeaders['Origin'] = line.slice(line.indexOf('=') + 1).trim();
       } else if (line.startsWith('#EXTHTTP:')) {
         try {
           const rawJson = line.slice(9).trim();
@@ -316,9 +317,9 @@ class SkTechChannelResolver {
           Object.assign(currentHeaders, parsed);
         } catch (_) {}
       } else if (line.startsWith('http://') || line.startsWith('https://')) {
-        const parsed = SkTechEmbedExtractor.parseDelimited(line);
+        const parsed = SkTechEmbedExtractor.parseDelimited(line, { defaultUserAgent: false });
         const streamUrl = parsed.url;
-        const mergedHeaders = { ...currentHeaders, ...parsed.headers };
+        const mergedHeaders = { 'User-Agent': DEFAULT_UA, ...currentHeaders, ...parsed.headers };
 
         if (streamUrl) {
           const t = currentTitle || '';

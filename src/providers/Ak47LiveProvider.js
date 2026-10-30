@@ -80,21 +80,23 @@ class Ak47LiveProvider extends BaseProvider {
     const lines = content.split(/\r?\n/);
     const entries = [];
     let currentVlcOpts = {};
+    const readVlcOpt = line => {
+      const optLine = line.substring(11).trim();
+      const eqIdx = optLine.indexOf('=');
+      if (eqIdx === -1) return;
+      const key = optLine.substring(0, eqIdx).trim().toLowerCase();
+      const val = optLine.substring(eqIdx + 1).trim();
+      if (key === 'http-referrer' || key === 'http-referer') currentVlcOpts.referer = val;
+      else if (key === 'http-origin') currentVlcOpts.origin = val;
+      else if (key === 'http-user-agent') currentVlcOpts.userAgent = val;
+    };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
       if (line.startsWith('#EXTVLCOPT:')) {
-        const optLine = line.substring(11).trim();
-        const eqIdx = optLine.indexOf('=');
-        if (eqIdx !== -1) {
-          const key = optLine.substring(0, eqIdx).trim().toLowerCase();
-          const val = optLine.substring(eqIdx + 1).trim();
-          if (key === 'http-referrer') currentVlcOpts.referer = val;
-          else if (key === 'http-origin') currentVlcOpts.origin = val;
-          else if (key === 'http-user-agent') currentVlcOpts.userAgent = val;
-        }
+        readVlcOpt(line);
         continue;
       }
 
@@ -120,6 +122,8 @@ class Ak47LiveProvider extends BaseProvider {
         let streamUrl = '';
         while (i + 1 < lines.length) {
           const nextLine = lines[i + 1].trim();
+          if (nextLine.startsWith('#EXTINF:')) break;
+          if (nextLine.startsWith('#EXTVLCOPT:')) readVlcOpt(nextLine);
           if (nextLine && !nextLine.startsWith('#')) {
             streamUrl = nextLine;
             i++;
@@ -128,7 +132,7 @@ class Ak47LiveProvider extends BaseProvider {
           i++;
         }
 
-        if (!streamUrl) continue;
+        if (!streamUrl) { currentVlcOpts = {}; continue; }
 
         // Strict Zero-DASH filter: discard MPEG-DASH manifests and CENC DRM URLs
         if (/\.mpd(\?|$)/i.test(streamUrl) || /\/dash\//i.test(streamUrl) || /cenc/i.test(streamUrl)) {
@@ -588,7 +592,11 @@ class Ak47LiveProvider extends BaseProvider {
       return [];
     }
 
-    const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+    const { manifestUserAgent } = require('../services/ManifestUserAgent');
+    // The provider injects DEFAULT_UA even when no source specified one. Keep
+    // the proxy's historical default in that case.
+    const manifestUa = userAgent === DEFAULT_UA ? '' : manifestUserAgent(userAgent);
+    const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${manifestUa ? `&hlsua=${encodeURIComponent(manifestUa)}` : ''}`;
 
     const stream = new StreamEntity({
       name: 'Ak47Live',

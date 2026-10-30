@@ -17,6 +17,8 @@ const express = require('express');
 const cors    = require('cors');
 const { getRouter } = require('stremio-addon-sdk');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const resolverProxyEvents = require('./services/ResolverProxyEvents');
+const { resolverTransport } = require('./services/ResolverTransportRuntime');
 const child_process = require('child_process');
 const path = require('path');
 
@@ -849,18 +851,21 @@ app.use(require('./routes/dash'));
 // Internal resolver cache APIs are used directly over loopback by cluster workers.
 // Only the resolver's stream and health endpoints may cross the public /api proxy.
 app.use('/api', require('./services/PublicResolverApiGate'));
+// Do not route new requests to a port where this worker observed that its
+// resolver failed to bind. This does not verify other workers' ownership.
+app.use('/api', require('./services/ResolverConflictGate'));
 // Mount the HLS Video Proxy (routes to the internal resolver on port RESOLVER_PORT)
 app.use('/api', createProxyMiddleware({
-  target: `http://127.0.0.1:${RESOLVER_PORT}/api`,
-  changeOrigin: true,
+  ...(resolverTransport ? resolverTransport.proxyOptions : { target: `http://127.0.0.1:${RESOLVER_PORT}/api` }),
+  // A socket target has no TCP hostname to synthesize as Host. Preserve the
+  // incoming host in that mode; the configured TLS servername is separate.
+  changeOrigin: !resolverTransport,
   xfwd: true,
-  logLevel: 'debug',
-  onError: (err, req, res) => {
-    console.error('[Proxy Error] Failed to proxy /api request to internal resolver:', err.message);
-    if (!res.headersSent) {
-      res.status(502).send('Bad Gateway: Internal stream resolver is not responding.');
-    }
-  }
+  // The proxy library's default logger includes request URLs. Resolver URLs
+  // can contain playback credentials, so log only fixed messages.
+  logger: { info: () => {}, warn: () => console.warn('[Resolver Proxy] Warning'),
+    error: () => console.error('[Resolver Proxy] Request failed') },
+  on: { proxyReq: resolverProxyEvents.proxyReq, error: resolverProxyEvents.error }
 }));
 
 // ─── Universal Dynamic Base URL Response Rewriter ─────────────────────────────

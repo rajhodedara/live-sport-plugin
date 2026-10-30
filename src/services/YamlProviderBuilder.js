@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const cheerio = require('cheerio');
-const { request } = require('undici');
+const { request } = require('./ProviderOutbound');
 const BaseProvider = require('../providers/BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
@@ -20,6 +20,16 @@ class GenericYamlProvider extends BaseProvider {
     };
       return res.data;
     });
+  }
+
+  _resolveUrl(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    try {
+      const url = new URL(value.trim(), this.config.baseUrl);
+      return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   async getMatches() {
@@ -41,6 +51,8 @@ class GenericYamlProvider extends BaseProvider {
         } else {
            link = $(el).find(this.config.selectors.link).attr('href');
         }
+        link = this._resolveUrl(link);
+        if (!link) return;
 
         const timeText = $(el).find(this.config.selectors.time).text().trim();
         // Fallback generic parsing
@@ -66,7 +78,8 @@ class GenericYamlProvider extends BaseProvider {
     // For simple YAML scrapers, we just return the link as an external player
     // Building a generic m3u8 extractor in YAML is too complex for this phase,
     // so we fallback to Nuvio Web Player.
-    const watchUrl = sourceId.startsWith('http') ? sourceId : `${this.config.baseUrl.replace(/\/$/, '')}${sourceId.startsWith('/') ? '' : '/'}${sourceId}`;
+    const watchUrl = this._resolveUrl(sourceId);
+    if (!watchUrl) return [];
     return [new StreamEntity({
       name: 'Nuvio Web Player',
       title: `${this.name} (${matchTitle})`,

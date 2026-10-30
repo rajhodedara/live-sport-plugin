@@ -22,6 +22,8 @@ const DamiTvProvider = require('./providers/DamiTvProvider');
 const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
+const { resolverTransport } = require('./services/ResolverTransportRuntime');
+const { relations: timingRelations } = require('./services/TimingRuntime');
 const StreamedWasmPool = require('./services/StreamedWasmPool');
 const IframeDomainRegistry = require('./services/IframeDomainRegistry');
 const PpvStProvider = require('./providers/PpvStProvider');
@@ -52,7 +54,7 @@ container.register({
   cronService: asClass(CronService).singleton(),
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),
-  streamResolveCache: asValue(new StreamResolveCache()),
+  streamResolveCache: asValue(new StreamResolveCache({ timingRelations, sharedResolver: resolverTransport })),
   streamedWasmPool: asValue(StreamedWasmPool),
   dashToHlsService: asClass(DashToHlsService).singleton(),
   providerHealthService: asClass(ProviderHealthService).singleton(),
