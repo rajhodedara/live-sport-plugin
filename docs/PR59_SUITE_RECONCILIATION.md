@@ -11,7 +11,8 @@ and socket connect/listen blocked by tests/fixtures/pr59-offline-boundary.cjs.
 There was no claim of a full-suite or CI pass; existing workflows do not run
 this offline selection as a test job. Raj's full-suite comparison is additional
 evidence and its failures must be reconciled, including the three new suites.
-The published SHA stays 27f35629 while this follow-up is reviewed locally.
+The report below concerns historical test target27f35629. Current integration
+and validation are documented in PR59_VALIDATION.md and STABLE_A71_INTEGRATION.md.
 
 | Reported suite | Current evidence / local correction | Validation limit |
 | --- | --- | --- |
@@ -49,7 +50,7 @@ Jest's testMatch is explicit for Jest JS/TS files; .test.mjs and Node .cjs tests
 belong to their Node runner, not Jest. They are not counted as passing by being
 excluded from the wrong runner.
 
-The expanded offline command now covers 54 suites, **515 passing tests** and
+The expanded offline command now covers 55 suites, **523 passing tests** and
 one existing TODO. Seven pure resolver HOST tests pass separately; actual
 HTTP/native cases still need the corrected fixtures run in Raj's environment.
 The fixture reconciliation does not change runtime logic. This candidate also
@@ -115,7 +116,9 @@ exercises actual handlers and guards in memory, mocking native allocation at its
 factory boundary. It does not claim full HTTP-stack/native verification or a
 proven explanation of the original timeout.
 
-The expanded54-suite command passes515 tests plus1 TODO on both Node22.23.2 and
-Node24.19.0 with installed Jest29.7.0. Detailed evidence and remaining limits are
-in PR59_LOCKED_RECONCILIATION.md. The published head remains27f35629 pending
-coordination and the isolated transport acceptance test.
+The locked-fixture54-suite selection passed515 tests plus1 TODO on both
+Node22.23.2 and Node24.19.0 with installed Jest29.7.0. The current55-suite command
+adds the existing8-test TimStreams suite and passes523 tests on both versions.
+PR59_LOCKED_RECONCILIATION.md retains the historical failure analysis;
+STABLE_A71_INTEGRATION.md records the latest stable integration. Isolated
+transport acceptance and full repository comparison remain pending.

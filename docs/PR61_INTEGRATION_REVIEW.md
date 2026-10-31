@@ -1,12 +1,13 @@
-# PR61 local integration review
+# PR61 integration review
 
-Prepared locally from PR61 `53c8afc873f8dd88395692994677d44a21f2750b` and
-published PR59 `27f35629f880306589ca51f676002c7a2b73e79a`, which includes stable
-`94042c2d5d8251cd4dee83323c0b61bff9882043`. The merge applied without conflicts.
-The local PR59 follow-up `ad4857ed0d341d294a5c16348e3fa8ec67b9a3d4` is also
-integrated, including fixture reconciliation and revision-based L2 invalidation.
-This report does not publish the branch or authorize merge/deployment. The
-PR59_SUITE_RECONCILIATION.md report records the remaining full-suite/runtime gaps.
+The candidate starts from published PR61
+`c952b588b14277dadae133764da589c97e3088c0` and now includes stable
+`a71e49f377a64a76f83104a2fdc03823df43cc84`. The local PR59 integration
+`324472c6b2a7cf0dee373db29825f9d72f8bbe74` is an ancestor, preserving its
+guard, resolver policy, cache correction and reconciled fixtures. Both merges
+applied without conflicts. This report does not authorize merge or deployment.
+STABLE_A71_INTEGRATION.md records fresh validation and remaining acceptance.
+PR59_SUITE_RECONCILIATION.md preserves the historical full-suite analysis.
 The mapping follow-up is integrated on top of local PR61 7d72771; see
 PR61_MAPPING_REVIEW.md for reproduced association defects and compatibility limits.
 
@@ -15,6 +16,10 @@ PR61_MAPPING_REVIEW.md for reproduced association defects and compatibility limi
 - The PR59 destination guard, redirect policy, resolver trust choice, native
   admission limits, provider-health behavior, Leaf install configuration and
   SoccerFull fixes are preserved. PR61 does not require weakening those guards.
+- Latest stable's TimStreams API and first-hop Referer use tim-streams.com;
+  token-hop Referer/Origin remain bound to the embed page. The upstream QEMU
+  and amd64/arm64 publication declarations are retained, without claiming an
+  actual arm64 image build or runtime check.
 - Scraper changes resolve relative links against their containing page and
   classify supported players by actual hostname/path, rather than domain-like
   text in a query. MLB/NFL bridge pages containing player names in query strings
@@ -56,9 +61,9 @@ node scripts/test-pr61-offline.cjs
 npm run build
 ```
 
-Current result: the inherited 54-suite PR59 selection passes 515 tests and has
+Current result: the inherited 55-suite PR59 selection passes 523 tests and has
 one existing TODO. The PR61 selection passes 400 tests in 53 suites. Seven
-additional Node-runner checks pass. Total: 915 Jest tests and seven Node tests;
+additional Node-runner checks pass. Total: 923 Jest tests and seven Node tests;
 no claim of a full repository suite pass. Worker construction, socket connects
 and listeners are blocked. The Node file's real-HTTP case is deliberately outside
 this offline command. Manifest route/cache/HLS tag cases invoke real handlers
@@ -79,8 +84,8 @@ must be reconciled separately. This candidate preserves that dependency rather
 than bypassing it. PPV upstream 403 remains unexplained; real Stremio/Exo/Nuvio,
 WARP and AK47 custom-UA behavior remain to be verified on an isolated runtime.
 No production process, PM2 setting, signing key or raw private log is modified.
-Keep the published heads fixed until the user reviews the local result and a
-new test SHA is agreed. No zero-defect guarantee is made.
+Use the exact newly agreed test SHA for each report; earlier target results
+do not automatically validate this update. No zero-defect guarantee is made.
 
 Independent review identified the pre-existing ownerless-DELETE race and a
 controlled reproduction confirmed it. The integrated revision/PATCH correction
@@ -105,7 +110,6 @@ upstream access errors.
 
 The locked PR59 report has now arrived and is reconciled in
 PR59_LOCKED_RECONCILIATION.md. Its fixture-only follow-up preserves all PR61
-runtime/mapping changes. The complete combined command passes915 Jest tests and
-7 Node tests on both Node22.23.2 and Node24.19.0, with1 existing TODO. Runtime
-source and dependency files are unchanged since the mapping candidate98afbdc,
-whose build passed.
+runtime/mapping changes. After the stable host integration, the complete combined
+command passes923 Jest tests and7 Node tests on both Node22.23.2 and Node24.19.0,
+with1 existing TODO. Both new candidate builds completed successfully.

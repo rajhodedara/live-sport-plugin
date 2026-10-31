@@ -1,7 +1,8 @@
 # PR59 locked-run evidence reconciliation
 
-This fixture-only follow-up starts from local PR59 f240afd. Published PR59 stays
-27f35629; no production process, PR body, dependency or runtime code is changed.
+This report records the fixture-only follow-up from local PR59 f240afd and
+historical published test target27f35629. STABLE_A71_INTEGRATION.md describes the
+current integration. No production process or dependency is changed here.
 
 ## Received evidence
 
@@ -49,7 +50,9 @@ node scripts/test-pr59-offline.cjs
 ```
 
 Result on both Node22.23.2 and Node24.19.0 with installed Jest29.7.0:
-54 suites pass,515 tests pass,1 existing TODO. No full Jest-suite pass is claimed.
+The original locked-fixture selection passed54 suites/515 tests and1 TODO.
+The current command includes8 existing TimStreams cases:55 suites/523 tests and
+1 TODO pass on both Node versions. No full Jest-suite pass is claimed.
 The Node22 binary came from the official distribution with SHA256 checked against
 its official SHASUMS; existing local dependency versions were retained. This was
 not a fresh installation on Raj's host.
@@ -63,9 +66,10 @@ offline preload. No actual native/WASM extractors run.
 
 Two independent read-only reviews found no blocking issue in these fixture
 changes and confirmed the distinction between failed setup and header evidence.
-The six test files and runner are the only executable-code changes since f240afd.
-Runtime source/dependency files are byte-identical, so the previous build evidence
-is retained; no new runtime build is required for these test/document edits.
+The six test files and runner were the only executable-code changes in that
+fixture follow-up. The subsequent stable integration changes TimStreams' host
+and adds fresh build evidence in STABLE_A71_INTEGRATION.md; dependency files
+remain unchanged.
 
 ## Other reported catalogue observation
 
@@ -83,4 +87,5 @@ An agreed new test SHA still needs corrected real HTTP/native fixtures and the
 operator's isolated pinned-transport matrix, including positive controls,
 explicit wrong-certificate failure, both workers and rotation/restart/fail-closed
 behavior. Full repository results and real playback remain separate. Published
-heads stay frozen until the new target is coordinated.
+test targets must be identified by their exact SHA; earlier target results do
+not automatically validate a later update.
