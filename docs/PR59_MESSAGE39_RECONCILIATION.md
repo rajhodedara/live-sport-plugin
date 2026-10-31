@@ -1,5 +1,9 @@
 # Received full-run evidence and fixture follow-up
 
+This records the initial received comparison and its fixture follow-up. For
+the subsequently received updated Windows and Linux reports, current runner
+totals and remaining focused acceptance, see PR59_WINDOWS_UPDATED_REVIEW.md.
+
 The supplied `full-stable.json`, `full-pr59.json`, `full-pr61.json`, and
 `comparison.json` have been audited independently. The narrative associates them
 with stable a71e49f, PR59 89745b0 and PR61 90a2e55. All recorded suite paths are
