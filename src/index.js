@@ -842,6 +842,7 @@ app.get('/img', async (req, res) => {
 // absent, all fetches silently use undici — streams continue to work.
 app.use(require('./routes/streamProxy'));
 app.use(require('./routes/manifest'));
+app.use(require('./routes/leafManifest'));
 app.use(require('./routes/hlsResource'));
 app.use(require('./routes/embed'));
 // Zero-bandwidth DASH→HLS converter (must stay above the /api resolver proxy)

@@ -257,7 +257,7 @@ class LeafProvider extends BaseProvider {
       const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
-      const manifestProxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(directUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+      const manifestProxyUrl = `${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent(directUrl)}`;
 
       const rawName = st.name || '';
       const rawTitle = st.title || '';
@@ -305,7 +305,14 @@ class LeafProvider extends BaseProvider {
         quality,
         bitrate,
         behaviorHints: {
-          notWebReady: false
+          notWebReady: false,
+          proxyHeaders: {
+            request: {
+              'Referer': referer,
+              'Origin': origin,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+            }
+          }
         },
         _source: 'leaf'
       }));
