@@ -4,7 +4,7 @@ const vm = require('vm');
 const { EventEmitter } = require('events');
 
 // Evaluate the actual manager in isolation: never spawn, kill or probe a real process.
-function fixture(worker = '0', transport = undefined) {
+function fixture(worker = '0', transport = undefined, legacyTrust = 'true') {
   const requests = [];
   const timers = [];
   const children = [];
@@ -30,7 +30,7 @@ function fixture(worker = '0', transport = undefined) {
   }) };
   const processMock = new EventEmitter();
   Object.assign(processMock, {
-    env: { NODE_APP_INSTANCE: worker, ...(transport ? { RESOLVER_TRANSPORT: transport } : {}) }, platform: 'linux',
+    env: { NODE_APP_INSTANCE: worker, RESOLVER_TRUST_LEGACY_TCP: legacyTrust, ...(transport ? { RESOLVER_TRANSPORT: transport } : {}) }, platform: 'linux',
     cwd: () => '/fixture', exit: jest.fn()
   });
   const context = {
@@ -48,6 +48,7 @@ function fixture(worker = '0', transport = undefined) {
       if (name === 'fs') return { existsSync: () => true, statSync: () => ({ isFile: () => true }) };
       if (name === './container') return { resolve: () => ({ shutdown }) };
       if (name === './services/ResolverConflictState') return conflictState;
+      if (name === './services/ResolverTrustPolicy') return require('../src/services/ResolverTrustPolicy');
       throw new Error(`Unexpected dependency: ${name}`);
     }
   };
@@ -70,7 +71,14 @@ describe('resolver shutdown across asynchronous health checks', () => {
       expect(f.spawn).not.toHaveBeenCalled();
     }
   });
-  test.todo('unverified HTTP 200 or 404 occupant is not adopted or contacted by proxy or cache');
+  test('default and non-explicit trust values never probe or start TCP in either worker', async () => {
+    for (const worker of ['0', '1']) for (const trust of [null, '', 'false', '1', 'yes']) {
+      const f = fixture(worker, undefined, trust);
+      await f.spawnResolver();
+      expect(f.requests).toHaveLength(0);
+      expect(f.spawn).not.toHaveBeenCalled();
+    }
+  });
   test.todo('two workers use only a verified shared resolver across owner restart and port replacement');
   test('does not spawn or kill ports after shutdown during failed initial probe', async () => {
     const f = fixture();

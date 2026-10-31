@@ -30,6 +30,17 @@ La rama #61 experimenta con User-Agent para manifests AK47 y segmenta la caché 
 
 ## Pruebas y evidencia
 
+### Asociación de eventos y canales
+
+Conservar país y número de señal al asociar un canal; una variante de otro país
+no prueba que transmita el mismo partido. Mantener los calificadores de género,
+edad y reservas unidos al equipo correspondiente. Si falta información, no
+atribuir fuentes de una ficha a otra por suposición. Los IDs repetidos y las
+búsquedas heredadas ambiguas deben resolverse con evidencia suficiente; no
+elegir simplemente el primer resultado. Probar también alias válidos, orden
+inverso de equipos, nombres Unicode y marcas que contengan abreviaturas de país.
+PR61_MAPPING_REVIEW.md documenta los casos corregidos y sus límites.
+
 1. Crear fixtures sintéticas pequeñas que prueben comportamiento observable, incluidas entradas malformadas, rutas relativas, dominios parecidos, cabeceras, límites y errores. Marcar explícitamente que no son respuestas reales.
 2. Simular resolución DNS y redirecciones en pruebas de seguridad; probar que destinos privados se rechazan en el punto correspondiente y que un error no hace perder entradas válidas siguientes. No afirmar protección completa a partir de una prueba de una ruta.
 3. Ejecutar suites enfocadas que no lancen workers/WASM reales ni contacten proveedores. La ejecución completa o pruebas WASM reales previamente rechazadas por revisión automática no se deben eludir. Inspeccionar imports: algunas suites pueden crear workers al cargar el contenedor. Documentar si Jest queda abierto y cómo terminó.

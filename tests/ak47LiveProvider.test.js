@@ -1,6 +1,8 @@
 'use strict';
 
 process.env.NODE_ENV = 'test';
+jest.mock('../src/services/StreamedWasmPool', () => ({ resolveWasmStream: jest.fn(), shutdown: jest.fn() }));
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn(async () => { throw new Error('Unexpected outbound I/O in AK47 fixture'); }) }));
 
 const crypto = require('crypto');
 const Ak47LiveProvider = require('../src/providers/Ak47LiveProvider');
@@ -14,6 +16,8 @@ describe('Ak47LiveProvider Unit & Integration Tests', () => {
   beforeEach(() => {
     provider = new Ak47LiveProvider({ cacheTtlMs: 5000 });
   });
+
+  afterEach(() => jest.useRealTimers());
 
   describe('AK47 Obfuscation Decryption Engine', () => {
     test('successfully decrypts double-base64 pair-swapped AES-128-CBC payloads', () => {
@@ -208,6 +212,7 @@ http://193.47.62.1:8080/live/game.m3u8
     });
 
     test('parses real event dates, formats solo event titles, and filters invisible events', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-10-25T13:00:00Z'));
       const mockEvents = [
         {
           event: JSON.stringify({

@@ -1,8 +1,10 @@
+const { BASE_URL } = require('../config');
 const crypto = require('crypto');
 const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const { unpack } = require('./deanEdwardsUnpack');
 
 function b64Decode(str) {
   let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -346,7 +348,34 @@ class SoccerFullProvider extends BaseProvider {
 
       // Extract iframe src
       const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-      if (!iframeMatch) return [];
+      if (!iframeMatch) {
+        // Shape A: ArtPlayer app with var m3u8Url = "/hls/<sid>.m3u8"
+        const m3u8Match = html.match(/var\s+m3u8Url\s*=\s*["']([^"']+)["']/i);
+        if (m3u8Match) {
+          const rawM3u8 = m3u8Match[1].trim();
+          if (rawM3u8.includes('.m3u8')) {
+            const fullM3u8 = new URL(rawM3u8, this.baseUrl).toString();
+            const cleanLabel = this._formatPartLabel(label);
+            // The upstream playlist is served without CORS headers, so it is
+            // published through the addon (playlist text only - every segment
+            // stays a direct CDN URI, see routes/soccerFullManifest.js).
+            const playlistUrl = `${BASE_URL}/api/soccerfull/manifest?url=${encodeURIComponent(fullM3u8)}`;
+            const artStream = new StreamEntity({
+              name: 'SoccerFull',
+              title: `SoccerFull | ${cleanLabel} (Auto)`,
+              resolution: 'Auto',
+              url: playlistUrl,
+              isTikTok: true,
+              behaviorHints: {
+                notWebReady: false
+              }
+            });
+            this._setCache(this._streamCache, playUrl, [artStream], 30 * 60 * 1000);
+            return [artStream];
+          }
+        }
+        return [];
+      }
 
       const iframeSrc = iframeMatch[1];
 
@@ -364,7 +393,14 @@ class SoccerFullProvider extends BaseProvider {
           streams.push(...okStreams);
         }
       }
-      // B. Vixeo host (vixeo.io)
+      // B. HGCloud host (hgcloud.to, audinifer.com, vibuxer.com, hanerix.com)
+      else if (/hgcloud|audinifer|vibuxer|hanerix/i.test(iframeSrc)) {
+        const hgStreams = await this.extractHgCloud(iframeSrc, label);
+        if (Array.isArray(hgStreams) && hgStreams.length > 0) {
+          streams.push(...hgStreams);
+        }
+      }
+      // C. Vixeo host (vixeo.io)
       else if (iframeSrc.includes('vixeo.io')) {
         const streamUrl = await this.extractVixeo(iframeSrc);
         if (streamUrl) {
@@ -693,6 +729,90 @@ class SoccerFullProvider extends BaseProvider {
     } catch (err) {
       console.warn(`[SoccerFull] Vidara extraction failed for ${vidaraUrl}:`, err.message);
       return null;
+    }
+  }
+
+  /**
+   * Extracts direct CDN HLS URL from HGCloud / StreamCloud mirror hosts
+   * Host in {hgcloud.to, audinifer.com, vibuxer.com, hanerix.com}.
+   * Extracts <code> from /e/<code>. Unpacks Dean Edwards packed script and extracts links.hls2.
+   */
+  async extractHgCloud(iframeSrc, label = '') {
+    try {
+      const codeMatch = iframeSrc.match(/\/e\/([a-zA-Z0-9_-]+)/);
+      const code = codeMatch ? codeMatch[1] : '';
+      if (!code) return [];
+
+      const mirrorHosts = ['hgcloud.to', 'audinifer.com', 'vibuxer.com', 'hanerix.com'];
+      try {
+        const uHost = new URL(iframeSrc.startsWith('http') ? iframeSrc : `https://${iframeSrc}`).hostname;
+        if (uHost && !mirrorHosts.includes(uHost)) {
+          mirrorHosts.unshift(uHost);
+        }
+      } catch (_) {}
+
+      for (const host of mirrorHosts) {
+        try {
+          const embedUrl = `https://${host}/e/${code}`;
+          const res = await undici.request(embedUrl, {
+            headers: {
+              ...this.defaultHeaders,
+              Referer: host === 'hgcloud.to' ? `${this.baseUrl}/` : 'https://hgcloud.to/'
+            },
+            headersTimeout: 6000,
+            bodyTimeout: 6000
+          });
+          if (res.statusCode !== 200) continue;
+          const html = await res.body.text();
+
+          // If the body has no packed payload (it is the 819-byte JS shell on hgcloud.to), try each mirror host in turn
+          if (!html.includes('function(p,a,c,k,e,d)')) {
+            continue;
+          }
+
+          const packerBlock = html.match(/(?:eval\s*)?\(\s*function\(p,a,c,k,e,d\)[\s\S]*?\.split\(['"]\|['"]\)\s*\)\s*\)?/);
+          if (!packerBlock) continue;
+
+          const unpacked = unpack(packerBlock[0]);
+          if (!unpacked) continue;
+
+          const linksMatch = unpacked.match(/var\s+links\s*=\s*(\{[^;]+\});/);
+          if (!linksMatch) continue;
+
+          let links;
+          try {
+            links = JSON.parse(linksMatch[1]);
+          } catch (_) {
+            continue;
+          }
+
+          // Emit links.hls2 ONLY (ACAO '*', notWebReady: false)
+          if (links && links.hls2 && typeof links.hls2 === 'string') {
+            const cleanLabel = this._formatPartLabel(label);
+            return [new StreamEntity({
+              name: 'SoccerFull',
+              title: `SoccerFull | ${cleanLabel} (Auto)`,
+              resolution: 'Auto',
+              url: links.hls2,
+              behaviorHints: {
+                notWebReady: false,
+                proxyHeaders: {
+                  request: {
+                    'User-Agent': this.defaultHeaders['User-Agent'],
+                    'Referer': `https://${host}/`,
+                    'Origin': `https://${host}`
+                  }
+                }
+              }
+            })];
+          }
+        } catch (_) {
+          continue;
+        }
+      }
+      return [];
+    } catch (_) {
+      return [];
     }
   }
 }

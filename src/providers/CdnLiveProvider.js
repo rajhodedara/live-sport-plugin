@@ -228,6 +228,7 @@ class CdnLiveProvider extends BaseProvider {
         if (!Array.isArray(events)) continue;
         for (const item of events) {
           if (!item || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+          if (item.name != null && typeof item.name !== 'string') continue;
           
           let title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();
           if (!title || title === 'vs') continue;

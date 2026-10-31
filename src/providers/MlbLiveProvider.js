@@ -329,7 +329,9 @@ class MlbLiveProvider extends BaseProvider {
         }
 
         try {
-          const isDirectProvider = /ok\.ru|byse|vidara|dailymotion|dai\.ly|d\.tube|\.(?:m3u8|mp4)/i.test(dest);
+          const isDirectProvider = this._isVidaraUrl(dest) || this._isByseUrl(dest) ||
+            this._isDailymotionUrl(dest) || ['ok.ru', 'd.tube'].some(host => matchesHost(playerHostname(dest), host)) ||
+            /\.(m3u8|mp4)$/i.test(new URL(dest).pathname);
           if (!isDirectProvider && /^https?:\/\//i.test(dest)) {
             try {
               const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://mlblive.net/' });
@@ -389,7 +391,7 @@ class MlbLiveProvider extends BaseProvider {
           }
 
           // 5. Direct Media File
-          if (/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
+          if (/\.(m3u8|mp4)$/i.test(new URL(dest).pathname)) {
             if (!seenUrls.has(dest)) {
               seenUrls.add(dest);
               directStreams.push(new StreamEntity({

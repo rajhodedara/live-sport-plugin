@@ -9,6 +9,7 @@ const child_process = require('child_process');
 const http = require('http');
 const container = require('./container');
 const resolverConflictState = require('./services/ResolverConflictState');
+const { allowsLegacyResolverTcp } = require('./services/ResolverTrustPolicy');
 
 // ─── Stream Resolver Lifecycle Manager ───────────────────────────────────────
 // All cluster workers share a single lightweight local resolver service.
@@ -70,6 +71,10 @@ async function spawnResolver() {
   // In the explicitly configured isolated mode an external service owns the
   // resolver socket. Never probe, spawn or adopt a listener on the TCP port.
   if (process.env.RESOLVER_TRANSPORT === 'systemd-unix-tls') return;
+  if (!allowsLegacyResolverTcp(process.env)) {
+    console.warn('[Resolver] Legacy TCP resolver disabled; configure a pinned resolver transport or explicitly opt into trusted-local TCP.');
+    return;
+  }
 
   // Check if an existing healthy resolver is already listening (e.g. from reload or prior worker)
   const alive = await isResolverAlive(RESOLVER_PORT);

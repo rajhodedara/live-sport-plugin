@@ -475,4 +475,63 @@ describe('SoccerFullProvider', () => {
       }
     });
   });
+
+  describe('ArtPlayer & HGCloud Stream Resolution', () => {
+    test('extracts links.hls2 from packed hgcloud fixture with zero network hops', async () => {
+      const fs = require('fs');
+      const path = require('path');
+      const fixturePath = path.join(__dirname, 'fixtures', 'hgcloud-packed.txt');
+      const packedContent = fs.readFileSync(fixturePath, 'utf8');
+
+      const undici = require('../src/services/ProviderOutbound');
+      jest.spyOn(undici, 'request').mockImplementation(async (url) => {
+        if (typeof url === 'string' && url.includes('hgcloud.to')) {
+          return {
+            statusCode: 200,
+            body: { text: async () => '<html><body><script src="/main.js"></script></body></html>' }
+          };
+        }
+        if (typeof url === 'string' && url.includes('audinifer.com')) {
+          return {
+            statusCode: 200,
+            body: { text: async () => `<html><body><script>${packedContent}</script></body></html>` }
+          };
+        }
+        return { statusCode: 404, body: { text: async () => '' } };
+      });
+
+      const streams = await provider.extractHgCloud('https://hgcloud.to/e/hb7sq8m5o1hh', '1st Half');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s).toBeInstanceOf(StreamEntity);
+      expect(s.name).toBe('SoccerFull');
+      expect(s.title).toBe('SoccerFull | 1st Half (Auto)');
+      expect(s.resolution).toBe('Auto');
+      expect(s.url).toContain('https://g4vsrqvtrj.cdn-centaurus.com/hls2/01/14931/hb7sq8m5o1hh_o/master.m3u8');
+      expect(s.behaviorHints.notWebReady).toBe(false);
+      expect(s.behaviorHints.proxyHeaders.request.Referer).toBe('https://audinifer.com/');
+      expect(s.behaviorHints.proxyHeaders.request.Origin).toBe('https://audinifer.com');
+    });
+
+    test('extracts ArtPlayer /hls/<sid>.m3u8 shape when no iframe is present', async () => {
+      const undici = require('../src/services/ProviderOutbound');
+      const artHtml = '<!doctype html><html><body><div class="artplayer-app"></div><script>(function(){ var m3u8Url = "/hls/18113.m3u8"; var art = new Artplayer({ url: m3u8Url }); })();</script></body></html>';
+
+      jest.spyOn(undici, 'request').mockResolvedValueOnce({
+        statusCode: 200,
+        body: { text: async () => artHtml }
+      });
+
+      const streams = await provider._resolveServerStream({ sid: '18113', label: '1st Half' }, 'https://soccerfull.net/match.html');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.name).toBe('SoccerFull');
+      expect(s.title).toBe('SoccerFull | 1st Half (Auto)');
+      expect(s.resolution).toBe('Auto');
+      expect(s.url).toContain('/api/soccerfull/manifest?url=');
+      expect(s.url).toContain(encodeURIComponent('https://soccerfull.net/hls/18113.m3u8'));
+      expect(s.behaviorHints.notWebReady).toBe(false);
+      expect(s.isTikTok).toBe(true);
+    });
+  });
 });

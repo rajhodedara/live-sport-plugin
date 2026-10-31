@@ -133,6 +133,12 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
           throw new Error('Upstream playlist has no media entries');
         }
 
+        // Reject anti-piracy trap playlists (_antipiracy segments) so the player can fail over immediately
+        if (/_antipiracy|antipiracy/i.test(out)) {
+          console.warn('[ManifestProxy] Upstream returned anti-piracy trap for', effectiveUrl);
+          throw new Error('Upstream anti-piracy tripwire triggered');
+        }
+
         let dynamicTtl = MANIFEST_TTL_MS;
         try {
           const m3u8Parser = require('m3u8-parser');
@@ -224,6 +230,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
     const isTransientUpstream = upstreamStatus >= 500 && upstreamStatus <= 599;
     if (err.message === 'Upstream returned non-m3u8 body' ||
         err.message === 'Upstream playlist has no media entries' ||
+        err.message === 'Upstream anti-piracy tripwire triggered' ||
         isExpired || isTransientUpstream) {
       if (isExpired) {
         console.warn(`[ManifestProxy] Upstream refused with ${upstreamStatus} (expired token?) for ${targetUrl}`);

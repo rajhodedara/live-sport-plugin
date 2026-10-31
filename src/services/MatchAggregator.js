@@ -13,6 +13,7 @@ const STOP_WORDS = new Set([
 const { parseTimezone } = require('../timezone');
 const ChannelIdentityService = require('./ChannelIdentityService');
 const MatchEntity = require('../domain/MatchEntity');
+const { eventSquadIdentity, canonicalizeAge } = require('./EventSquadIdentity');
 
 /**
  * Parses a provider-supplied match date into epoch milliseconds.
@@ -250,6 +251,26 @@ function _teamsSimilar(a, b) {
   return minLen > 0 && (common / minLen) >= 0.7;
 }
 
+function _teamPairsSimilar(a, b) {
+  return (_teamsSimilar(a[0], b[0]) && _teamsSimilar(a[1], b[1])) ||
+    (_teamsSimilar(a[0], b[1]) && _teamsSimilar(a[1], b[0]));
+}
+
+function _squadsCompatible(p1, p2) {
+  const a = p1.squad, b = p2.squad;
+  if (!a || !b) return true;
+  if (a.conflicting || b.conflicting || a.key !== b.key) return false;
+  if (!a.teamKeys || !b.teamKeys) return true;
+  if (a.teamKeys.every(key => key === a.key) && b.teamKeys.every(key => key === b.key)) return true;
+  if (!p1.teams || !p2.teams) return false;
+  return (_teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]) &&
+      a.teamKeys[0] === b.teamKeys[0] && a.teamKeys[1] === b.teamKeys[1]) ||
+    (_teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]) &&
+      a.teamKeys[0] === b.teamKeys[1] && a.teamKeys[1] === b.teamKeys[0]);
+}
+
+const _resolvedTeam = name => Boolean(name) && !/^(?:tba|tbd|unknown|to be (?:announced|decided|determined)|team(?: [ab12])?|winner.*|loser.*)$/i.test(name);
+
 const COUNTRY_CANONICAL = {
   'uk': 'united kingdom',
   'gb': 'united kingdom',
@@ -443,12 +464,13 @@ function _tryExtractTeams(title, precomputedSeries) {
 
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
-// Identity key mirroring the merge loop's 7-field source equality (source, id,
-// streamSource, streamId, group, channelName, name — deliberately NOT url),
+// Identity key shared by the merge loop's source equality (deliberately NOT
+// url). Country context can select a different broadcaster even for the same
+// provider display name/ID, so it must survive source deduplication.
 // joined with a byte that cannot occur in provider display fields.
 const sourceIdentityKey = (s) => [
   s.source || '', s.id || '', s.streamSource || '', s.streamId || '',
-  s.group || '', s.channelName || '', s.name || ''
+  s.group || '', s.country || '', s.countryCode || '', s.channelName || '', s.name || ''
 ].join('\u0000');
 
 class MatchAggregator {
@@ -491,19 +513,21 @@ class MatchAggregator {
       if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
 
-      // Extract candidate broadcaster names from all sources
-      const candidateNames = [];
+      // Retain the source's country context alongside its broadcaster name.
+      const candidates = [];
       for (const src of match.sources) {
         if (!src) continue;
         const candidateName = src.channelName || src.channel_name || src.channel;
         if (candidateName && typeof candidateName === 'string' && candidateName.trim()) {
-          candidateNames.push(candidateName.trim());
+          candidates.push({ name: candidateName.trim(), context: {
+            group: src.group, country: src.country, countryCode: src.countryCode
+          } });
         }
       }
 
       // Check if this fixture has specific event/overflow channels (e.g., Canal+ Live 3, Canal+ Extra 2)
-      const hasCanalOverflow = candidateNames.some(c => /canal\+?\s*(live|extra)\s*\d+/i.test(c));
-      const hasMovistarOverflow = candidateNames.some(c => /movistar\s*(liga|deportes|campeones)\s*\d+/i.test(c));
+      const hasCanalOverflow = candidates.some(c => /canal\+?\s*(live|extra)\s*\d+/i.test(c.name));
+      const hasMovistarOverflow = candidates.some(c => /movistar\s*(liga|deportes|campeones)\s*\d+/i.test(c.name));
 
       // If specific overflow channels exist, prune any linear channels that were mistakenly added
       if (hasCanalOverflow) {
@@ -525,7 +549,8 @@ class MatchAggregator {
       );
 
       // Prioritize numbered event feeds and filter out conflicting generic network channels
-      const prioritizedCandidates = candidateNames.filter(c => {
+      const prioritizedCandidates = candidates.filter(candidate => {
+        const c = candidate.name;
         if (hasCanalOverflow && /canal\+?\s*(sport|premiere?)/i.test(c) && !/(live|extra)/i.test(c)) {
           return false;
         }
@@ -537,8 +562,8 @@ class MatchAggregator {
 
       let injectedForThisMatch = 0;
 
-      for (const candidateName of prioritizedCandidates) {
-        const vavooSource = this.broadcasterMatchService.createVavooSource(candidateName);
+      for (const candidate of prioritizedCandidates) {
+        const vavooSource = this.broadcasterMatchService.createVavooSource(candidate.name, candidate.context);
         if (vavooSource && vavooSource.id && !existingVavooUrls.has(vavooSource.id)) {
           existingVavooUrls.add(vavooSource.id);
           match.sources.push(vavooSource);
@@ -568,7 +593,7 @@ class MatchAggregator {
       (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) ||
       id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_')
     );
-    const title = e && e.title ? _foldText(e.title) : '';
+    const title = e && e.title ? canonicalizeAge(_foldText(e.title)) : '';
     // Fold the title ONCE and thread the folded + lowercased forms through
     // the whole pipeline. The old chain re-ran the NFKD/diacritic cascade
     // 6-11x per row (stripNoise, compoundify, tokenize, motorsport checks and
@@ -591,8 +616,8 @@ class MatchAggregator {
     const extractedTeams = (isMotorsport || isChannel) ? null : _tryExtractTeams(title, motorsportSeries);
     const fallbackTeams = (!extractedTeams && !isMotorsport && !isChannel && e && e.team1 && e.team2 && e.team1.name && e.team2.name)
       ? [
-          _tokenizeF(_compoundifyF(_stripNoiseF(_foldText(e.team1.name)))).join(' '),
-          _tokenizeF(_compoundifyF(_stripNoiseF(_foldText(e.team2.name)))).join(' ')
+          _tokenizeF(_compoundifyF(_stripNoiseF(canonicalizeAge(_foldText(e.team1.name))))).join(' '),
+          _tokenizeF(_compoundifyF(_stripNoiseF(canonicalizeAge(_foldText(e.team2.name))))).join(' ')
         ]
       : null;
 
@@ -616,6 +641,7 @@ class MatchAggregator {
     return {
       id,
       category: rawCategory,
+      squad: (isChannel || isMotorsport) ? null : eventSquadIdentity(e || {}),
       date: _parseEventDate(e && e.date),
       teams: extractedTeams || fallbackTeams,
       tokens: new Set(_tokenizeF(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
@@ -720,8 +746,9 @@ class MatchAggregator {
       return false;
     }
 
-    // 2. Exact ID match
-    if (p1.id && p2.id && p1.id === p2.id) return true;
+    // Explicit squad distinctions also constrain ID/alias shortcuts. Missing
+    // labels cannot safely inherit a women's, youth or reserve team's sources.
+    if (!isMoto1 && !isMoto2 && !_squadsCompatible(p1, p2)) return false;
 
     // 3. Date window & motorsport identity guards
     if (isMoto1 && isMoto2) {
@@ -746,12 +773,19 @@ class MatchAggregator {
       if (p1.date && p2.date && Math.abs(p1.date - p2.date) > maxDateDiff) return false;
     }
 
+    // IDs and aliases cannot bypass date/session or squad contradictions.
+    if (p1.id && p2.id && p1.id === p2.id) {
+      if (!isMoto1 && !isMoto2 && p1.teams?.every(_resolvedTeam) && p2.teams?.every(_resolvedTeam)) {
+        return _teamPairsSimilar(p1.teams, p2.teams);
+      }
+      // A placeholder such as TBA may acquire its real teams under this ID.
+      return true;
+    }
+
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
     //    BOTH teams to independently fuzzy-match. (Skip for motorsport which has no teams).
     if (p1.teams && p2.teams && !isMoto1 && !isMoto2) {
-      const fwd = _teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]);
-      const rev = _teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]);
-      return fwd || rev;
+      return _teamPairsSimilar(p1.teams, p2.teams);
     }
 
     // 6. Channel-identity path — at least one title is not a team-vs-team fixture
@@ -852,6 +886,8 @@ class MatchAggregator {
       s.streamId || '',
       s.url || '',
       s.group || '',
+      s.country || '',
+      s.countryCode || '',
       s.channelName || '',
       s.name || ''
     ].join('|');

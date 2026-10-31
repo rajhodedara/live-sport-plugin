@@ -34,7 +34,7 @@ class WatchFootyProvider extends BaseProvider {
       
       if (Array.isArray(data)) {
         for (const item of data) {
-          if (!item || typeof item !== 'object') continue;
+          if (!item || typeof item !== 'object' || (item.title != null && typeof item.title !== 'string')) continue;
           const matchId = item.matchId;
           const title = item.title || `${item.teams?.home?.name || 'Home'} vs ${item.teams?.away?.name || 'Away'}`;
           

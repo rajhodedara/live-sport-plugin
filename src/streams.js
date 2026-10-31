@@ -1623,9 +1623,27 @@ async function handleStream(type, id, config) {
     if (s.url && s.url.includes('.m3u8')) {
       s.behaviorHints.notWebReady = false;
       if (s.url.includes('/api/manifest')) {
-        if (s.behaviorHints.proxyHeaders) {
-          delete s.behaviorHints.proxyHeaders;
+        // AK47 playlists leave media/key URLs direct. Keep only the provider's
+        // bounded playback context for those player requests; arbitrary cookies,
+        // authorization and custom token headers must not reach the addon URL.
+        const request = {};
+        if (s._source === 'ak47live') {
+          const headers = verificationHeaders(s);
+          const userAgent = manifestUserAgent(headers['User-Agent']);
+          if (userAgent) request['User-Agent'] = userAgent;
+          for (const name of ['Referer', 'Origin']) {
+            const value = headers[name];
+            if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) continue;
+            try {
+              const parsed = new URL(value);
+              if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue;
+              if (name === 'Origin' && parsed.origin !== value) continue;
+              request[name] = value;
+            } catch (_) {}
+          }
         }
+        if (Object.keys(request).length) s.behaviorHints.proxyHeaders = { request };
+        else delete s.behaviorHints.proxyHeaders;
       } else {
         // Direct unproxied m3u8 stream needing player-level header injection
         let referer = '';

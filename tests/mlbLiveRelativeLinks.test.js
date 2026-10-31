@@ -3,6 +3,18 @@ jest.mock('../src/impitClient', () => ({ safeFetch: jest.fn() }));
 const MlbLiveProvider = require('../src/providers/MlbLiveProvider');
 
 describe('MLBLive relative stream links', () => {
+  test.each(['?player=ok.ru', '?format=.mp4', '?player=vidara.so'])('does not mistake a player name in a bridge query for a direct source: %s', query => {
+    const provider = new MlbLiveProvider();
+    const replay = 'https://mlblive.net/games/replay';
+    const bridge = 'https://mlblive.net/bridge' + query;
+    provider.fetchPage.fire = jest.fn(async url => url === replay
+      ? '<a href="' + bridge + '">Watch</a>'
+      : '<iframe src="https://cdn.example/game.mp4"></iframe>');
+    return provider.resolveStream(replay).then(streams => {
+      expect(streams.map(s => s.url)).toEqual(['https://cdn.example/game.mp4']);
+      expect(provider.fetchPage.fire).toHaveBeenCalledWith(bridge, expect.any(Object));
+    });
+  });
   test('does not prioritize an unrelated hostname containing a known player name', async () => {
     const provider = new MlbLiveProvider();
     provider.fetchPage.fire = jest.fn(async url => url.endsWith('/bridge/123')

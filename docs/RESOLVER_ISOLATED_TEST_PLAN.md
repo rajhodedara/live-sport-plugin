@@ -3,7 +3,9 @@
 This plan is for review before execution. It is not an instruction to deploy,
 modify production, change the existing PM2 daemon, run `pm2 save`, or enable
 the examples at boot. Keep #59 in draft. Freeze and record the tested SHA.
-The default TCP path still has an unresolved unverified-listener issue.
+Plain TCP is now disabled by default. The explicit RESOLVER_TRUST_LEGACY_TCP=true
+compatibility mode still does not authenticate listener ownership; see
+RESOLVER_PORT_SAFETY_DRAFT.md before selecting a deployment mode.
 
 ## Preconditions and safety boundary
 

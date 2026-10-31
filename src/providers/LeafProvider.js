@@ -2,13 +2,39 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../services/ProviderOutbound');
+const { BASE_URL } = require('../config');
+
+// Upstream replaced the old shared-token API with a per-install config path:
+//   https://sports.highfly.to/<base64url(config)>/{catalog,stream}/sport/...
+// The config blob is what the official configure page issues
+// (sports.highfly.to/configure -> Turnstile -> install link) and decodes to
+// {"freeUserId":"<uuid>.<hash>"}. That blob is the account selector, so it is
+// read from LEAF_INSTALL_CONFIG - never hardcoded. A shared literal is exactly
+// what upstream revokes, and it is a per-install identity, not a build input.
+//
+// The old shared master token is deliberately gone: papacito.cfd answers 403
+// "Authentication required" to it and the stream route replies with the
+// "please reinstall" stub, so a locally minted signed URL could only ever
+// produce a broken stream.
+const DEFAULT_ORIGIN = 'https://sports.highfly.to';
+
+function toBase64Url(json) {
+  return Buffer.from(JSON.stringify(json))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
 
 class LeafProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
     this.name = 'Leaf';
-    this.apiUrl = process.env.LEAF_API_URL || 'https://sports.highfly.to';
-    this.masterToken = process.env.LEAF_MASTER_TOKEN || 'E4V7FE6H6nBzANT35Q2rR7JmTz1a5nCi';
+    this.apiUrl = LeafProvider.buildApiUrl();
+    this.configured = Boolean(
+      process.env.LEAF_API_URL || process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID
+    );
+    this._installNagWarned = false;
 
     if (this.circuitBreaker) {
       this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
@@ -22,12 +48,75 @@ class LeafProvider extends BaseProvider {
   }
 
   /**
+   * Build the upstream base for the per-install config path.
+   *
+   * LEAF_API_URL stays a whole-base override on purpose: production parks the
+   * source on a dead local port (http://127.0.0.1:9/leaf-disabled) to disable
+   * leaf without shipping code, and that kill switch must keep working
+   * verbatim - every request fails fast and the provider returns [].
+   *
+   * @returns {string}
+   */
+  static buildApiUrl() {
+    const override = process.env.LEAF_API_URL;
+    if (override) return override.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
+
+    const origin = (process.env.LEAF_API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, '');
+    const config = process.env.LEAF_INSTALL_CONFIG ||
+      (process.env.LEAF_FREE_USER_ID ? toBase64Url({ freeUserId: process.env.LEAF_FREE_USER_ID }) : '');
+
+    return config ? `${origin}/${config}` : origin;
+  }
+
+  /**
+   * Upstream retires the free stream API by answering every stream id with a
+   * single fake entry that points at /configure ("Please reinstall the addon /
+   * we have updated our free addon"). That payload used to reach the player and
+   * is what renders as the "this stream is stolen, install the official addon"
+   * notice, so it is dropped here: an empty list is the honest answer, never a
+   * stream tile that is really an advert.
+   *
+   * @param {Array} streamsList
+   * @returns {boolean}
+   */
+  static isInstallNag(streamsList) {
+    return (streamsList || []).some((st) => st && (
+      /reinstall/i.test(st.name || '') ||
+      /\/configure\b/.test(st.url || '')
+    ));
+  }
+
+  _warnInstallNag() {
+    if (this._installNagWarned) return;
+    this._installNagWarned = true;
+    console.warn(
+      `[${this.name}] Upstream answered with the install-nag stub instead of streams. ` +
+      'The free stream API is not served for this install config; leaf stays dormant until ' +
+      'a fresh link is issued at sports.highfly.to/configure.'
+    );
+  }
+
+  _warnUnconfigured() {
+    if (this._installNagWarned) return;
+    this._installNagWarned = true;
+    console.warn(
+      `[${this.name}] Skipped: no LEAF_INSTALL_CONFIG / LEAF_FREE_USER_ID set. ` +
+      'Leaf needs the per-install config blob from sports.highfly.to/configure.'
+    );
+  }
+
+  /**
    * Fetch live sporting matches from Highfly live catalog.
    * Strictly filters OUT all 24/7 TV channels.
    *
    * @returns {Promise<Array<MatchEntity>>}
    */
   async getMatches() {
+    if (!this.configured) {
+      this._warnUnconfigured();
+      return [];
+    }
+
     try {
       if (this.fetchMatches && typeof this.fetchMatches.fire === 'function') {
         return await this.fetchMatches.fire();
@@ -102,8 +191,9 @@ class LeafProvider extends BaseProvider {
 
   /**
    * Resolve live streams for a match.
-   * Strictly isolates Leaf (papacito.cfd) streams and replaces temporary tokens
-   * with the master bearer token for direct, 4K/FHD unthrottled playback.
+   * Strictly isolates Leaf (papacito.cfd) streams and forwards the upstream
+   * signed playback URL untouched, because the signature is the only
+   * authorisation the CDN accepts and it cannot be minted locally.
    *
    * @param {string} sourceId
    * @param {string} matchCategory
@@ -114,6 +204,10 @@ class LeafProvider extends BaseProvider {
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const targetId = src.id || sourceId;
     if (!targetId) return [];
+    if (!this.configured) {
+      this._warnUnconfigured();
+      return [];
+    }
 
     try {
       if (this.fetchStreams && typeof this.fetchStreams.fire === 'function') {
@@ -142,6 +236,12 @@ class LeafProvider extends BaseProvider {
 
     const data = await res.json();
     const streamsList = data && Array.isArray(data.streams) ? data.streams : [];
+
+    if (LeafProvider.isInstallNag(streamsList)) {
+      this._warnInstallNag();
+      return [];
+    }
+
     const resolved = [];
 
     for (const st of streamsList) {
@@ -155,15 +255,14 @@ class LeafProvider extends BaseProvider {
       if (!['http:', 'https:'].includes(sourceUrl.protocol) || sourceUrl.username || sourceUrl.password ||
           (host !== 'papacito.cfd' && !host.endsWith('.papacito.cfd'))) continue;
 
-      // Preserve upstream signed playback URL (which includes the valid ?ft= JWT).
-      // Fallback to minted master token only if upstream URL has no query parameters.
-      let directUrl = st.url;
-      if (!st.url.includes('?')) {
-        const slugMatch = st.url.match(/\/m3u\/([^/?#]+)\/live\.m3u8/);
-        if (!slugMatch || !slugMatch[1]) continue;
-        const slug = slugMatch[1];
-        directUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=${this.masterToken}`;
-      }
+      // Forward the upstream signed playback URL only. A papacito URL without a
+      // query string carries no signature, and the signature cannot be minted
+      // locally, so it would answer 403 "Authentication required" at the CDN.
+      if (!st.url.includes('?')) continue;
+      const directUrl = st.url;
+      const referer = 'https://sports.highfly.to/';
+      const origin = 'https://sports.highfly.to';
+      const manifestProxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(directUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
 
       const rawName = typeof st.name === 'string' ? st.name : '';
       const rawTitle = typeof st.title === 'string' ? st.title : '';
@@ -206,7 +305,7 @@ class LeafProvider extends BaseProvider {
       resolved.push(new StreamEntity({
         name: `Leaf [${quality}]`,
         title: channelLabel ? `(${channelLabel}) ${quality}` : `Leaf Stream · ${quality}`,
-        url: directUrl,
+        url: manifestProxyUrl,
         resolution,
         quality,
         bitrate,

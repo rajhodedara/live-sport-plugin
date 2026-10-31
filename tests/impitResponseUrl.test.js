@@ -1,5 +1,5 @@
 // Tests response-metadata forwarding with an Impit API model, not the native binary.
-jest.mock('impit',()=>({Impit:jest.fn()}),{virtual:true});
+jest.mock('impit',()=>({Impit:jest.fn()}));
 jest.mock('undici',()=>({Agent:jest.fn().mockImplementation(()=>({})),request:jest.fn()}));
 let fetch,response,request,safeFetch;
 const initial='https://source.example/master.m3u8';

@@ -46,6 +46,18 @@ function listenAddress(host) {
           return server;
         });
       }, { context });
+      if (name === 'node:https') return new SyntheticModule(['createServer'], function () {
+        this.setExport('createServer', () => { throw Error('Unexpected TLS server in plaintext bind fixture'); });
+      }, { context });
+      if (name === './systemdSocket.js') return new SyntheticModule(['systemdSocketFd'], function () {
+        this.setExport('systemdSocketFd', () => null);
+      }, { context });
+      if (name === './systemdTls.js') return new SyntheticModule(['systemdTlsOptions'], function () {
+        this.setExport('systemdTlsOptions', () => null);
+      }, { context });
+      if (name === './listeningLog.js') return new SyntheticModule(['logListeningAddress'], function () {
+        this.setExport('logListeningAddress', () => {});
+      }, { context });
       if (name === './env.js') return new SyntheticModule(['port', 'bindHost'], function () {
         this.setExport('port', 0); this.setExport('bindHost', bindHost);
       }, { context });

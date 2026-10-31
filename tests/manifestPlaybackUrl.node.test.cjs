@@ -55,19 +55,24 @@ test('actual publication block preserves recovery keys and normalizes the suffix
   assert.ok(cached.behaviorHints.proxyHeaders);
 });
 
-test('publication keeps source headers on direct HLS but drops them on proxied HLS', () => {
+test('publication keeps direct HLS headers and only AK47 playback context on proxied HLS', () => {
   const text = source('src/streams.js');
   const start = text.indexOf('    // Change only the published path');
   const end = text.indexOf('\n  });', start);
-  const publish = vm.runInNewContext('(function(s,providerName){' + text.slice(start, end) + '\nreturn s;})', { manifestPlaybackUrl, BASE_URL: base });
+  const headerStart = text.indexOf('function verificationHeaders(');
+  const headerEnd = text.indexOf('async function verifyStreams(', headerStart);
+  const verificationHeaders = vm.runInNewContext(text.slice(headerStart, headerEnd) + '\nverificationHeaders');
+  const { manifestUserAgent } = require('../src/services/ManifestUserAgent');
+  const publish = vm.runInNewContext('(function(s,providerName){' + text.slice(start, end) + '\nreturn s;})', { manifestPlaybackUrl, manifestUserAgent, verificationHeaders, URL, BASE_URL: base });
   const direct = { url: 'https://cdn.example.invalid/live.m3u8', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0' } } } };
-  const proxied = { url: base + '/api/manifest?url=' + encodeURIComponent(direct.url) + '&hlsua=FixtureClient%2F1.0', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0' } } } };
+  const proxied = { _source: 'ak47live', url: base + '/api/manifest?url=' + encodeURIComponent(direct.url) + '&hlsua=FixtureClient%2F1.0', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0', Authorization: 'Bearer fixture', Cookie: 'fixture', 'X-Token': 'fixture' } } } };
   publish(direct, 'Ak47Live');
   publish(proxied, 'Ak47Live');
   assert.equal(direct.behaviorHints.notWebReady, false);
   assert.equal(direct.behaviorHints.proxyHeaders.request['User-Agent'], 'FixtureClient/1.0');
   assert.equal(proxied.behaviorHints.notWebReady, false);
-  assert.equal(proxied.behaviorHints.proxyHeaders, undefined);
+  assert.equal(proxied.behaviorHints.proxyHeaders.request['User-Agent'], 'FixtureClient/1.0');
+  assert.deepEqual(Object.keys(proxied.behaviorHints.proxyHeaders.request), ['User-Agent']);
   assert.equal(new URL(proxied.url).searchParams.get('hlsua'), 'FixtureClient/1.0');
 });
 

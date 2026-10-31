@@ -14,3 +14,10 @@ test('a failed channel does not prevent later channels from resolving', async ()
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
   try { const result = await p.resolveStream('event', 'football', 'Fixture'); expect(result).toHaveLength(1); expect(p.resolvePlayer).toHaveBeenCalledTimes(2); } finally { warn.mockRestore(); }
 });
+test('non-string event titles are skipped before they enter aggregation', async () => {
+  const p = setup({ Soccer: [
+    { gameID: 'bad', name: { invalid: true }, channels: [{}] },
+    { gameID: 'valid', name: 'Valid fixture', channels: [{}] }
+  ] });
+  expect((await p.getEventMatches()).map(m => m.title)).toEqual(['Valid fixture']);
+});

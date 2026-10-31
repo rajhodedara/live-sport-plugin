@@ -92,6 +92,7 @@ class DamiTvProvider extends BaseProvider {
     const seenIds = new Set();
     const out = [];
     for (const st of rawSources) {
+      if (st && st.embed != null && typeof st.embed !== 'string') continue;
       let embedUrl = (st && st.embed) || primaryEmbedUrl || '';
       if (!embedUrl) continue;
       if (embedUrl.startsWith('/')) embedUrl = 'https://damitv.st' + embedUrl;
@@ -129,7 +130,8 @@ class DamiTvProvider extends BaseProvider {
         const streams = categoryGroup.streams;
 
         streams.forEach(s => {
-          if (!s || !s.id || !s.name) return;
+          if (!s || !s.id || typeof s.name !== 'string' || !s.name.trim()) return;
+          const poster = typeof s.poster === 'string' ? s.poster : '';
 
           // Every source embed url is keyed by the ?id= param; build the
           // canonical primary embed the same way the feed does.
@@ -171,8 +173,8 @@ class DamiTvProvider extends BaseProvider {
               popular: '1',
               status: '',
               league: 'Live TV',
-              thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
-              poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+              thumbnail_url: poster ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
+              poster: poster ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
               sources: enrichedSources
             });
             entity.channelIdentityKey = ident.identityKey;
@@ -212,8 +214,8 @@ class DamiTvProvider extends BaseProvider {
             popular: popular,
             sources: sources,
             league: s.league || '',
-            thumbnail_url: s.poster && !s.poster.includes('ppvservices.st') ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
-            poster: s.poster && !s.poster.includes('ppvservices.st') ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+            thumbnail_url: poster && !poster.includes('ppvservices.st') ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
+            poster: poster && !poster.includes('ppvservices.st') ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
             team1: s.teams && s.teams.home && s.teams.home.name ? { name: s.teams.home.name, logo: s.teams.home.badge || null } : null,
             team2: s.teams && s.teams.away && s.teams.away.name ? { name: s.teams.away.name, logo: s.teams.away.badge || null } : null
           }));

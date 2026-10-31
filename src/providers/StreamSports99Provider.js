@@ -66,6 +66,7 @@ class StreamSports99Provider extends BaseProvider {
           for (const item of events) {
             // Only include matches that actually have stream channels available
             if (!item || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+          if (item.name != null && typeof item.name !== 'string') continue;
 
             // Some events might just have 'name' instead of homeTeam/awayTeam
             const title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();

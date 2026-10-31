@@ -12,3 +12,12 @@ test('invalid entries or poster URLs do not hide later valid events', async () =
   expect(result.map(x => x.title)).toEqual(['First', 'Bad poster', 'Second']);
   expect(result[1].poster).toBeFalsy(); expect(result[2].poster).toBe('https://api.watchfooty.st/image.png');
 });
+test('non-string titles are skipped before aggregation', async () => {
+  const circuitBreaker = { wrap: () => ({ fire: async () => null }), wrapSync: () => ({ fire: async () => null }) };
+  const p = new Provider({ circuitBreaker });
+  p.fetchMain.fire = async () => [
+    { matchId: 'bad', title: 123, streams: [{}] },
+    { matchId: 'valid', title: 'Valid fixture', streams: [{}] }
+  ];
+  expect((await p.getMatches()).map(m => m.title)).toEqual(['Valid fixture']);
+});

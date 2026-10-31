@@ -851,6 +851,7 @@ app.use(require('./routes/dash'));
 // Internal resolver cache APIs are used directly over loopback by cluster workers.
 // Only the resolver's stream and health endpoints may cross the public /api proxy.
 app.use('/api', require('./services/PublicResolverApiGate'));
+app.use('/api', require('./services/ResolverTrustPolicy').createResolverTrustGate());
 // Do not route new requests to a port where this worker observed that its
 // resolver failed to bind. This does not verify other workers' ownership.
 app.use('/api', require('./services/ResolverConflictGate'));
@@ -878,7 +879,7 @@ app.use('/api', createProxyMiddleware({
 // A substring scan is far cheaper than JSON-parsing multi-megabyte hub
 // responses that carry no relative URLs, so payloads without any prefix are
 // passed through untouched. Keep in sync with the prefix lists in rewriteUrl.
-const REWRITE_SCAN_PREFIXES = ['/img', '/watch', '/api/manifest', '/api/dash', '/logo', '/api/mp4proxy', '/api/fastmp4', '/api/hlschunk', '/api/hls', '/hls', '/posters', '/donate'];
+const REWRITE_SCAN_PREFIXES = ['/img', '/watch', '/api/manifest', '/api/soccerfull/manifest', '/api/dash', '/logo', '/api/mp4proxy', '/api/fastmp4', '/api/hlschunk', '/api/hls', '/hls', '/posters', '/donate'];
 
 app.use((req, res, next) => {
   const isAddonRoute = req.path === '/manifest.json' || 
@@ -922,12 +923,12 @@ app.use((req, res, next) => {
         const rewriteUrl = (url) => {
           if (!url || typeof url !== 'string') return url;
           // Relative URLs
-          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/api/dash') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/api/hls') || url.startsWith('/hls') || url.startsWith('/posters') || url.startsWith('/donate')) {
+          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/api/soccerfull/manifest') || url.startsWith('/api/dash') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/api/hls') || url.startsWith('/hls') || url.startsWith('/posters') || url.startsWith('/donate')) {
             modified = true;
             return `${currentBaseUrl}${url}`;
           }
           // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/soccerfull\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
           if (match) {
             modified = true;
             return `${currentBaseUrl}${match[1]}`;

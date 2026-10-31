@@ -60,7 +60,8 @@ export async function route(req, res) {
     // GET    /api/cache/:key?claim=1    → reserve the mint (ok:false = held)
     // POST   /api/cache/:key            → store { streams, ttlMs, status }
     //                                     or { activeIds } for prune
-    // DELETE /api/cache/:key            → drop entry + claim (noteFailure)
+    // PATCH  /api/cache/:key?revision=  → invalidate one published generation
+    // DELETE /api/cache/:key            → legacy deletion / owner claim release
     // GET    /api/cache-stats           → entry counters
     if (pathname === '/api/cache-stats') {
       json(res, 200, cacheStats())
@@ -103,6 +104,12 @@ export async function route(req, res) {
       }
       if (req.method === 'DELETE') {
         json(res, 200, cacheDelete(key, searchParams.has('ownerToken') ? searchParams.get('ownerToken') : undefined))
+        return
+      }
+      if (req.method === 'PATCH') {
+        // Old resolvers reject PATCH with 405 instead of ignoring a new
+        // DELETE parameter and accidentally deleting a newer generation.
+        json(res, 200, cacheDelete(key, undefined, searchParams.get('revision') || ''))
         return
       }
       json(res, 405, { error: 'method not allowed' })

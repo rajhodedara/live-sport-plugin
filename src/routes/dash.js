@@ -84,6 +84,12 @@ function createDashRouter(service) {
 }
 
 const router = createDashRouter(new DashToHlsService());
+
+// SoccerFull's `/hls/<sid>.m3u8` playlists are the same shape of endpoint as the
+// DASH ones above: this only ever serves playlist text, and every media segment
+// stays a direct CDN URI. Mounted here so the two zero-bandwidth playlist
+// endpoints live together; see routes/soccerFullManifest.js.
+router.use(require('./soccerFullManifest'));
 router.createDashRouter = createDashRouter;
 
 module.exports = router;

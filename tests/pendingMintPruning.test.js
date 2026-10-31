@@ -8,9 +8,12 @@ function deferred() {
 describe('Pruning pending stream resolutions', () => {
   const originalShared = process.env.RESOLVE_CACHE_SHARED;
   const originalFetch = global.fetch;
+  const originalTrust = process.env.RESOLVER_TRUST_LEGACY_TCP;
   beforeEach(() => { process.env.RESOLVE_CACHE_SHARED = 'false'; });
   afterEach(() => {
     global.fetch = originalFetch;
+    if (originalTrust === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP;
+    else process.env.RESOLVER_TRUST_LEGACY_TCP = originalTrust;
     if (originalShared === undefined) delete process.env.RESOLVE_CACHE_SHARED;
     else process.env.RESOLVE_CACHE_SHARED = originalShared;
   });
@@ -46,6 +49,7 @@ describe('Pruning pending stream resolutions', () => {
 
   test('late shared-cache lookup cannot restore a locally pruned match', async () => {
     process.env.RESOLVE_CACHE_SHARED = 'true';
+    process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; // Explicit mocked TCP compatibility scenario.
     const lookup = deferred();
     global.fetch = jest.fn((url, opts = {}) => opts.method === 'POST'
       ? Promise.resolve({ ok: true, json: async () => ({ ok: true }) }) : lookup.promise);
@@ -62,6 +66,7 @@ describe('Pruning pending stream resolutions', () => {
 
   test('a locally pruned result is not written through to the shared cache', async () => {
     process.env.RESOLVE_CACHE_SHARED = 'true';
+    process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; // Explicit mocked TCP compatibility scenario.
     global.fetch = jest.fn(async (url, opts = {}) => ({ ok: true, json: async () =>
       opts.method === 'POST' || url.includes('claim=1') ? { ok: true } : { status: 'miss' } }));
     const cache = new StreamResolveCache();

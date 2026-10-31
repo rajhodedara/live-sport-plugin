@@ -1,5 +1,16 @@
 'use strict';
 
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(async () => { throw new Error('Unexpected WASM execution in unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+jest.mock('../src/services/ProviderOutbound', () => ({
+  safeFetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  request: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  streamingFetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
+
 const ChannelIdentityService = require('../src/services/ChannelIdentityService');
 const { compareStreams } = require('../src/services/LanguagePriorityService');
 const MatchAggregator = require('../src/services/MatchAggregator');

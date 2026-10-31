@@ -5,7 +5,23 @@ const tls = require('node:tls');
 const net = require('node:net');
 const https = require('node:https');
 const { Duplex, PassThrough } = require('node:stream');
+
+// Node 22 supplies Symbol.dispose on its host realm, while Jest 29's VM can
+// omit it. Undici reads the VM symbol to dispose a native abort listener, so
+// align this fixture with the actual runtime before loading Undici.
+const disposeDescriptor = Object.getOwnPropertyDescriptor(Symbol, 'dispose');
+const nativeDisposeSymbol = require('node:vm').runInThisContext('Symbol.dispose');
+const alignedDisposeSymbol = Symbol.dispose !== nativeDisposeSymbol;
+if (alignedDisposeSymbol) {
+  Object.defineProperty(Symbol, 'dispose', { configurable: true, value: nativeDisposeSymbol });
+}
 const { createPinnedResolverClients } = require('../src/services/ResolverPinnedClients');
+
+afterAll(() => {
+  if (!alignedDisposeSymbol) return;
+  if (disposeDescriptor) Object.defineProperty(Symbol, 'dispose', disposeDescriptor);
+  else delete Symbol.dispose;
+});
 
 const dir = path.join(__dirname, 'fixtures/guarded-tls');
 const cert = fs.readFileSync(path.join(dir, 'cert.pem'), 'utf8');
@@ -54,13 +70,24 @@ async function exercise(pin, mode = 'cache') {
       });
       body = result.body; failure = result.failure;
     }
-    return { response: body || null, failed: !!failure, configured, plaintextRequests };
+    return { response: body || null, failed: !!failure, failure, configured, plaintextRequests };
   } finally {
     await clients.close();
     for (const stream of created) stream.destroy();
     connect.mockRestore(); noNetwork.mockRestore();
   }
 }
+
+test('installed Undici can remove a native abort listener in the test realm', () => {
+  const controller = new AbortController();
+  const aborted = jest.fn();
+  const removeAbortListener = require('undici/lib/core/util').addAbortListener(controller.signal, aborted);
+  expect(Symbol.dispose).toBe(nativeDisposeSymbol);
+  expect(typeof removeAbortListener).toBe('function');
+  removeAbortListener();
+  controller.abort();
+  expect(aborted).not.toHaveBeenCalled();
+});
 
 test('installed Undici forwards pinned TLS options and completes an in-memory request', async () => {
   const result = await exercise(cert);
@@ -74,6 +101,7 @@ test('installed Undici forwards pinned TLS options and completes an in-memory re
 test('installed Undici rejects a wrong pin before sending an HTTP request', async () => {
   const result = await exercise(tls.rootCertificates[0]);
   expect(result.failed).toBe(true);
+  expect(result.failure.cause || result.failure).toMatchObject({ message: 'Resolver identity verification failed' });
   expect(result.plaintextRequests).toBe(0);
   expect(typeof result.configured.checkServerIdentity).toBe('function');
 }, 10000);
@@ -88,6 +116,7 @@ test('HTTPS proxy agent enforces the configured pin in an in-memory request', as
 test('HTTPS proxy agent rejects a wrong pin before sending an HTTP request', async () => {
   const result = await exercise(tls.rootCertificates[0], 'proxy');
   expect(result.failed).toBe(true);
+  expect(result.failure.cause || result.failure).toMatchObject({ message: 'Resolver identity verification failed' });
   expect(result.plaintextRequests).toBe(0);
   expect(typeof result.configured.checkServerIdentity).toBe('function');
 }, 10000);

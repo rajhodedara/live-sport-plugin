@@ -593,6 +593,17 @@ class Ak47LiveProvider extends BaseProvider {
     }
 
     const { manifestUserAgent } = require('../services/ManifestUserAgent');
+    userAgent = manifestUserAgent(userAgent) || DEFAULT_UA;
+    const contextUrl = (value, fallback, originOnly = false) => {
+      if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) return fallback;
+      try {
+        const parsed = new URL(value);
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return fallback;
+        return originOnly ? parsed.origin : parsed.href;
+      } catch (_) { return fallback; }
+    };
+    referer = contextUrl(referer, DEFAULT_REFERER);
+    origin = contextUrl(origin, DEFAULT_ORIGIN, true);
     // The provider injects DEFAULT_UA even when no source specified one. Keep
     // the proxy's historical default in that case.
     const manifestUa = userAgent === DEFAULT_UA ? '' : manifestUserAgent(userAgent);

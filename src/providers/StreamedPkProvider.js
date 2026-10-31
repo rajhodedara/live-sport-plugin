@@ -73,7 +73,7 @@ class StreamedPkProvider extends BaseProvider {
       if (Array.isArray(allData)) {
         const now = Date.now();
         for (const item of allData) {
-          if (!item || typeof item !== 'object' || !item.id || !item.title) continue;
+          if (!item || typeof item !== 'object' || !item.id || typeof item.title !== 'string' || !item.title.trim()) continue;
           const itemSources = Array.isArray(item.sources) ? item.sources.filter(s => s && typeof s === 'object') : [];
 
           const is247Channel = !item.date || Number(item.date) <= 0;

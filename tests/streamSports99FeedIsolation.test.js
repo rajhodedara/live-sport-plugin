@@ -16,3 +16,11 @@ test('malformed entries do not block later event resolution', async () => {
   const p = provider(); const log = jest.spyOn(console, 'log').mockImplementation(() => {});
   try { const streams = await p.resolveStream('b', 'football', 'Second'); expect(streams).toHaveLength(1); expect(streams[0].externalUrl).toBe('https://example.invalid/b'); } finally { log.mockRestore(); }
 });
+test('a non-string name does not abort the following events', async () => {
+  const p = provider();
+  p.fetchMain.fire = async () => ({ 'cdn-live-tv': { Soccer: [
+    { name: 123, channels: [{}] },
+    { gameID: 'valid', name: 'Valid fixture', channels: [{}] }
+  ] } });
+  expect((await p.getMatches()).map(m => m.title)).toEqual(['Valid fixture']);
+});

@@ -1,40 +1,25 @@
-/** Actual manifest router + local HTTP; only upstream fetch and container mocked. */
-const http=require('node:http');
-const net=require('node:net');
-const express=require('express');
+/** Actual manifest handler and rewriter; no HTTP listener or network. */
+jest.mock('express', () => ({ Router: () => ({ get: jest.fn(), use: jest.fn(), options: jest.fn(), all: jest.fn() }), json: () => () => {}, urlencoded: () => () => {} }));
 jest.mock('../src/container',()=>({resolve:()=>({noteFailure:jest.fn()})}));
 jest.mock('../src/impitClient',()=>({safeFetch:jest.fn()}));
 const {safeFetch}=require('../src/impitClient');
 const proxy=require('../src/manifestProxy');
 const router=require('../src/routes/manifest');
 const base='https://cdn.example/live/master.m3u8?parent=SECRET';
-let body,server,addon;
-const nativeConnect=net.Socket.prototype.connect;
-beforeAll(async()=>{
-  const app=express();app.use(router);server=http.createServer(app);
-  await new Promise(r=>server.listen(0,'127.0.0.1',r));addon='http://127.0.0.1:'+server.address().port;
-  net.Socket.prototype.connect=function(...args){
-    const a=Array.isArray(args[0])?args[0][0]:args[0];
-    if(typeof a!=='object'||a.host!=='127.0.0.1'||Number(a.port)!==server.address().port)throw new Error('TEST_NETWORK_BLOCKED');
-    return nativeConnect.apply(this,args);
-  };
-});
+let body;
+const addon='https://addon.example.test';
 beforeEach(()=>{
   proxy.manifestCache.clear();proxy.manifestInFlight.clear();safeFetch.mockReset();
   safeFetch.mockImplementation(async()=>({ok:true,status:200,text:async()=>body}));
 });
 afterEach(()=>expect(proxy.manifestInFlight.size).toBe(0));
-afterAll(async()=>{
-  await new Promise(r=>{server.closeAllConnections();server.close(r);});
-  net.Socket.prototype.connect=nativeConnect;expect(server.listening).toBe(false);
-});
 async function render(tag,params={}){
   body='#EXTM3U\n'+tag+'\n#EXTINF:6,\nsegment.ts\n';
-  return new Promise((resolve,reject)=>{
-    const req=http.get(addon+'/api/manifest?'+new URLSearchParams({url:base,...params}),res=>{
-      let out='';res.setEncoding('utf8');res.on('data',x=>out+=x);res.on('end',()=>resolve({status:res.statusCode,body:out}));
-    });req.on('error',reject);req.setTimeout(3000,()=>req.destroy(new Error('test HTTP timeout')));
-  });
+  const req={query:{url:base,...params},headers:{host:'addon.example.test'},protocol:'https',url:'/api/manifest?'+new URLSearchParams({url:base,...params})};
+  const result={status:200};
+  const res={setHeader(){},status(code){result.status=code;return this;},send(body){result.body=body;return this;}};
+  await router.get.mock.calls[0][1](req,res);
+  return result;
 }
 // Consume whole attributes so URI= text inside a quoted NAME is not mistaken
 // for the URI attribute being asserted.

@@ -119,8 +119,14 @@ class PpvStProvider extends BaseProvider {
 
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
-    const embedUrl = src.embedUrl;
-    if (!embedUrl || !embedUrl.startsWith('http')) return streams;
+    src = src && typeof src === 'object' ? src : {};
+    let embedUrl;
+    try {
+      if (typeof src.embedUrl !== 'string') return streams;
+      const parsed = new URL(src.embedUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return streams;
+      embedUrl = parsed.href;
+    } catch (_) { return streams; }
 
     let referer = 'https://embedindia.st/';
     try { referer = new URL(embedUrl).origin + '/'; } catch(e) {}
@@ -151,11 +157,12 @@ class PpvStProvider extends BaseProvider {
           : origin;
         const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(streamReferer)}&origin=${encodeURIComponent(streamOrigin)}`;
         
-          const langStr = src.language ? ` [${src.language.toUpperCase()}]` : '';
+          const langStr = typeof src.language === 'string' && src.language ? ` [${src.language.toUpperCase()}]` : '';
+          const channelName = typeof src.channelName === 'string' ? src.channelName : '';
           const isTikTokStream = Boolean(/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(m3u8Url) || /admin|strmd\.st|\.image|tiktokcdn/i.test(embedUrl));
           const s = new StreamEntity({
             name: 'PpvSt',
-            title: `PpvSt${langStr}${src.channelName ? ' - ' + src.channelName : ''} (${matchTitle || channelId})`,
+            title: `PpvSt${langStr}${channelName ? ' - ' + channelName : ''} (${matchTitle || channelId})`,
             url: proxyUrl,
             behaviorHints: { 
               notWebReady: true,
@@ -179,7 +186,10 @@ class PpvStProvider extends BaseProvider {
       console.warn(`[${this.name}] WASM extraction failed: ${e.message}`);
     }
     
-    if (streams.length === 0) {
+    // Keep the explicitly labeled web option even after extraction succeeds:
+    // the later HLS verification can still reject the minted manifest. The
+    // response layer hides web fallbacks when a direct stream is available.
+    {
         streams.push(new StreamEntity({
             name: 'PpvSt',
             title: `${matchTitle || sourceId} (Web Player)`,

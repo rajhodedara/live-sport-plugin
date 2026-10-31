@@ -18,8 +18,10 @@ const MAX_TTL_MS = 10 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 1000;
 const MAX_ENTRIES = 200;
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
+const sharedRevision = value => typeof value === 'string' && /^[a-f0-9-]{36}$/i.test(value) ? value : null;
 const { withTimingWork } = require('./TimingContext');
 const resolverConflictState = require('./ResolverConflictState');
+const { allowsLegacyResolverTcp } = require('./ResolverTrustPolicy');
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
 // generic structuredClone serializer by 5-15x on these shapes, and cloneStream
@@ -258,6 +260,7 @@ class StreamResolveCache {
       status: remote.status === 'ok' ? 'ok' : 'failed',
       expiresAt,
       lastAccess: Date.now(),
+      sharedRevision: sharedRevision(remote.revision),
     });
     this._evictIfNeeded();
     return true;
@@ -267,7 +270,7 @@ class StreamResolveCache {
     try { if (this.resolverConflictState.hasConflict() !== false) return false; }
     catch (_) { return false; }
     if (!_sharedAvailable()) return false;
-    if (this.sharedResolver === null) return true; // legacy path; still unverified
+    if (this.sharedResolver === null) return allowsLegacyResolverTcp();
     try {
       return typeof this.sharedResolver.available === 'function' &&
         typeof this.sharedResolver.request === 'function' && this.sharedResolver.available() === true;
@@ -433,9 +436,15 @@ class StreamResolveCache {
         if (operation.pruned) return;
         let status = 'failed';
         let ttl = this.negativeTtlMs;
+        let localEntry;
         if (Array.isArray(streams) && streams.length > 0) {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
+          // A PPV web fallback is usable as a hand-off, but it must not delay
+          // another direct-playback attempt longer than an empty result did.
+          if (sourceName === 'ppvst' && streams.every(s => s && !s.url && s.externalUrl)) {
+            ttl = Math.min(ttl, this.negativeTtlMs);
+          }
           for (const s of streams) {
             if (s && s.url) {
               const rem = this._extractTokenRemainingMs(s.url);
@@ -444,9 +453,9 @@ class StreamResolveCache {
               }
             }
           }
-          this._set(key, sourceName, matchId, streams, 'ok', ttl);
+          localEntry = this._set(key, sourceName, matchId, streams, 'ok', ttl);
         } else {
-          this._set(key, sourceName, matchId, [], 'failed', ttl);
+          localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
         }
         // Write-through so the other worker inherits the mint instantly.
         if (claimed && this._sharedAvailable()) {
@@ -459,7 +468,15 @@ class StreamResolveCache {
             },
             2000
           );
+          const rememberPublication = async result => {
+            const revision = result?.ok === true && sharedRevision(result.revision);
+            if (!revision) return;
+            localEntry.sharedRevision = revision;
+            // Failure/pruning may have happened while the POST was in flight.
+            if (localEntry.invalidated || operation.pruned) await this._invalidateShared(key, revision);
+          };
           const write = await publish(ownerToken);
+          await rememberPublication(write);
           // Background mints can outlive the original lease. Retry once with
           // a fresh lease only if the resolver atomically confirms no cached
           // result or active owner would be displaced. Older resolvers must
@@ -468,7 +485,7 @@ class StreamResolveCache {
             const fresh = await this._sharedJson(`${_sharedKey(key)}?claim=1&fenced=1&vacant=1`);
             if (!operation.pruned && fresh && fresh.ok && fresh.vacantOnly === true && typeof fresh.ownerToken === 'string' && fresh.ownerToken) {
               ownerToken = fresh.ownerToken;
-              await publish(ownerToken);
+              await rememberPublication(await publish(ownerToken));
             }
           }
         }
@@ -492,14 +509,16 @@ class StreamResolveCache {
   _set(key, sourceName, matchId, streams, status, ttlMs) {
     const now = Date.now();
     this.entries.delete(key);
-    this.entries.set(key, {
+    const entry = {
       streams: streams.map(cloneStream), // store our own copy
       matchId, status,
       resolvedAt: now,
       expiresAt: now + ttlMs,
       lastAccess: now
-    });
+    };
+    this.entries.set(key, entry);
     this._evictIfNeeded();
+    return entry;
   }
 
   /** Pre-flight passed: double the source TTL (capped) and extend the entry. */
@@ -521,10 +540,18 @@ class StreamResolveCache {
     const sourceName = key.split(':')[0];
     const next = Math.max(Math.floor(this._ttlFor(sourceName) / 2), this.minTtlMs);
     this.ttl.set(sourceName, next);
+    const entry = this.entries.get(key);
+    if (entry) entry.invalidated = true;
     this.entries.delete(key);
-    if (this._sharedAvailable()) {
-      this._sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
-    }
+    this._invalidateShared(key, entry?.sharedRevision).catch(() => {});
+  }
+
+  async _invalidateShared(key, revision) {
+    // An older resolver supplies no revision. Keep its bounded L2 entry rather
+    // than sending an unconditional delete. PATCH is rejected by old resolver
+    // code even if the peer was downgraded after we received this revision.
+    if (!sharedRevision(revision) || !this._sharedAvailable()) return;
+    await this._sharedJson(`${_sharedKey(key)}?revision=${encodeURIComponent(revision)}`, { method: 'PATCH' }, 1000);
   }
 
   /** Drop entries whose match is no longer in the active match set. */

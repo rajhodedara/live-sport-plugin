@@ -1,7 +1,39 @@
 # Resolver port ownership: local review draft
 
-This is a design and test contract, not an implemented fix. PR #59 remains a
-draft. No existing occupant may be killed merely because it owns the port.
+## Current candidate: fail closed by default
+
+The current candidate disables legacy TCP resolver routing unless the operator
+sets exactly `RESOLVER_TRUST_LEGACY_TCP=true` and leaves `RESOLVER_TRANSPORT`
+unset. With no selected transport, startup skips TCP health probes and child
+spawning, resolver-dependent `/api` requests return 503 before reaching a
+listener, and the shared L2 cache performs no TCP reads, claims, writes, deletes
+or pruning. Local provider resolution and the per-worker local resolve cache
+continue. Public APIs implemented before the resolver proxy keep their routes.
+
+This changes the default deployment behavior: installations relying on the
+legacy resolver must deliberately select a mode before deploying this candidate.
+Use `RESOLVER_TRANSPORT=systemd-unix-tls` with its configured private socket,
+certificate and validated server setup for authenticated connections. Invalid
+explicit TLS configuration fails startup; it cannot fall back to plaintext.
+Unix/TLS cache and public proxy clients use the configured certificate identity.
+
+`RESOLVER_TRUST_LEGACY_TCP=true` is an explicit compatibility opt-in for an
+environment where every local process is trusted. It restores existing TCP
+spawn/reuse, both workers, proxy routing and shared-cache behavior. It does not
+authenticate the listener, prevent port replacement, encrypt traffic, or prove
+ownership. An HTTP health response in this mode is still only reachability.
+The observed-conflict guard remains active even with the opt-in.
+
+Mocked tests cover default denial before any URL or playback headers are sent,
+exact-value opt-in, unchanged pinned adapter selection, local-cache fallback,
+and conflict precedence. They do not establish live clustered reload or player
+playback for this candidate. Earlier deployment results apply only to the SHA
+tested at the time. Do not infer current production configuration from this file.
+
+PR #59 remains a draft. No existing occupant may be killed merely because it
+owns the port. The sections below preserve the earlier investigation and explain
+the trust boundary; descriptions of an enabled default TCP path refer to the
+earlier candidate or the explicitly enabled compatibility mode.
 
 Local partial change: if the resolver child exits with its documented
 EADDRINUSE code 98, the manager pauses automatic restarts for the lifetime of

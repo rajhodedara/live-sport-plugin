@@ -1,12 +1,13 @@
 'use strict';
 
-// Characterizes the current defect using a mocked fetch; no listener or
-// network is created. It is not a regression test for the desired behavior.
+// Default-denial regression using mocked fetch; no listener or network exists.
 const StreamResolveCache = require('../src/services/StreamResolveCache');
 
-test('an unverified cache endpoint can receive a generated stream and its hints', async () => {
+test('an unverified TCP cache endpoint receives no generated stream or hints by default', async () => {
   const originalFetch = global.fetch, originalShared = process.env.RESOLVE_CACHE_SHARED;
   const originalPort = process.env.RESOLVER_PORT;
+  const originalTrust = process.env.RESOLVER_TRUST_LEGACY_TCP;
+  delete process.env.RESOLVER_TRUST_LEGACY_TCP;
   process.env.RESOLVE_CACHE_SHARED = 'true';
   process.env.RESOLVER_PORT = '7004';
   const seen = [];
@@ -21,12 +22,12 @@ test('an unverified cache endpoint can receive a generated stream and its hints'
     await cache.getOrCreate('damitv:fixture:source', async () => [{ url: 'https://example.test/private',
       behaviorHints: { proxyHeaders: { request: { Authorization: 'fixture-credential' } } } }]);
     const post = seen.find(call => call.method === 'POST');
-    expect(post).toBeDefined();
-    expect(JSON.parse(post.body).streams[0]).toMatchObject({ url: 'https://example.test/private',
-      behaviorHints: { proxyHeaders: { request: { Authorization: 'fixture-credential' } } } });
+    expect(post).toBeUndefined();
+    expect(seen).toEqual([]);
   } finally {
     global.fetch = originalFetch;
     if (originalShared === undefined) delete process.env.RESOLVE_CACHE_SHARED; else process.env.RESOLVE_CACHE_SHARED = originalShared;
     if (originalPort === undefined) delete process.env.RESOLVER_PORT; else process.env.RESOLVER_PORT = originalPort;
+    if (originalTrust === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP; else process.env.RESOLVER_TRUST_LEGACY_TCP = originalTrust;
   }
 });

@@ -1,41 +1,50 @@
 'use strict';
-// Exercise the guarded fallback route without loading native transport inside
-// Jest's VM or contacting any fake-public destination. Native fixtures run in
-// separate processes with their own strictly loopback dial injection.
-jest.mock('impit', () => ({ Impit: class {
-  constructor() { throw Object.assign(new Error('Native unavailable in boundary fixture'), { code: 'ERR_NATIVE_UNAVAILABLE' }); }
-} }));
+// Invoke the registered route handlers with in-memory request/response objects.
+// Keep native preflight and guarded fallback policy real, but stop allocation
+// before NativeGuardedSlot can open its listener or load the native module.
+jest.mock('../src/services/NativeGuardedSlot', () => ({
+  createNativeGuardedSlot: jest.fn(async () => {
+    throw Object.assign(new Error('Native unavailable in boundary fixture'), { code: 'ERR_NATIVE_UNAVAILABLE' });
+  })
+}));
 jest.mock('undici', () => ({ ...jest.requireActual('undici'), request: jest.fn(() => { throw Error('Unexpected outbound request'); }) }));
 jest.mock('../src/container', () => ({ resolve: jest.fn() }));
-const express = require('express');
-const http = require('node:http');
 const dns = require('node:dns');
 const { request } = require('undici');
+const { createNativeGuardedSlot } = require('../src/services/NativeGuardedSlot');
 
 describe('public proxy URL boundaries', () => {
-  let server, origin;
-  beforeAll(async () => {
-    const app = express();
-    app.use(require('../src/routes/manifest'));
-    app.use(require('../src/routes/embed'));
-    server = http.createServer(app);
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    origin = 'http://127.0.0.1:' + server.address().port;
+  let routers;
+  beforeAll(() => {
+    routers = [require('../src/routes/manifest'), require('../src/routes/embed')];
   });
   afterAll(async () => {
+    await require('../src/services/SharedOutboundFetch').closeSharedOutbound();
     await require('../src/services/GuardedOutbound').closeGuardedDispatcher();
-    await new Promise(resolve => server.close(resolve));
   });
-  beforeEach(() => request.mockClear());
+  beforeEach(() => {
+    request.mockReset().mockImplementation(() => { throw Error('Unexpected outbound request'); });
+    createNativeGuardedSlot.mockClear();
+  });
 
-  function get(path, target) {
-    return new Promise((resolve, reject) => {
-      http.get(origin + path + '?url=' + encodeURIComponent(target), response => {
-        let body = '';
-        response.on('data', chunk => { body += chunk; });
-        response.on('end', () => resolve({ status: response.statusCode, body: JSON.parse(body) }));
-      }).on('error', reject);
+  async function get(path, target) {
+    const registered = routers.flatMap(router => router.stack).find(layer => {
+      const route = layer.route;
+      return route && route.methods.get && (Array.isArray(route.path) ? route.path.includes(path) : route.path === path);
     });
+    if (!registered) throw new Error('Missing registered GET route: ' + path);
+    const url = path + '?url=' + encodeURIComponent(target);
+    const req = { method: 'GET', query: { url: target }, headers: { host: 'proxy.fixture.example.org' },
+      protocol: 'http', url, originalUrl: url };
+    const result = { status: 200, body: undefined };
+    const res = {
+      setHeader() {},
+      status(status) { result.status = status; return this; },
+      json(body) { result.body = body; return this; },
+      send(body) { result.body = body; return this; }
+    };
+    await registered.route.stack.find(layer => layer.method === 'get').handle(req, res);
+    return result;
   }
 
   test.each(['/api/manifest', '/api/manifest.m3u8', '/api/manifest.mpd'])('%s rejects loopback through the real route', async path => {
@@ -43,6 +52,7 @@ describe('public proxy URL boundaries', () => {
     expect(response.status).toBe(403);
     expect(response.body.reason).toBe('blocked_address');
     expect(request).not.toHaveBeenCalled();
+    expect(createNativeGuardedSlot).not.toHaveBeenCalled();
   });
 
   test('embed hostname allowlist does not authorize private DNS answers', async () => {
@@ -52,6 +62,7 @@ describe('public proxy URL boundaries', () => {
       expect(response.status).toBe(403);
       expect(response.body.reason).toBe('blocked_address');
       expect(request).not.toHaveBeenCalled();
+      expect(createNativeGuardedSlot).not.toHaveBeenCalled();
     } finally { lookup.mockRestore(); }
   });
 
@@ -60,6 +71,7 @@ describe('public proxy URL boundaries', () => {
     expect(await images.getImage('http://127.0.0.1:7003/private-image.png')).toBeNull();
     expect(await images.fetchImage('http://169.254.169.254/private-image.png')).toEqual({ ok: false, bytes: 0 });
     expect(request).not.toHaveBeenCalled();
+    expect(createNativeGuardedSlot).not.toHaveBeenCalled();
   });
 
   test.each([

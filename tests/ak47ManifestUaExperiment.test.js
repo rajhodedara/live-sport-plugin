@@ -22,3 +22,15 @@ test('the player-facing manifest alias retains the source user agent', async () 
 test.each(['bad\r\nInjected: yes', 'x'.repeat(513), ['bad'], ''])('rejects invalid user agent input', value => {
   expect(manifestUserAgent(value)).toBe('');
 });
+test('invalid source headers are normalized before both the proxy URL and verification hints', async () => {
+  const [stream] = await new Provider().resolveStream('https://cdn.example.invalid/live.m3u8', '', 'Fixture', {
+    userAgent: 'bad\r\nInjected: yes', referer: { bad: true }, origin: 'https://user:secret@example.invalid/'
+  });
+  const url = new URL(stream.url);
+  expect(url.searchParams.has('hlsua')).toBe(false);
+  const request = stream.behaviorHints.proxyHeaders.request;
+  expect(request['User-Agent']).toMatch(/^Mozilla\/5/);
+  expect(request.Referer).toBe('http://www.fawanews.sc/');
+  expect(request.Origin).toBe('http://www.fawanews.sc');
+  expect(JSON.stringify(request)).not.toContain('Injected');
+});

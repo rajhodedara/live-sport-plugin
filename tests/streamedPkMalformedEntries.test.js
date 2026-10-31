@@ -17,6 +17,7 @@ describe('StreamedPk malformed entries', () => {
     provider.fetchLiveMatches.fire.mockResolvedValue([]);
     provider.fetchMatches.fire.mockResolvedValue([
       null,
+      { id: 'invalid-title', title: { invalid: true }, sources: [] },
       { id: 'one', title: 'One', sources: [null, { id: 's1', source: 'alpha' }] },
       { id: 'two', title: 'Two', sources: 'bad' },
       { id: 'three', title: 'Three', sources: [{ id: 's3', source: 'bravo' }] },

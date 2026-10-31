@@ -24,7 +24,7 @@ test('stream window records unresolved sources at cutoff and passes its handle t
     await jest.advanceTimersByTimeAsync(200);
     expect((await pending).streams).toEqual([]);
     expect(cache.getOrCreate).toHaveBeenCalledWith(expect.any(String), expect.any(Function), handle);
-    expect(relations.endWindow).toHaveBeenCalledWith(handle, 1, 1);
+    expect(relations.endWindow).toHaveBeenCalledWith(handle, 1, 1, 'hard_wait_expired');
   } finally {
     jest.useRealTimers();
     for (const [key, value] of [['STREAM_SOFT_DEADLINE_MS', previous.soft], ['STREAM_HARD_DEADLINE_MS', previous.hard], ['DONATION_URL', previous.donation]]) {
