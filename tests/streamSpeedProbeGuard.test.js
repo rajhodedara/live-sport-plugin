@@ -26,7 +26,23 @@ test('does not buffer a non-streaming response', async () => {
 test('cancels the stream at the byte budget', async () => {
   const reader = { read: jest.fn().mockResolvedValue({ done: false, value: new Uint8Array(100) }), cancel: jest.fn().mockResolvedValue(), releaseLock: jest.fn() };
   expect(await readProbeBytes({ getReader: () => reader }, 16)).toBe(16);
+  expect(reader.read).toHaveBeenCalledTimes(1);
   expect(reader.cancel).toHaveBeenCalledTimes(1); expect(reader.releaseLock).toHaveBeenCalledTimes(1);
+});
+test('reads no more than the configured probe window across chunks', async () => {
+  const reader = {
+    read: jest.fn()
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(4) })
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(8) })
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array(8) })
+      .mockResolvedValue({ done: true }),
+    cancel: jest.fn().mockResolvedValue(),
+    releaseLock: jest.fn(),
+  };
+  expect(await readProbeBytes({ getReader: () => reader }, 5)).toBe(5);
+  expect(reader.read).toHaveBeenCalledTimes(2);
+  expect(reader.cancel).toHaveBeenCalledTimes(1);
+  expect(reader.releaseLock).toHaveBeenCalledTimes(1);
 });
 
 test('uses the upstream CDN URL rather than an addon redirect', () => {

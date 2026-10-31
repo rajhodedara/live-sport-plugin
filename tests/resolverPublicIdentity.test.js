@@ -6,21 +6,24 @@ const { createPinnedResolverIdentity } = require('../src/services/ResolverPinned
 const { X509Certificate } = require('node:crypto');
 
 const cert = fs.readFileSync(path.join(__dirname, 'fixtures/guarded-tls/cert.pem'));
+const identityDirectory = path.resolve(path.parse(__dirname).root, 'resolver-identity-test');
 
 test('each worker can load the same public certificate without reading a private key', () => {
   const read = jest.fn(() => cert);
-  const first = readResolverPublicIdentity('/run/credentials/test', 'cdn.example.org', read);
-  const second = readResolverPublicIdentity('/run/credentials/test', 'cdn.example.org', read);
-  expect(read.mock.calls).toEqual([['/run/credentials/test/resolver.crt'], ['/run/credentials/test/resolver.crt']]);
+  const first = readResolverPublicIdentity(identityDirectory, 'cdn.example.org', read);
+  const second = readResolverPublicIdentity(identityDirectory, 'cdn.example.org', read);
+  const certificatePath = path.join(identityDirectory, 'resolver.crt');
+  expect(read.mock.calls).toEqual([[certificatePath], [certificatePath]]);
   expect(first).toEqual(second);
   expect(Object.isFrozen(first)).toBe(true);
   expect(createPinnedResolverIdentity(first)('cdn.example.org', new X509Certificate(cert).toLegacyObject())).toBeUndefined();
 });
 
 test('invalid identity configuration and unreadable or malformed certificates fail closed', () => {
-  expect(() => readResolverPublicIdentity('/run/test/../bad', 'cdn.example.org', () => cert)).toThrow('Invalid resolver public identity configuration');
-  expect(() => readResolverPublicIdentity('/run/test', 'bad host', () => cert)).toThrow('Invalid resolver public identity configuration');
-  expect(() => readResolverPublicIdentity('/run/test', 'cdn.example.org', () => { throw new Error('private path'); })).toThrow('Resolver public certificate unavailable');
-  expect(() => readResolverPublicIdentity('/run/test', 'cdn.example.org', () => Buffer.from('bad'))).toThrow('Resolver public certificate unavailable');
-  expect(() => readResolverPublicIdentity('/run/test', 'cdn.example.org', () => Buffer.alloc(65537))).toThrow('Resolver public certificate unavailable');
+  const traversingDirectory = `${identityDirectory}${path.sep}..${path.sep}bad`;
+  expect(() => readResolverPublicIdentity(traversingDirectory, 'cdn.example.org', () => cert)).toThrow('Invalid resolver public identity configuration');
+  expect(() => readResolverPublicIdentity(identityDirectory, 'bad host', () => cert)).toThrow('Invalid resolver public identity configuration');
+  expect(() => readResolverPublicIdentity(identityDirectory, 'cdn.example.org', () => { throw new Error('private path'); })).toThrow('Resolver public certificate unavailable');
+  expect(() => readResolverPublicIdentity(identityDirectory, 'cdn.example.org', () => Buffer.from('bad'))).toThrow('Resolver public certificate unavailable');
+  expect(() => readResolverPublicIdentity(identityDirectory, 'cdn.example.org', () => Buffer.alloc(65537))).toThrow('Resolver public certificate unavailable');
 });

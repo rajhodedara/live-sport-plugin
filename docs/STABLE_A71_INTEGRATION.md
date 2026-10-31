@@ -24,7 +24,7 @@ asserts API→embed→token call order, the new first-hop Referer and the token
 hop's embed-specific Referer/Origin. Its existing8-case suite was added to the
 PR59 offline command; no previously selected suite was removed.
 
-## Validation on the merged code
+## Historical validation at the initial stable integration
 
 | Candidate | Node22.23.2 and Node24.19.0, Jest29.7.0 |
 | --- | --- |
@@ -39,11 +39,20 @@ controlled fixtures; these are not live-provider, native/WASM or player tests.
 Two read-only reviews found no blocking integration issue. Whitespace checks
 pass. This is selected validation, not the full repository suite or CI status.
 
+The subsequent Windows full-run comparison has now been received and audited.
+The follow-up fixture repairs pass60 offline suites/583 tests plus1 existing
+TODO on both Node versions. See
+[PR59_MESSAGE39_RECONCILIATION.md](PR59_MESSAGE39_RECONCILIATION.md) for exact
+raw-run scope and remaining acceptance; PR61's integration review records its
+own additional selection.
+
 ## Acceptance still pending
 
-- Full stable-vs-PR runs under identical locked dependencies/configuration,
-  supplying both raw JSONs. The latest locked stable report is still missing.
-- Corrected real HTTP/native/cancellation suites and actual arm64 image checks.
+- Rerun the repaired fixtures on Windows. The received stable-vs-PR JSONs close
+  the previously missing baseline comparison, but precede these fixture repairs.
+- Resolve the PR59 full-run redirect/body deadline failure and supply the
+  separate real HTTP/native/cancellation results, including the six unreported
+  PR61 Linux suites, plus actual arm64 image checks.
 - Isolated pinned Unix/TLS matrix: successful controls, explicit wrong-pin/CA/
   hostname failures, both worker identities, restart/rotation and fail-closed
   behavior. In-memory TLS tests do not replace the deployed socket checks.

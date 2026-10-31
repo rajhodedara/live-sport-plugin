@@ -50,11 +50,14 @@ Jest's testMatch is explicit for Jest JS/TS files; .test.mjs and Node .cjs tests
 belong to their Node runner, not Jest. They are not counted as passing by being
 excluded from the wrong runner.
 
-The expanded offline command now covers 55 suites, **523 passing tests** and
+The expanded offline command now covers 60 suites, **583 passing tests** and
 one existing TODO. Seven pure resolver HOST tests pass separately; actual
 HTTP/native cases still need the corrected fixtures run in Raj's environment.
 The fixture reconciliation does not change runtime logic. This candidate also
 includes the separate runtime correction described below.
+
+The received Windows full-run baseline comparison and the subsequent fixture
+repairs are recorded in [PR59_MESSAGE39_RECONCILIATION.md](PR59_MESSAGE39_RECONCILIATION.md).
 
 ## Shared invalidation correction
 
@@ -117,8 +120,11 @@ factory boundary. It does not claim full HTTP-stack/native verification or a
 proven explanation of the original timeout.
 
 The locked-fixture54-suite selection passed515 tests plus1 TODO on both
-Node22.23.2 and Node24.19.0 with installed Jest29.7.0. The current55-suite command
-adds the existing8-test TimStreams suite and passes523 tests on both versions.
+Node22.23.2 and Node24.19.0 with installed Jest29.7.0. The subsequent stable
+integration added the existing8-test TimStreams suite:55 suites/523 passing
+tests on both versions. The current fixture follow-up passes60 suites/583 tests
+plus1 existing TODO on both versions, as recorded in PR59_MESSAGE39_RECONCILIATION.md.
 PR59_LOCKED_RECONCILIATION.md retains the historical failure analysis;
 STABLE_A71_INTEGRATION.md records the latest stable integration. Isolated
-transport acceptance and full repository comparison remain pending.
+transport acceptance and repaired-fixture reruns remain pending; the received
+Windows full-run baseline comparison has now been audited.

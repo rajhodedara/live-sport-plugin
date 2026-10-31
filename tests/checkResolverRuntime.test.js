@@ -4,7 +4,10 @@ const os = require('node:os');
 const path = require('node:path');
 const { checkRuntimeDirectory } = require('../scripts/check-resolver-runtime');
 
-test('accepts only a private real directory owned by the expected user', () => {
+// Windows does not provide the Unix UID, mode, and symlink contract checked here.
+const unixTest = process.platform === 'win32' ? test.skip : test;
+
+unixTest('accepts only a private real directory owned by the expected user', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'resolver-perms-'));
   try {
     fs.chmodSync(root, 0o700);

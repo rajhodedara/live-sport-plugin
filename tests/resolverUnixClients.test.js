@@ -3,15 +3,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { X509Certificate } = require('node:crypto');
 const { createResolverUnixClients, createPinnedResolverUnixClients } = require('../src/services/ResolverUnixClients');
+const fixtureSocketPath = path.resolve(path.parse(__dirname).root, 'nuvio-test', 'resolver.sock');
 
 test('experimental socket adapter confines cache requests and does not follow redirects', async () => {
   const dispatcher = { close: jest.fn(async () => {}) };
   const Dispatcher = jest.fn(function () { return dispatcher; });
   const fetch = jest.fn(async () => ({ ok: true }));
-  const clients = createResolverUnixClients({ socketPath: '/run/nuvio-test/resolver.sock', legacyPort: 7004 }, { Dispatcher, fetch });
+  const clients = createResolverUnixClients({ socketPath: fixtureSocketPath, legacyPort: 7004 }, { Dispatcher, fetch });
   try {
-    expect(Dispatcher).toHaveBeenCalledWith({ connect: { socketPath: '/run/nuvio-test/resolver.sock' } });
-    expect(clients.proxyOptions).toEqual({ target: { protocol: 'http:', socketPath: '/run/nuvio-test/resolver.sock', pathname: '/api' }, agent: false, followRedirects: false });
+    expect(Dispatcher).toHaveBeenCalledWith({ connect: { socketPath: fixtureSocketPath } });
+    expect(clients.proxyOptions).toEqual({ target: { protocol: 'http:', socketPath: fixtureSocketPath, pathname: '/api' }, agent: false, followRedirects: false });
     await clients.request('http://127.0.0.1:7004/api/cache/key', { redirect: 'follow', dispatcher: {} });
     expect(fetch).toHaveBeenCalledWith('http://127.0.0.1:7004/api/cache/key', expect.objectContaining({ dispatcher, redirect: 'error' }));
     await expect(clients.request('http://foreign.example:7004/api/cache/key')).rejects.toThrow('Invalid resolver request');
@@ -23,7 +24,9 @@ test('experimental socket adapter confines cache requests and does not follow re
 });
 
 test('rejects relative, traversing and malformed socket configurations', () => {
-  for (const socketPath of ['relative.sock', '/run/test/../resolver.sock', '/run/a\0b', '/' + 'x'.repeat(101)]) {
+  const socketDirectory = path.dirname(fixtureSocketPath);
+  const traversingSocketPath = `${socketDirectory}${path.sep}..${path.sep}resolver.sock`;
+  for (const socketPath of ['relative.sock', traversingSocketPath, `${socketDirectory}${path.sep}a\0b`, path.parse(fixtureSocketPath).root + 'x'.repeat(101)]) {
     expect(() => createResolverUnixClients({ socketPath, legacyPort: 7004 })).toThrow('Invalid resolver socket configuration');
   }
 });
@@ -35,7 +38,7 @@ test('pinned Unix clients require TLS for both cache and proxy paths', async () 
   const Dispatcher = jest.fn(function (opts) { connectOptions = opts.connect; return dispatcher; });
   const createProxyAgent = jest.fn(opts => { agentOptions = opts; return agent; });
   const fetch = jest.fn(async () => ({ ok: true }));
-  const config = { socketPath: '/run/nuvio-test/resolver.sock', legacyPort: 7004,
+  const config = { socketPath: fixtureSocketPath, legacyPort: 7004,
     tlsIdentity: { certificatePem, expectedHost: 'cdn.example.org' } };
   const clients = createPinnedResolverUnixClients(config, { Dispatcher, createProxyAgent, fetch });
   try {

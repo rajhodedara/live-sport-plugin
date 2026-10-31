@@ -1,17 +1,22 @@
 'use strict';
 const fs = require('fs');
+const path = require('node:path');
 const YamlProviderBuilder = require('../src/services/YamlProviderBuilder');
+const fixturePath = path.join(__dirname, '..', 'src', 'providers', 'yaml', 'example.yml');
 
 describe('YAML provider event links', () => {
   let provider;
   beforeEach(() => {
     const originalRead = fs.readFileSync;
     jest.spyOn(fs, 'readdirSync').mockReturnValue(['example.yml']);
-    jest.spyOn(fs, 'readFileSync').mockImplementation((name, ...args) => String(name).endsWith('/providers/yaml/example.yml')
+    jest.spyOn(fs, 'readFileSync').mockImplementation((name, ...args) => name === fixturePath
       ? `name: Sample\nbaseUrl: https://example.com/sports/index\nselectors:\n  matches: .event\n  title: .title\n  link: a -> href\n`
       : originalRead(name, ...args));
     const circuitBreaker = { wrapSync: () => ({ fire: jest.fn() }) };
-    provider = new YamlProviderBuilder().buildProviders(null, circuitBreaker)[0];
+    const providers = new YamlProviderBuilder().buildProviders(null, circuitBreaker);
+    expect(providers).toHaveLength(1);
+    expect(providers[0]).toMatchObject({ name: 'Sample' });
+    provider = providers[0];
   });
   afterEach(() => jest.restoreAllMocks());
   test('skips a missing link and keeps a later valid event', async () => {

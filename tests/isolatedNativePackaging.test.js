@@ -9,18 +9,20 @@ test('build copy manifest includes both supervisor and child alongside guarded d
   const source = fs.readFileSync(path.join(__dirname, '../scripts/copy-guarded-worker-deps.js'), 'utf8');
   vm.runInNewContext(source, { process: { argv: ['node', 'script', 'output'] },
     require: name => name === 'node:fs' ? fakeFs : name === 'node:path' ? path : (() => { throw Error('unexpected import'); })() });
-  expect(copies).toContainEqual(['src/services/IsolatedNativePoolCandidate.js', 'output/services/IsolatedNativePoolCandidate.js']);
-  expect(copies).toContainEqual(['src/services/isolated-native-child.cjs', 'output/services/isolated-native-child.cjs']);
-  expect(copies).toContainEqual(['src/services/NativeGuardedFetch.js', 'output/services/NativeGuardedFetch.js']);
-  expect(copies).toContainEqual(['src/services/NativeTiming.js', 'output/services/NativeTiming.js']);
-  expect(copies).toContainEqual(['src/services/TimingContext.js', 'output/services/TimingContext.js']);
-  expect(copies).toContainEqual(['src/services/TimingOutput.js', 'output/services/TimingOutput.js']);
-  expect(copies).toContainEqual(['src/services/TimingSnapshotTimer.js', 'output/services/TimingSnapshotTimer.js']);
-  expect(copies).toContainEqual(['src/impitClient.js', 'output/impitClient.js']);
+  expect(copies).toContainEqual([path.join('src', 'services', 'IsolatedNativePoolCandidate.js'), path.join('output', 'services', 'IsolatedNativePoolCandidate.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'isolated-native-child.cjs'), path.join('output', 'services', 'isolated-native-child.cjs')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'NativeGuardedFetch.js'), path.join('output', 'services', 'NativeGuardedFetch.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'NativeTiming.js'), path.join('output', 'services', 'NativeTiming.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'TimingContext.js'), path.join('output', 'services', 'TimingContext.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'TimingOutput.js'), path.join('output', 'services', 'TimingOutput.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'TimingSnapshotTimer.js'), path.join('output', 'services', 'TimingSnapshotTimer.js')]);
+  expect(copies).toContainEqual([path.join('src', 'impitClient.js'), path.join('output', 'impitClient.js')]);
 });
 
 test('child path supports source services and the bundled output root', () => {
-  expect(childScriptPath('/app/src/services', candidate => candidate === '/app/src/services/isolated-native-child.cjs'))
-    .toBe('/app/src/services/isolated-native-child.cjs');
-  expect(childScriptPath('/app/dist', () => false)).toBe('/app/dist/services/isolated-native-child.cjs');
+  const sourceServices = path.resolve('app', 'src', 'services');
+  const sourceChild = path.join(sourceServices, 'isolated-native-child.cjs');
+  const bundledOutput = path.resolve('app', 'dist');
+  expect(childScriptPath(sourceServices, candidate => candidate === sourceChild)).toBe(sourceChild);
+  expect(childScriptPath(bundledOutput, () => false)).toBe(path.join(bundledOutput, 'services', 'isolated-native-child.cjs'));
 });
