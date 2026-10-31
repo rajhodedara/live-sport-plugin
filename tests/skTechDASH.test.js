@@ -1,3 +1,16 @@
+// These parser/extractor unit tests do not exercise or launch WASM workers.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in provider unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
+jest.mock('../src/services/ProviderOutbound', () => ({
+  fetchUndici: (...args) => {
+    if (!jest.isMockFunction(global.fetch)) throw new Error('Unexpected SK Tech I/O in unit fixture');
+    return global.fetch(...args);
+  }
+}));
+
 'use strict';
 
 const crypto = require('crypto');

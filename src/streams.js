@@ -2,13 +2,13 @@ const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
 const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
-const { rewriteHlsUri } = require('./services/HlsRewriteService');
+const { resolveSegmentUrl } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
-const { checkOutboundUrl } = require('./services/OutboundUrlGuard');
+const { relations: timingRelations } = require('./services/TimingRuntime');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -201,8 +201,17 @@ async function dispatchToProvider(sourceName, src, match) {
     const provider = container.resolve('timStreamsProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title);
   } else if (sourceName === 'damitv') {
-    const provider = container.resolve('damiTvProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    const startedAt = Date.now();
+    console.info('[DamiTV] Dispatch started');
+    try {
+      const provider = container.resolve('damiTvProvider');
+      resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+      console.info('[DamiTV] Dispatch finished', JSON.stringify({ ms: Date.now() - startedAt, streams: Array.isArray(resStreams) ? resStreams.length : 0 }));
+    } catch (failure) {
+      const kind = ['TimeoutError', 'AbortError', 'TypeError', 'SyntaxError'].includes(failure?.name) ? failure.name : 'Error';
+      console.warn('[DamiTV] Dispatch failed', JSON.stringify({ ms: Date.now() - startedAt, kind }));
+      throw failure;
+    }
   } else if (sourceName === 'watchfooty') {
     const provider = container.resolve('watchFootyProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title);
@@ -328,7 +337,7 @@ async function resolveSource(src, match, config) {
 
 // Safe impit+undici helper — works on all platforms (Windows, Linux x64/ARM64, musl).
 // impit is tried first for browser TLS fingerprinting; undici is the automatic fallback.
-const { safeFetch: _safeFetch } = require('./impitClient');
+const { safeFetch: _safeFetch, streamingFetch: _streamingFetch } = require('./services/ProviderOutbound');
 
 // How long one verification ping may take, and how long all its retries may
 // take together. The total stays under handleStream's soft deadline so a
@@ -343,7 +352,7 @@ const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
 const SPEED_PROBE_TIMEOUT_MS = Math.max(250, Math.min(10000, Number(process.env.SPEED_PROBE_TIMEOUT_MS) || 5000));
 const SPEED_PROBE_RANGE_BYTES = Math.floor(Math.max(16 * 1024, Math.min(1024 * 1024, Number(process.env.SPEED_PROBE_RANGE_BYTES) || 524288)));
 const SPEED_PROBE_MIN_BYTES = Math.floor(Math.max(1, Math.min(SPEED_PROBE_RANGE_BYTES, Number(process.env.SPEED_PROBE_MIN_BYTES) || 32768)));
-const ENABLE_SPEED_PROBE = process.env.ENABLE_SPEED_PROBE !== 'false';
+const ENABLE_SPEED_PROBE = process.env.ENABLE_SPEED_PROBE === 'true';
 
 // Proxied /api/manifest URLs wrap an upstream token that expires on its own
 // schedule. Tag the URL with the resolve-cache key that produced it so the
@@ -375,65 +384,14 @@ function parseManifestProxyUrl(rawUrl) {
   }
 }
 
-// Build the exact URL the player would fetch for this segment, so the probe
-// measures the real playback path (CF worker / hlschunk / direct) and not a
-// shortcut that bypasses it.
-function buildPlayerSegmentUrl(segmentUri, manifestUrl, referer, origin) {
-  return rewriteHlsUri(segmentUri, manifestUrl, { referer, origin, absoluteAddonBaseUrl: BASE_URL });
+// Probe the upstream segment directly; never request the addon's signed redirect.
+function buildProbeSegmentUrl(segmentUri, manifestUrl) {
+  return resolveSegmentUrl(segmentUri, manifestUrl);
 }
 
-// The only intentional self-request is our signed zero-byte-relay redirect.
-// Matching the base origin alone would also exempt unrelated add-on endpoints.
-function isSignedAddonRedirect(rawUrl) {
-  try {
-    const parsed = new URL(rawUrl);
-    return parsed.origin === new URL(BASE_URL).origin &&
-      /^\/(?:api\/)?hls\/resource\/[^/]+\/media\.ts$/.test(parsed.pathname);
-  } catch (_) {
-    return false;
-  }
-}
-
-// Only a short, validated redirect chain is permitted. Do not let fetch()
-// automatically follow a Location that has not passed the outbound URL guard.
+// Stream only the bounded speed sample through the shared guarded transport.
 async function guardedProbeFetch(url, options = {}) {
-  let currentUrl = url;
-  const maxRedirects = 2;
-  for (let hop = 0; hop <= maxRedirects; hop++) {
-    if (!isSignedAddonRedirect(currentUrl)) {
-      const verdict = await checkOutboundUrl(currentUrl);
-      if (!verdict || verdict.ok !== true) {
-        const error = new Error('Blocked speed-probe URL: ' + (verdict && verdict.reason || 'validation_failed'));
-        error.code = 'EOUTBOUNDURLBLOCKED';
-        error.statusCode = 403;
-        throw error;
-      }
-    }
-
-    const response = await fetch(currentUrl, { ...options, redirect: 'manual' });
-    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
-
-    const location = response.headers && response.headers.get('location');
-    if (!location) return response;
-    try { await response.body?.cancel?.(); } catch (_) {}
-    if (hop >= maxRedirects) {
-      const error = new Error('Speed-probe redirect limit exceeded');
-      error.code = 'ETOOMANYREDIRECTS';
-      throw error;
-    }
-
-    let nextUrl;
-    try {
-      nextUrl = new URL(location, currentUrl);
-    } catch (_) {
-      throw new Error('Invalid speed-probe redirect URL');
-    }
-    if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
-      throw new Error('Blocked speed-probe redirect protocol');
-    }
-    currentUrl = nextUrl.toString();
-  }
-  throw new Error('Speed-probe redirect limit exceeded');
+  return _streamingFetch(url, options);
 }
 
 // Count at most the requested bytes, then cancel. Without a streaming response,
@@ -513,7 +471,7 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
       stream._isTikTok = true;
     }
 
-    const segmentUrl = buildPlayerSegmentUrl(info.firstSegmentUri, manifestUrl, referer, origin);
+    const segmentUrl = buildProbeSegmentUrl(info.firstSegmentUri, manifestUrl);
     const controller = new AbortController();
     const probeTimeoutMs = Math.max(1, Math.min(SPEED_PROBE_TIMEOUT_MS, timeLeft - 150));
     const timer = setTimeout(() => controller.abort(), probeTimeoutMs);
@@ -526,7 +484,7 @@ async function measureStreamSpeed(stream, manifestUrl, manifestText, referer, or
     try {
       const start = performance.now();
       const response = await withRetry(
-        () => guardedProbeFetch(segmentUrl, { signal: controller.signal, headers: probeHeaders }),
+        () => guardedProbeFetch(segmentUrl, { signal: controller.signal, headers: probeHeaders, timeoutMs: probeTimeoutMs, redirect: 'manual' }),
         {
           attempts: 1,
           deadlineAt,
@@ -1310,6 +1268,10 @@ async function handleStream(type, id, config) {
   const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
   const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000), HARD_DEADLINE_MS);
   const resolutionStartedAt = Date.now();
+  let timingStream = null;
+  if (timingRelations) {
+    try { timingStream = timingRelations.stream(); } catch (_) { /* diagnostic only */ }
+  }
 
   const inFlight = [];        // per-source promise + settled result for the fallback wait
   const races = activeSources.map((src) => {
@@ -1317,7 +1279,7 @@ async function handleStream(type, id, config) {
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
     const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
     const promise = resolveCache
-      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key))
+      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key), timingStream)
       .then((minted) => {
         state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
         state.settled = true;
@@ -1348,6 +1310,7 @@ async function handleStream(type, id, config) {
   // while still returning instantly as soon as DaddyLive completes (or when already cached).
   const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
   const shouldWait = (streams.length === 0 || priority1InFlight.length > 0) && inFlight.length > 0;
+  let timingWaitOutcome = 'no_wait';
 
   if (shouldWait) {
     const remaining = Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
@@ -1358,12 +1321,13 @@ async function handleStream(type, id, config) {
         ? priority1InFlight.map((f) => f.promise)
         : inFlight.map((f) => f.promise);
 
-      await settleBefore(
+      const waited = await settleBefore(
         Promise.allSettled(waitTargets),
         remaining,
         null
       );
-    }
+      timingWaitOutcome = waited === null ? 'hard_wait_expired' : 'wait_completed';
+    } else timingWaitOutcome = 'budget_exhausted';
     for (const f of inFlight) {
       // Snapshot newly settled resolutions without duplicating
       if (f.settled && Array.isArray(f.value)) {
@@ -1377,6 +1341,12 @@ async function handleStream(type, id, config) {
     lateCount = inFlight.filter(f => !f.settled).length;
   } else if (lateCount > 0) {
     console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
+  }
+  if (timingStream) {
+    const unsettled = inFlight.filter(f => !f.settled).length;
+    const reason = timingWaitOutcome === 'hard_wait_expired' || timingWaitOutcome === 'budget_exhausted' ? timingWaitOutcome :
+      unsettled === 0 ? 'all_settled' : timingWaitOutcome === 'wait_completed' ? 'priority_completed' : 'early_return';
+    try { timingRelations.endWindow(timingStream, inFlight.length, unsettled, reason); } catch (_) { /* diagnostic only */ }
   }
   // Withhold per-team 24/7 channels until the fixture is actually in its
   // playable window (see suppressPreMatchTeamChannels). Applied to the assembled
@@ -1827,6 +1797,7 @@ module.exports = {
   // down, and driving it through handleStream would need the whole match cache.
   verifyStreams,
   guardedProbeFetch,
+  buildProbeSegmentUrl,
   readProbeBytes,
   // Exported for direct unit testing of the resolution deduplication algorithm
   // without requiring a live container / IoC / match-cache setup.

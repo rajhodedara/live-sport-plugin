@@ -1,3 +1,9 @@
+// The unit fixture never executes provider WASM/network bootstrap.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
 
 // The behaviour under test: a verification ping is a single sample of a flaky
@@ -13,6 +19,13 @@ jest.mock('../src/impitClient', () => ({
   safeFetch: jest.fn(),
   isImpitAvailable: () => false,
   getImpit: () => null,
+}));
+jest.mock('../src/services/ProviderOutbound', () => ({
+  ...jest.requireActual('../src/services/ProviderOutbound'),
+  streamingFetch: (...args) => {
+    if (!jest.isMockFunction(global.fetch)) throw new Error('Unexpected probe I/O in unit fixture');
+    return global.fetch(...args);
+  }
 }));
 
 process.env.ENABLE_SPEED_PROBE = 'true';

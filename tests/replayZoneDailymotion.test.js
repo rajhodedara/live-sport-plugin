@@ -1,6 +1,19 @@
+// These parser/extractor unit tests do not exercise or launch WASM workers.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in provider unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
 
-const undici = require('undici');
+jest.mock('../src/services/ProviderOutbound', () => ({
+  request: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  safeFetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
+
+
+const undici = require('../src/services/ProviderOutbound');
 const ReplayZoneProvider = require('../src/providers/ReplayZoneProvider');
 
 describe('ReplayZoneProvider - Dailymotion Handling', () => {

@@ -117,34 +117,12 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
 };
 
 // ─── 3. In-Memory WASM Caching & TLS-Impersonated Fetch Hook ──────────────────
-const originalFetch = global.fetch;
+// The build copies providers flat into dist, while source keeps them in src/providers.
+const outboundPath = fs.existsSync(path.join(__dirname, 'services', 'ProviderOutbound.js'))
+  ? path.join(__dirname, 'services', 'ProviderOutbound.js')
+  : path.join(__dirname, '..', 'services', 'ProviderOutbound.js');
+const { fetch: guardedFetch } = require(outboundPath);
 let cachedWasmBuffer = null;
-
-// The impit native client accumulates Rust-side state (connection pools, TLS
-// sessions, per-host buffers) that nothing in this thread ever releases, and
-// impit exposes no close() API — one new instance per /fetch call reproduced
-// the ~250 MB/h native growth documented in impitClient.js. Reuse a single
-// instance per thread and rotate it on the same IMPIT_RECYCLE_MS clock as the
-// main thread so every leak surface shares one bound. In-flight fetches keep
-// their reference and finish safely on the retired instance.
-let _threadImpit;
-let _threadImpitBornAt = 0;
-const THREAD_IMPIT_RECYCLE_MS = Math.max(10 * 60 * 1000, Number(process.env.IMPIT_RECYCLE_MS) || 90 * 60 * 1000);
-
-function getThreadImpit() {
-  if (_threadImpit && Date.now() - _threadImpitBornAt > THREAD_IMPIT_RECYCLE_MS) {
-    _threadImpit = undefined;
-  }
-  if (_threadImpit !== undefined) return _threadImpit;
-  try {
-    const { Impit } = require('impit');
-    _threadImpit = new Impit();
-    _threadImpitBornAt = Date.now();
-  } catch (_) {
-    _threadImpit = null;
-  }
-  return _threadImpit;
-}
 
 global.fetch = async (url, opts) => {
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
@@ -173,7 +151,7 @@ global.fetch = async (url, opts) => {
     reqHeaders.set('Origin', targetOrigin);
     reqHeaders.set('Content-Type', 'application/octet-stream');
     
-    const impit = getThreadImpit();
+
 
     const headersObj = {};
     reqHeaders.forEach((v, k) => { headersObj[k] = v; });
@@ -181,22 +159,14 @@ global.fetch = async (url, opts) => {
     let response;
     for (let attempt = 1; attempt <= 5; attempt++) {
       try {
-        if (impit) {
-          response = await impit.fetch(proxyUrl, {
-            method: fetchOpts.method || 'POST',
-            headers: headersObj,
-            body: reqBody ? Buffer.from(reqBody) : undefined
-          });
-        } else {
-          response = await originalFetch(proxyUrl, {
-            method: fetchOpts.method || 'POST',
-            headers: reqHeaders,
-            body: reqBody ? Buffer.from(reqBody) : undefined
-          });
-        }
+        response = await guardedFetch(proxyUrl, {
+          method: fetchOpts.method || 'POST', headers: headersObj,
+          body: reqBody ? Buffer.from(reqBody) : undefined,
+          profile: 'vanilla', attempts: 1, diagnosticOwner: 'wasm'
+        });
         break;
       } catch (e) {
-        if (attempt === 5) throw e;
+        if (e.isFatal || e.code === 'ERR_OUTBOUND_BLOCKED' || attempt === 5) throw e;
         await new Promise(r => setTimeout(r, 600 * attempt));
       }
     }

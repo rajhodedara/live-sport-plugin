@@ -1,3 +1,11 @@
+
+// These tests explicitly exercise the unauthenticated TCP compatibility mode.
+const legacyTrustBeforeTests = process.env.RESOLVER_TRUST_LEGACY_TCP;
+beforeAll(() => { process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; });
+afterAll(() => {
+  if (legacyTrustBeforeTests === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP;
+  else process.env.RESOLVER_TRUST_LEGACY_TCP = legacyTrustBeforeTests;
+});
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -40,6 +48,7 @@ test('slow-mint recovery crosses the real worker, HTTP router and resolver cache
     };
     process.env.RESOLVER_PORT = String(server.address().port);
     process.env.RESOLVE_CACHE_SHARED = 'true';
+    process.env.RESOLVER_TRUST_LEGACY_TCP = 'true';
     const require = createRequire(import.meta.url);
     const StreamResolveCache = require('./src/services/StreamResolveCache');
     try {

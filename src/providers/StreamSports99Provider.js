@@ -145,7 +145,7 @@ class StreamSports99Provider extends BaseProvider {
             // --- INTERNAL FALLBACK ---
             console.log("[DEBUG SS99] ENTERING EXTRACTION TRY BLOCK FOR", ch.url);
             try {
-              const { safeFetch } = require('../impitClient');
+              const { safeFetch } = require('../services/ProviderOutbound');
               const playerRes = await safeFetch(ch.url, {
                 headersTimeout: 15000, bodyTimeout: 15000,
                 headers: {

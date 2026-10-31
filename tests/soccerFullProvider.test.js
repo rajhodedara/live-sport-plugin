@@ -1,4 +1,17 @@
+// These parser/extractor unit tests do not exercise or launch WASM workers.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in provider unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
+
+jest.mock('../src/services/ProviderOutbound', () => ({
+  request: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  safeFetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
+
 
 const SoccerFullProvider = require('../src/providers/SoccerFullProvider');
 const MatchEntity = require('../src/domain/MatchEntity');
@@ -132,7 +145,7 @@ describe('SoccerFullProvider', () => {
     });
 
     test('handles missing data-config gracefully', async () => {
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       jest.spyOn(undici, 'request').mockResolvedValueOnce({
         statusCode: 200,
         body: { text: async () => '<html><body>No player here</body></html>' }
@@ -145,7 +158,7 @@ describe('SoccerFullProvider', () => {
 
   describe('Vidara Extractor (extractVidara)', () => {
     test('extracts streaming_url from backend API', async () => {
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       const mockStreamUrl = 'https://s8.97bf1.com/hls/test/master.m3u8';
 
       jest.spyOn(undici, 'request').mockResolvedValueOnce({
@@ -158,7 +171,7 @@ describe('SoccerFullProvider', () => {
     });
 
     test('returns null on API failure', async () => {
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       jest.spyOn(undici, 'request').mockResolvedValueOnce({
         statusCode: 500,
         body: { text: async () => 'Server error' }
@@ -180,7 +193,7 @@ describe('SoccerFullProvider', () => {
 
       jest.spyOn(provider.fetchPage, 'fire').mockResolvedValueOnce(fakeMatchHtml);
 
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       // SID 1 -> Vixeo
       // SID 2 -> embed.st (Live stream, should be dropped)
       jest.spyOn(undici, 'request')
@@ -302,7 +315,7 @@ describe('SoccerFullProvider', () => {
     });
 
     test('extracts OK.ru direct 1080p MP4 and Auto HLS streams with okcdn.ru URLs', async () => {
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       const fakeOkHtml = `
         <div data-module="OKVideo" data-options='{"flashvars":{"metadata":"{\\"videos\\":[{\\"name\\":\\"full\\",\\"url\\":\\"https://vd517.okcdn.ru/video.mp4\\"},{\\"name\\":\\"sd\\",\\"url\\":\\"https://vd517.okcdn.ru/video_sd.mp4\\"}],\\"hlsManifestUrl\\":\\"https://vd517.okcdn.ru/video.m3u8\\"}"}}'></div>
       `;
@@ -470,7 +483,7 @@ describe('SoccerFullProvider', () => {
       const fixturePath = path.join(__dirname, 'fixtures', 'hgcloud-packed.txt');
       const packedContent = fs.readFileSync(fixturePath, 'utf8');
 
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       jest.spyOn(undici, 'request').mockImplementation(async (url) => {
         if (typeof url === 'string' && url.includes('hgcloud.to')) {
           return {
@@ -501,7 +514,7 @@ describe('SoccerFullProvider', () => {
     });
 
     test('extracts ArtPlayer /hls/<sid>.m3u8 shape when no iframe is present', async () => {
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       const artHtml = '<!doctype html><html><body><div class="artplayer-app"></div><script>(function(){ var m3u8Url = "/hls/18113.m3u8"; var art = new Artplayer({ url: m3u8Url }); })();</script></body></html>';
 
       jest.spyOn(undici, 'request').mockResolvedValueOnce({

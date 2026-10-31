@@ -1,3 +1,14 @@
+// Container wiring is exercised, but native workers and external I/O are not.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(async () => { throw new Error('Unexpected WASM execution in unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+jest.mock('../src/services/ProviderOutbound', () => ({
+  safeFetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  request: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  streamingFetch: jest.fn(async () => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
 const DaddyLiveProvider = require('../src/providers/DaddyLiveProvider');
 const CircuitBreakerService = require('../src/services/CircuitBreakerService');
 const MatchEntity = require('../src/domain/MatchEntity');
@@ -13,6 +24,10 @@ describe('DaddyLiveProvider', () => {
   beforeEach(() => {
     circuitBreaker = new CircuitBreakerService();
     provider = new DaddyLiveProvider({ circuitBreaker });
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
   });
 
   describe('decodeEconfig', () => {
@@ -129,7 +144,7 @@ describe('DaddyLiveProvider', () => {
       };
 
       const testNow = Date.parse('21 March 2025 12:00:00 UTC');
-      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(testNow);
 
       // Mock proxyFetch to return mock HTML, and mock the parser to return mockSchedule
       provider.proxyFetch = jest.fn().mockResolvedValue({
@@ -139,7 +154,6 @@ describe('DaddyLiveProvider', () => {
       provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
-      dateNowSpy.mockRestore();
 
       // Should have 4 matches (Empty Sport skipped because 0 channels)
       expect(matches.length).toBe(4);
@@ -201,12 +215,11 @@ describe('DaddyLiveProvider', () => {
       };
 
       const testNow = Date.parse('29 October 2026 02:00:00 UTC');
-      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(testNow);
       provider.proxyFetch = jest.fn().mockResolvedValue({ ok: true, text: async () => '<html>MOCK</html>' });
       provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
-      dateNowSpy.mockRestore();
 
       const match = matches.find(m => m.title.includes('Knicks'));
       expect(match).toBeDefined();
@@ -234,12 +247,11 @@ describe('DaddyLiveProvider', () => {
 
       // 21:00 on the 28th: the 20:00 event is live, the 00:00 event is still ahead.
       const testNow = Date.parse('28 October 2026 21:00:00 UTC');
-      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(testNow);
       provider.proxyFetch = jest.fn().mockResolvedValue({ ok: true, text: async () => '<html>MOCK</html>' });
       provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
-      dateNowSpy.mockRestore();
 
       const lateNight = matches.find(m => m.title.includes('Knicks'));
       const evening = matches.find(m => m.title.includes('Raptors'));
@@ -265,12 +277,11 @@ describe('DaddyLiveProvider', () => {
       };
 
       const testNow = Date.parse('29 October 2026 02:00:00 UTC');
-      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(testNow);
       provider.proxyFetch = jest.fn().mockResolvedValue({ ok: true, text: async () => '<html>MOCK</html>' });
       provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
-      dateNowSpy.mockRestore();
 
       const match = matches.find(m => m.title.includes('Knicks'));
       expect(match).toBeDefined();
@@ -563,7 +574,7 @@ describe('DaddyLiveProvider', () => {
       };
 
       const testNow = Date.parse('21 March 2025 12:00:00 UTC');
-      const dateNowSpy = jest.spyOn(Date, 'now').mockReturnValue(testNow);
+      jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] }).setSystemTime(testNow);
 
       provider.proxyFetch = jest.fn().mockResolvedValue({
         ok: true,
@@ -572,7 +583,6 @@ describe('DaddyLiveProvider', () => {
       provider.parseScheduleHtml = jest.fn().mockReturnValue(mockSchedule);
 
       const matches = await provider.getMatches();
-      dateNowSpy.mockRestore();
 
       // Fulham vs Everton only had Event Stream channels, so it must be dropped (0 streams)
       expect(matches.find(m => m.title.includes('Fulham'))).toBeUndefined();

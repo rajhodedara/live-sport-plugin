@@ -1,11 +1,11 @@
 'use strict';
 
 const crypto = require('crypto');
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { getImpit } = require('../impitClient');
+const { safeFetch } = require('../services/ProviderOutbound');
 const { parseTimezone } = require('../timezone');
 
 function b64Decode(str) {
@@ -59,28 +59,15 @@ class FullRacesProvider extends BaseProvider {
    * Fetches an HTML document using impitClient to bypass Cloudflare Turnstile.
    */
   async _fetchHtml(url) {
-    const impit = getImpit();
-    if (impit) {
-      try {
-        const res = await impit.fetch(url, { headers: this.defaultHeaders });
-        if (res.status === 200) {
-          return await res.text();
-        }
-      } catch (err) {
-        console.warn(`[FullRaces] impit fetch failed for ${url}: ${err.message}`);
-      }
+    const response = await safeFetch(url, { headers: this.defaultHeaders, timeoutMs: 10000, attempts: 1 });
+    if (response.status === 200) return response.text();
+    // Retain the old alternate-transport check for non-200 native verdicts;
+    // shared safeFetch has already done that check for direct 403 responses.
+    if (response.status !== 403) {
+      const alternate = await undici.request(url, { headers: this.defaultHeaders, headersTimeout: 10000, bodyTimeout: 10000 });
+      if (alternate.statusCode === 200) return alternate.body.text();
     }
-
-    // Fallback to undici if impit is unavailable
-    const res = await undici.request(url, {
-      headers: this.defaultHeaders,
-      headersTimeout: 10000,
-      bodyTimeout: 10000
-    });
-    if (res.statusCode !== 200) {
-      throw new Error(`HTTP ${res.statusCode}`);
-    }
-    return await res.body.text();
+    throw new Error(`HTTP ${response.status}`);
   }
 
   /**

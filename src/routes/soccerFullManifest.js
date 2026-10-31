@@ -22,7 +22,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('../services/ProviderOutbound');
 const { getRequestBaseUrl } = require('../config');
 const { rewriteSoccerFullPlaylist, prewarmPlaylist } = require('../services/SoccerFullHlsRewrite');
 
@@ -99,6 +99,8 @@ router.get('/api/soccerfull/manifest', async (req, res) => {
       return res.status(502).send(`Upstream ${upstream ? upstream.status : 'unreachable'}`);
     }
 
+    if (upstream.bodyTruncated) throw new Error('Upstream playlist exceeds its body limit');
+
     const body = await upstream.text();
     const isMaster = body.includes('#EXT-X-STREAM-INF');
 
@@ -116,6 +118,13 @@ router.get('/api/soccerfull/manifest', async (req, res) => {
     res.setHeader('X-SoccerFull-Cache', 'MISS');
     return res.send(rewritten);
   } catch (err) {
+    res.setHeader('Cache-Control', 'no-store');
+    if (err && err.code === 'ERR_OUTBOUND_CAPACITY') {
+      return res.status(503).send('Outbound capacity temporarily exhausted');
+    }
+    if (err && err.code === 'ERR_OUTBOUND_BLOCKED') {
+      return res.status(403).send('Blocked outbound URL');
+    }
     console.error('[soccerFullManifest] rewrite failed:', err && err.message ? err.message : err);
     return res.status(502).send('Upstream playlist unavailable');
   }

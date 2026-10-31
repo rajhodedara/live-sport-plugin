@@ -1,5 +1,7 @@
 jest.mock('../src/container', () => ({ resolve: jest.fn() }));
+jest.mock('../src/services/TimingRuntime', () => ({ relations: { stream: jest.fn(() => ({})), endWindow: jest.fn() } }));
 const container = require('../src/container');
+const { relations } = require('../src/services/TimingRuntime');
 const { handleStream } = require('../src/streams');
 
 function deferred() {
@@ -50,6 +52,7 @@ describe('handleStream hard response deadline', () => {
     await jest.advanceTimersByTimeAsync(200);
     expect(response).toBeDefined();
     expect(response.streams).toEqual([]);
+    expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 2, 'hard_wait_expired');
   });
 
   test('keeps a stream arriving between soft and hard deadlines without awaiting a stalled peer', async () => {
@@ -78,6 +81,7 @@ describe('handleStream hard response deadline', () => {
     pending[1].resolve([]);
     const response = await handleStream('tv', 'nuvio_sport_deadline');
     expect(response.streams).toHaveLength(1);
+    expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 0, 'all_settled');
     expect(jest.getTimerCount()).toBe(0);
   });
 
@@ -87,6 +91,16 @@ describe('handleStream hard response deadline', () => {
     handleStream('tv', 'nuvio_sport_deadline').then(value => { response = value; });
     await jest.advanceTimersByTimeAsync(200);
     expect(response).toBeDefined();
+    expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 2, 'budget_exhausted');
+  });
+
+  test('labels an early return while another source continues in the background', async () => {
+    let response;
+    handleStream('tv', 'nuvio_sport_deadline').then(value => { response = value; });
+    pending[0].resolve([playable('https://cdn.example/fast.mp4')]);
+    await jest.advanceTimersByTimeAsync(100);
+    expect(response.streams).toHaveLength(1);
+    expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 1, 'early_return');
   });
 
   test('late provider completion still warms the real cache for the next request', async () => {

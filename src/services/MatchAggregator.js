@@ -883,11 +883,11 @@ class MatchAggregator {
     return merged;
   }
 
-  async _fetchProviderMatches(provider) {
+  async _fetchProviderMatches(provider, shouldRecord = () => true) {
     const startedAt = Date.now();
     try {
       const matches = await provider.getMatches();
-      if (this.providerHealthService) {
+      if (this.providerHealthService && shouldRecord()) {
         this.providerHealthService.recordResult(provider, {
           matches,
           durationMs: Date.now() - startedAt,
@@ -895,7 +895,7 @@ class MatchAggregator {
       }
       return matches;
     } catch (error) {
-      if (this.providerHealthService) {
+      if (this.providerHealthService && shouldRecord()) {
         this.providerHealthService.recordResult(provider, {
           matches: [],
           durationMs: Date.now() - startedAt,
@@ -1358,18 +1358,24 @@ class MatchAggregator {
       // top of runSync(). Observed on production 2026-10-27: sktech never settled,
       // the sync sat in "running" for 16 h and the catalogue stayed frozen. Bound
       // each provider so one hang costs that provider's data, not the refresh.
-      const PROVIDER_SYNC_TIMEOUT_MS = Math.max(5000, Number(process.env.PROVIDER_SYNC_TIMEOUT_MS || 180000));
+      const configuredTimeout = Number(process.env.PROVIDER_SYNC_TIMEOUT_MS || 180000);
+      const PROVIDER_SYNC_TIMEOUT_MS = Number.isFinite(configuredTimeout) ? Math.min(2147483647, Math.max(5000, configuredTimeout)) : 180000;
       const withProviderTimeout = (provider) => {
         let timer = null;
+        let current = true;
+        const startedAt = Date.now();
         const limit = new Promise((resolve) => {
           timer = setTimeout(() => {
-            const name = (provider && (provider.name || provider.id)) || 'unknown';
+            current = false;
+            const name = (provider && (provider.sourceName || provider.name || provider.id)) || 'unknown';
+            const error = new Error('provider sync timeout');
             console.warn('[MatchAggregator] provider ' + name + ' exceeded ' + PROVIDER_SYNC_TIMEOUT_MS + 'ms during sync; continuing without it');
-            resolve({ status: 'rejected', reason: new Error('provider sync timeout') });
+            try { this.providerHealthService?.recordResult(provider, { matches: [], durationMs: Date.now() - startedAt, error }); } catch (_) {}
+            resolve({ status: 'rejected', reason: error });
           }, PROVIDER_SYNC_TIMEOUT_MS);
           if (timer && typeof timer.unref === 'function') timer.unref();
         });
-        const work = this._fetchProviderMatches(provider).finally(() => { if (timer) clearTimeout(timer); });
+        const work = this._fetchProviderMatches(provider, () => current).finally(() => { if (timer) clearTimeout(timer); });
         return Promise.race([work, limit]);
       };
 

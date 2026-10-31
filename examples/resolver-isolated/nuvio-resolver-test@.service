@@ -1,0 +1,19 @@
+# Example only. The isolated build and test credentials must be provisioned first.
+[Unit]
+Description=Isolated Nuvio resolver (%i)
+Requires=nuvio-resolver-test@%i.socket
+After=nuvio-resolver-test@%i.socket
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+Sockets=nuvio-resolver-test@%i.socket
+User=root
+Restart=on-failure
+RestartSec=2
+Environment=RESOLVER_SYSTEMD_SOCKET=true
+Environment=RESOLVER_SYSTEMD_TLS=true
+LoadCredential=resolver.crt:/run/nuvio-resolver-test-%i/identity/resolver.crt
+LoadCredential=resolver.key:/run/nuvio-resolver-test-%i/identity/resolver.key
+ExecStart=/usr/bin/env node /opt/nuvio-isolated/%i/dist.next/src/server.js

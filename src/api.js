@@ -1,4 +1,4 @@
-const { request } = require('undici');
+const { request } = require('./services/ProviderOutbound');
 
 const STREAMED_API = 'https://streamed.pk/api';
 

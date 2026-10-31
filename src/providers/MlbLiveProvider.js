@@ -1,11 +1,11 @@
 'use strict';
 
 const crypto = require('crypto');
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('../services/ProviderOutbound');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 
 function b64Decode(str) {

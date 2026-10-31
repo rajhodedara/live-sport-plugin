@@ -1,3 +1,11 @@
+
+// These tests explicitly exercise the unauthenticated TCP compatibility mode.
+const legacyTrustBeforeTests = process.env.RESOLVER_TRUST_LEGACY_TCP;
+beforeAll(() => { process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; });
+afterAll(() => {
+  if (legacyTrustBeforeTests === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP;
+  else process.env.RESOLVER_TRUST_LEGACY_TCP = legacyTrustBeforeTests;
+});
 /**
  * Shared resolve cache integration tests.
  *

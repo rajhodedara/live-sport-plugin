@@ -1,4 +1,4 @@
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');

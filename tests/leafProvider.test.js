@@ -1,5 +1,6 @@
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn() }));
 const LeafProvider = require('../src/providers/LeafProvider');
-const impitClient = require('../src/impitClient');
+const impitClient = require('../src/services/ProviderOutbound');
 const { BASE_URL } = require('../src/config');
 
 const TEST_CONFIG = Buffer.from(JSON.stringify({ freeUserId: 'test-user-id.abcdef' }))

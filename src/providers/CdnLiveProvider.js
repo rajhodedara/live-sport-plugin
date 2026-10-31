@@ -266,7 +266,7 @@ class CdnLiveProvider extends BaseProvider {
     }
 
     try {
-      const { safeFetch } = require('../impitClient');
+      const { safeFetch } = require('../services/ProviderOutbound');
 
       // Primary URL and automatic mirror fallback (.tv <-> .is)
       const urlsToTry = [playerUrl];

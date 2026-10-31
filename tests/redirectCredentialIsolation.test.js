@@ -17,7 +17,7 @@ beforeEach(()=>request.mockReset());
 test.each([301,302,303,307,308])('%s cross-origin redirect strips known sensitive headers',async status=>{
   request.mockResolvedValueOnce(response(status,'https://target.example/final')).mockResolvedValueOnce(response(200));
   await safeFetch(initial,{headers:{...auth},attempts:1});expectStripped(request.mock.calls[1][1].headers);
-  expect(flat(request.mock.calls[1][1].headers)).toMatchObject({'user-agent':'audit-UA',referer:'https://embed.example/',origin:'https://embed.example','x-custom':'keep'});
+  expect(flat(request.mock.calls[1][1].headers)).toEqual({'user-agent':'audit-UA'});
 });
 test.each(['/next','https://source.example/next','https://source.example:443/next'])('same-origin %s preserves credentials',async location=>{
   request.mockResolvedValueOnce(response(302,location)).mockResolvedValueOnce(response(200));
@@ -36,9 +36,9 @@ test.each([
  ['pair iterable',()=>new Map([['Authorization','Bearer FAKE'],['Cookie','audit=FAKE'],['Host','override.example'],['X-Custom','keep']])],
  ['Headers',()=>new Headers({Authorization:'Bearer FAKE',Cookie:'audit=FAKE',Host:'override.example','X-Custom':'keep'})],
  ['null-prototype object',()=>Object.assign(Object.create(null),{Authorization:'Bearer FAKE',Cookie:'audit=FAKE',Host:'override.example','X-Custom':'keep'})],
-])('%s is filtered without losing ordinary headers',async(_name,build)=>{
+])('%s is filtered without retaining custom headers',async(_name,build)=>{
   const input=build(),before=flat(input);request.mockResolvedValueOnce(response(302,'https://target.example/')).mockResolvedValueOnce(response(200));
-  await safeFetch(initial,{headers:input,attempts:1});expectStripped(request.mock.calls[1][1].headers);expect(flat(request.mock.calls[1][1].headers)['x-custom']).toBe('keep');expect(flat(input)).toEqual(before);
+  await safeFetch(initial,{headers:input,attempts:1});expectStripped(request.mock.calls[1][1].headers);expect(flat(request.mock.calls[1][1].headers)['x-custom']).toBeUndefined();expect(flat(input)).toEqual(before);
 });
 test('A to B to A never restores the removed original credentials',async()=>{
   request.mockResolvedValueOnce(response(302,'https://target.example/b')).mockResolvedValueOnce(response(302,'https://source.example/back')).mockResolvedValueOnce(response(200));
@@ -63,4 +63,18 @@ test('missing Location does not follow or alter caller headers',async()=>{
 });
 test('unsupported Location protocol is not followed',async()=>{
   request.mockResolvedValueOnce(response(302,'file:///fixture'));const r=await safeFetch(initial,{headers:{...auth},attempts:1});expect(r.status).toBe(302);expect(request).toHaveBeenCalledTimes(1);
+});
+test('302 retains PUT body and method in legacy path',async()=>{
+  request.mockResolvedValueOnce(response(302,'https://target.example/')).mockResolvedValueOnce(response(200));
+  await safeFetch(initial,{method:'PUT',body:'payload',headers:{'Content-Type':'text/plain','X-Api-Key':'fixture'},attempts:1});
+  const next=request.mock.calls[1][1];expect(next.method).toBe('PUT');expect(next.body).toBe('payload');expect(flat(next.headers)['x-api-key']).toBeUndefined();expect(flat(next.headers)['content-type']).toBe('text/plain');
+});
+test.each([
+  ['flat list',['Content-Length','7','Content-Type','text/plain','Content-Encoding','gzip','User-Agent','client']],
+  ['Headers',new Headers({'Content-Length':'7','Content-Type':'text/plain','Content-Encoding':'gzip','User-Agent':'client'})]
+])('302 POST removes body headers in %s',async(_name,headers)=>{
+  request.mockResolvedValueOnce(response(302,'https://target.example/')).mockResolvedValueOnce(response(200));
+  await safeFetch(initial,{method:'POST',body:'payload',headers,attempts:1});
+  const next=request.mock.calls[1][1], h=flat(next.headers);expect(next.method).toBe('GET');expect(next.body).toBeUndefined();
+  expect(h['content-length']).toBeUndefined();expect(h['content-type']).toBeUndefined();expect(h['content-encoding']).toBeUndefined();expect(h['user-agent']).toBe('client');
 });

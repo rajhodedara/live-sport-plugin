@@ -201,6 +201,16 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
     res.send(result.body);
   } catch (err) {
     // Preserve the old 404 semantics so players can fail over to another stream.
+    if (err.code === 'ERR_OUTBOUND_CAPACITY') {
+      if (Number.isInteger(err.previousUpstreamStatus)) {
+        console.warn(`[ManifestProxy] Local capacity exhausted on retry; previous upstream HTTP ${err.previousUpstreamStatus}`);
+      } else {
+        console.warn('[ManifestProxy] Local outbound capacity exhausted');
+      }
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).send('Outbound capacity temporarily exhausted');
+    }
+    if (err.code === 'ERR_OUTBOUND_BLOCKED') return res.status(403).json({ error: 'Blocked outbound URL', reason: err.reason });
     // Failures are negatively cached (15 s) so player polls stop hammering the dead upstream.
     // In parallel, drop the originating resolve-cache entry so the next click mints fresh.
     notifyResolveCacheOfDeadStream(req.originalUrl || req.url);
@@ -413,7 +423,7 @@ async function handleDashManifestProxy(req, res) {
   if (cookie) headers['Cookie'] = cookie;
 
   try {
-    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000 });
+    const result = await _safeFetch(targetUrl, { headers, timeoutMs: 10000, guardExternal: true });
     if (!result.ok) {
       return res.status(result.status).send(`Upstream returned HTTP ${result.status}`);
     }
@@ -529,6 +539,11 @@ async function handleDashManifestProxy(req, res) {
     return res.send(mpd);
   } catch (err) {
     console.error('[ManifestProxy] DASH error:', err.message);
+    if (err.code === 'ERR_OUTBOUND_CAPACITY') {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).send('Outbound capacity temporarily exhausted');
+    }
+    if (err.code === 'ERR_OUTBOUND_BLOCKED') return res.status(403).json({ error: 'Blocked outbound URL', reason: err.reason });
     return res.status(502).send('Manifest proxy error: ' + err.message);
   }
 }

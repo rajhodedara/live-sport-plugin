@@ -1,3 +1,11 @@
+
+// These tests explicitly exercise the unauthenticated TCP compatibility mode.
+const legacyTrustBeforeTests = process.env.RESOLVER_TRUST_LEGACY_TCP;
+beforeAll(() => { process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; });
+afterAll(() => {
+  if (legacyTrustBeforeTests === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP;
+  else process.env.RESOLVER_TRUST_LEGACY_TCP = legacyTrustBeforeTests;
+});
 const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 
@@ -8,6 +16,7 @@ function run(body, legacy = false, expireRetry = false) {
     import { createRequire } from 'node:module';
     import { cacheClaim, cacheGet, cacheSet, cacheDelete, cacheStats } from './resolver/src/cache.js';
     process.env.RESOLVE_CACHE_SHARED = 'true';
+    process.env.RESOLVER_TRUST_LEGACY_TCP = 'true';
     let now = 100000; Date.now = () => now;
     const calls = [], writes = [];
     global.fetch = async (url, options = {}) => {

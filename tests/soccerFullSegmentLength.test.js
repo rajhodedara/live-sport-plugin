@@ -12,7 +12,7 @@ const { rewriteSoccerFullPlaylist } = require('../src/services/SoccerFullHlsRewr
 
 // Probes are asserted on how they are *scheduled*, never on their result, so no
 // test in this file touches the network.
-jest.mock('../src/impitClient', () => ({ safeFetch: jest.fn(() => new Promise(() => {})) }));
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn(() => new Promise(() => {})) }));
 const segmentLengthService = require('../src/services/SoccerFullSegmentLength');
 
 const { detectCloakPrefix, SoccerFullSegmentLength } = segmentLengthService;
@@ -133,6 +133,24 @@ describe('rewriteSoccerFullPlaylist', () => {
     const out = rewriteSoccerFullPlaylist(body, manifestUrl);
     expect(out).toContain('#EXT-X-VERSION:4');
     expect(out).not.toContain('#EXT-X-VERSION:3');
+  });
+
+  test('adds HLS version 4 when a versionless playlist gains byte ranges', () => {
+    const versionless = body.replace('#EXT-X-VERSION:3\n', '');
+    const out = rewriteSoccerFullPlaylist(versionless, manifestUrl);
+    expect(out.split('\n').slice(0, 2)).toEqual(['#EXTM3U', '#EXT-X-VERSION:4']);
+    expect(out).toContain('#EXT-X-BYTERANGE:1997688@120');
+  });
+
+  test('keeps an existing HLS version above 4', () => {
+    const out = rewriteSoccerFullPlaylist(body.replace('#EXT-X-VERSION:3', '#EXT-X-VERSION:6'), manifestUrl);
+    expect(out).toContain('#EXT-X-VERSION:6');
+    expect(out).not.toContain('#EXT-X-VERSION:4');
+  });
+
+  test('leaves a versionless plain-segment playlist unchanged', () => {
+    const plain = '#EXTM3U\n#EXTINF:4,\nhttps://cdn.example.test/segment.ts\n#EXT-X-ENDLIST';
+    expect(rewriteSoccerFullPlaylist(plain, manifestUrl)).toBe(plain);
   });
 
   test('routes child playlists back through the addon', () => {

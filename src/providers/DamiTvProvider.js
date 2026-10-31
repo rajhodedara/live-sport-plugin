@@ -16,6 +16,9 @@ const ROLLING_WINDOW_TOLERANCE_S = 90;
 // item shape (title instead of name, date in ms instead of starts_at in s).
 const MATCHES_ALL_URL = 'https://damitv.st/papi/matches/all';
 const EXTRACT_URL_BASE = 'https://damitv.st/papi/extract-url/';
+// Local pool saturation says nothing about provider health. Do not let it
+// count as a DamiTV failure or prevent a later sync from trying again.
+const localCapacityFilter = error => error?.code === 'ERR_OUTBOUND_CAPACITY';
 
 const DAMITV_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -34,7 +37,7 @@ class DamiTvProvider extends BaseProvider {
       const res = await this.proxyFetch(this.apiUrl, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    });
+    }, { errorFilter: localCapacityFilter });
 
     // Secondary feed for the 24/7 channels. Non-fatal: a failure here only
     // costs the 24/7 row, not the fixture schedule.
@@ -42,7 +45,7 @@ class DamiTvProvider extends BaseProvider {
       const res = await this.proxyFetch(MATCHES_ALL_URL, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    });
+    }, { errorFilter: localCapacityFilter });
   }
 
   /**
@@ -300,29 +303,38 @@ class DamiTvProvider extends BaseProvider {
     const streams = [];
 
     let embedUrl = src.url || src.embedUrl || sourceId;
-    if (!embedUrl || !embedUrl.startsWith('http')) return streams;
+    if (!embedUrl || !embedUrl.startsWith('http')) { console.info('[DamiTV] Extraction skipped', JSON.stringify({ reason: 'missing_embed_url' })); return streams; }
 
     try {
       const urlObj = new URL(embedUrl);
       const matchId = urlObj.searchParams.get('id');
 
-      if (!matchId) return streams;
+      if (!matchId) { console.info('[DamiTV] Extraction skipped', JSON.stringify({ reason: 'missing_match_id' })); return streams; }
+
+      console.info('[DamiTV] Extraction started');
 
       let extractData = null;
+      let extractPhase = 'fetch';
       try {
         const extractRes = await this.proxyFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             'Referer': embedUrl
           },
-          signal: AbortSignal.timeout(8000)
+          timeoutMs: 11000,
+          signal: AbortSignal.timeout(11000)
         });
 
         if (extractRes.ok) {
+          extractPhase = 'parse';
           extractData = await extractRes.json();
+        } else {
+          console.warn(`[${this.name}] API extraction returned a non-success response`, JSON.stringify({ status: extractRes.status }));
         }
       } catch (extractErr) {
-        console.warn(`[${this.name}] API extraction failed for ${matchId}, falling back to embed chain...`);
+        const kind = ['SyntaxError', 'TimeoutError', 'AbortError', 'TypeError'].includes(extractErr?.name) ? extractErr.name : 'Error';
+        const code = typeof extractErr?.code === 'string' && /^(ERR_[A-Z0-9_]{1,64}|ETIMEDOUT|ECONNRESET|ABORT_ERR)$/.test(extractErr.code) ? extractErr.code : undefined;
+        console.warn(`[${this.name}] API extraction failed`, JSON.stringify({ phase: extractPhase, kind, ...(code ? { code } : {}) }));
       }
 
       const UA_CHROME131 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
@@ -338,6 +350,7 @@ class DamiTvProvider extends BaseProvider {
       };
 
       if (extractData && extractData.success) {
+        console.info('[DamiTV] Extraction response', JSON.stringify({ success: true, hasHls: !!extractData.hlsUrl, hasSd: !!extractData.sdUrl }));
         if (extractData.hlsUrl) {
           const isTikTokStream = Boolean(/streamed\/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(extractData.hlsUrl));
           const s = new StreamEntity({

@@ -1,0 +1,12 @@
+# Example only. Never install for production; review paths and lifecycle first.
+[Unit]
+Description=Isolated Nuvio resolver socket (%i)
+
+[Socket]
+ExecStartPre=/usr/bin/env node /opt/nuvio-isolated/%i/scripts/check-resolver-runtime.js /run/nuvio-resolver-test-%i
+ListenStream=/run/nuvio-resolver-test-%i/resolver.sock
+DirectoryMode=0700
+SocketMode=0600
+Accept=no
+RemoveOnStop=no
+Service=nuvio-resolver-test@%i.service

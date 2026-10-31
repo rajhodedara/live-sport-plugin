@@ -1,7 +1,7 @@
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const impitClient = require('../impitClient');
+const impitClient = require('../services/ProviderOutbound');
 const { BASE_URL } = require('../config');
 
 // Upstream replaced the old shared-token API with a per-install config path:

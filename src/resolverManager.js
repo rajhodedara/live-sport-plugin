@@ -8,6 +8,8 @@ const path = require('path');
 const child_process = require('child_process');
 const http = require('http');
 const container = require('./container');
+const resolverConflictState = require('./services/ResolverConflictState');
+const { allowsLegacyResolverTcp } = require('./services/ResolverTrustPolicy');
 
 // ─── Stream Resolver Lifecycle Manager ───────────────────────────────────────
 // All cluster workers share a single lightweight local resolver service.
@@ -17,6 +19,7 @@ let resolverProcess = null;
 let isShuttingDown = false;
 let resolverRestarts = 0;
 let resolverStableTimer = null;
+let resolverPortConflict = false;
 
 // Locate resolver/src/server.js safely without bundler rewrite
 const RESOLVER_BASENAME = String.fromCharCode(115, 101, 114, 118, 101, 114) + '.' +
@@ -64,14 +67,24 @@ function isResolverAlive(port) {
 }
 
 async function spawnResolver() {
-  if (isShuttingDown) return;
+  if (isShuttingDown || resolverPortConflict) return;
+  // In the explicitly configured isolated mode an external service owns the
+  // resolver socket. Never probe, spawn or adopt a listener on the TCP port.
+  if (process.env.RESOLVER_TRANSPORT === 'systemd-unix-tls') return;
+  if (!allowsLegacyResolverTcp(process.env)) {
+    console.warn('[Resolver] Legacy TCP resolver disabled; configure a pinned resolver transport or explicitly opt into trusted-local TCP.');
+    return;
+  }
 
   // Check if an existing healthy resolver is already listening (e.g. from reload or prior worker)
   const alive = await isResolverAlive(RESOLVER_PORT);
   // Shutdown may have started while the asynchronous health probe was pending.
-  if (isShuttingDown) return;
+  if (isShuttingDown || resolverPortConflict) return;
   if (alive) {
-    console.log(`[Resolver] Verified healthy stream resolver active on 127.0.0.1:${RESOLVER_PORT}`);
+    // An HTTP response proves reachability only; it does not identify the
+    // listener. The current shared-worker routing still requires a separate
+    // ownership fix before this path can be considered safe.
+    console.warn(`[Resolver] HTTP response detected on 127.0.0.1:${RESOLVER_PORT}; resolver ownership is unverified`);
     return;
   }
 
@@ -91,12 +104,8 @@ async function spawnResolver() {
     return;
   }
 
-  // If we reach here and it's not responding, clear any zombie hanging onto the port (Linux)
-  if (process.platform === 'linux') {
-    try {
-      child_process.execSync(`fuser -k ${RESOLVER_PORT}/tcp 2>/dev/null || true`);
-    } catch (_) {}
-  }
+  // A failed health check does not establish who owns the port. Do not kill
+  // another process by port; a bind conflict must fail without harming it.
 
   const spawnEnv = { ...process.env, PORT: RESOLVER_PORT, HOST: '127.0.0.1' };
   resolverProcess = child_process['sp' + 'awn']('node', [scriptPath], {
@@ -122,6 +131,15 @@ async function spawnResolver() {
   resolverProcess.on('exit', (code, signal) => {
     resolverProcess = null;
     if (isShuttingDown) return;
+    if (code === 98) {
+      // server.js reserves 98 for EADDRINUSE. Do not retry and then mistake
+      // the existing listener's HTTP response for our resolver.
+      resolverPortConflict = true;
+      resolverConflictState.markConflict();
+      if (resolverStableTimer) clearTimeout(resolverStableTimer);
+      console.error(`[Resolver] Port ${RESOLVER_PORT} is occupied; automatic resolver restarts paused. Listener ownership is unverified.`);
+      return;
+    }
     resolverRestarts++;
     const delay = Math.min(2000 * Math.pow(2, resolverRestarts - 1), 30000);
     console.error(
@@ -149,7 +167,29 @@ function shutdownResolver() {
   try { container.resolve('browserSniffer').shutdown(); } catch (_) {}
 }
 process.on('exit', shutdownResolver);
-process.on('SIGINT', () => { shutdownResolver(); process.exit(0); });
-process.on('SIGTERM', () => { shutdownResolver(); process.exit(0); });
+let terminating = false;
+async function shutdownOnSignal() {
+  if (terminating) return;
+  terminating = true;
+  const { closeNativePool, waitForChildExit } = require('./services/NativeShutdown');
+  const ownedResolver = resolverProcess;
+  const resolverExit = waitForChildExit(ownedResolver);
+  console.info('[Shutdown] Cleanup started', JSON.stringify({ resolverOwned: !!ownedResolver }));
+  shutdownResolver();
+  const [closed, resolverClosed, transportClosed] = await Promise.all([
+    closeNativePool(() => require('./services/SharedOutboundFetch').closeSharedOutbound()),
+    closeNativePool(() => resolverExit),
+    closeNativePool(() => process.env.RESOLVER_TRANSPORT === 'systemd-unix-tls'
+      ? require('./services/ResolverTransportRuntime').resolverTransport.close() : undefined)
+  ]);
+  console.info('[Shutdown] Cleanup finished', JSON.stringify({ nativePoolClosed: closed, resolverExited: resolverClosed,
+    ...(process.env.RESOLVER_TRANSPORT === 'systemd-unix-tls' ? { resolverTransportClosed: transportClosed } : {}) }));
+  if (!closed) console.warn('[Shutdown] Native pool did not confirm closure before the deadline');
+  if (!resolverClosed) console.warn('[Shutdown] Owned resolver did not confirm exit before the deadline');
+  if (!transportClosed) console.warn('[Shutdown] Resolver transport did not confirm closure before the deadline');
+  process.exit(0);
+}
+process.on('SIGINT', shutdownOnSignal);
+process.on('SIGTERM', shutdownOnSignal);
 
 module.exports = { workerOffset, RESOLVER_PORT, spawnResolver, shutdownResolver };
