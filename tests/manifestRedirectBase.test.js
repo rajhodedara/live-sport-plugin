@@ -20,7 +20,7 @@ const http=require('node:http');
 const net=require('node:net');
 jest.mock('../src/container',()=>({resolve:jest.fn()}));
 jest.mock('../src/streams',()=>({resolveSource:jest.fn()}));
-jest.mock('impit',()=>{throw new Error('test: native impit disabled');},{virtual:true});
+jest.mock('impit',()=>{throw new Error('test: native impit disabled');});
 jest.mock('undici',()=>{
   const actual=jest.requireActual('undici');const agents=[];
   return {...actual,_testAgents:agents,Agent:class extends actual.Agent{

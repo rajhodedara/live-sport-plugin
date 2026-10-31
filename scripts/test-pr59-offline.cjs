@@ -7,17 +7,35 @@ const suites = [
   'ssrfGuard', 'guardedOutboundTransport', 'nativeGuardedRotation', 'nativeLeaseCleanup',
   'nativeAdmissionQueue', 'nativeAdmissionReview', 'nativeAdmissionShared',
   'providerOutboundCompatibility', 'providerGuardRouting', 'providerSyncTimeout', 'providerHealth',
-  'redirectHeaderPolicy', 'redirectCredentialIsolation', 'impitRedirect', 'sharedOutboundPolicy',
+  'guardedPublicEntries', 'redirectHeaderPolicy', 'redirectCredentialIsolation',
+  'impitRedirect', 'impitResponseUrl', 'sharedOutboundPolicy',
   'segmentLengthService', 'streamSpeedProbeGuard',
   'soccerFullProvider', 'soccerFullSegmentLength', 'soccerFullGuardIntegration', 'soccerFullPublishedUrl',
   'leafProvider', 'providerChildBuildImports', 'gasmIndiaPlayerCompletion', 'ppvChildCompletion',
   'resolverTransportConfig', 'resolverUnixClients', 'resolverPinnedClients', 'resolverPinnedIdentity',
   'resolverPublicIdentity', 'resolverProxyEvents', 'resolverConflictGate', 'resolverShutdownRace',
+  'resolverUndiciMemoryTls',
   'resolverPortSafetyCharacterization', 'resolverTrustPolicy', 'sharedCacheExpiry',
-  'sharedLeaseProtocol', 'sharedSlowMintRecovery', 'streamResolveConcurrency', 'resolverTlsHandshake',
-  'daddyLiveProvider', 'universalChannelIdentity'
+  'sharedLeaseProtocol', 'sharedLeaseOwnership', 'sharedSlowMintRecovery',
+  'sharedClaimBounds', 'sharedClaimCleanup', 'sharedInvalidationRevision',
+  'streamResolveConcurrency', 'resolverTlsHandshake',
+  'daddyLiveProvider', 'universalChannelIdentity',
+  'cacheTimingRelations', 'streamTimingWindow', 'pendingMintPruning',
+  'skTechDashDrmProxy', 'manifestRecoveryIdentity'
 ].map(name => `tests/${name}.test.js`);
-const result = spawnSync(process.execPath, [require.resolve('jest/bin/jest'), '--runInBand', '--silent', '--runTestsByPath', ...suites], {
+let jestEntry;
+try { jestEntry = require.resolve('jest/bin/jest'); }
+catch (_) {
+  console.error('Local Jest is missing. Install the locked development dependencies with: npm ci --include=dev');
+  process.exit(1);
+}
+const jestVersion = require('jest/package.json').version;
+if (!jestVersion.startsWith('29.')) {
+  console.error(`Expected the project Jest 29 dependency, received ${jestVersion}. Run: npm ci --include=dev`);
+  process.exit(1);
+}
+console.info(`PR59 offline selection: Node ${process.version}, Jest ${jestVersion}`);
+const result = spawnSync(process.execPath, [jestEntry, '--runInBand', '--silent', '--runTestsByPath', ...suites], {
   cwd: root, stdio: 'inherit', env: { ...process.env,
     NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} --require=${JSON.stringify(boundary)}`.trim() }
 });

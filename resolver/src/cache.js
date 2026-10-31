@@ -62,7 +62,7 @@ export function cacheGet(key) {
     if (held && held.expiresAt > now) return { status: 'minting' }
     return { status: 'miss' }
   }
-  return { status: e.status, streams: e.streams, expiresAt: e.expiresAt }
+  return { status: e.status, streams: e.streams, expiresAt: e.expiresAt, revision: e.revision }
 }
 
 // Reserve the right to mint a key. ok:false means another worker holds a
@@ -108,20 +108,31 @@ export function cacheSet(key, streams, ttlMs, status = 'ok', ownerToken) {
   const rejected = ownershipError(key, ownerToken)
   if (rejected) return rejected
   const ttl = Math.max(1000, Number(ttlMs) || 60000)
+  const revision = randomUUID()
   entries.set(key, {
     streams: Array.isArray(streams) ? streams : [],
     status: status === 'failed' ? 'failed' : 'ok',
     expiresAt: Date.now() + ttl,
     storedAt: Date.now(),
+    revision,
   })
   claims.delete(key)
   evictIfNeeded()
-  return { ok: true, entries: entries.size }
+  return { ok: true, entries: entries.size, revision }
 }
 
-export function cacheDelete(key, ownerToken) {
+export function cacheDelete(key, ownerToken, expectedRevision) {
   const rejected = ownershipError(key, ownerToken)
   if (rejected) return rejected
+  if (expectedRevision !== undefined) {
+    const entry = entries.get(key)
+    if (typeof expectedRevision !== 'string' || !entry || entry.revision !== expectedRevision) {
+      return { ok: false, reason: 'stale-revision' }
+    }
+    entries.delete(key)
+    // Invalidating a published entry never releases an unrelated mint claim.
+    return { ok: true }
+  }
   entries.delete(key)
   claims.delete(key)
   return { ok: true }

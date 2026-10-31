@@ -27,6 +27,10 @@ not a production deployment. It does not require merging PR61 first.
 - A provider sync timeout updates its health record. A late result from that
   timed-out attempt cannot overwrite a later health result. This does not
   cancel the provider or prevent its internal state from changing.
+- Shared resolve-cache publications carry revisions. Conditional invalidation
+  cannot erase a newer publication or release an unrelated mint claim. See
+  PR59_SUITE_RECONCILIATION.md for the reproduced race, mixed-version limits and
+  the separate fixture corrections made after the published 27f35629 review.
 
 ## Deployment choice required before merge/deployment
 
@@ -49,11 +53,15 @@ node scripts/test-pr59-offline.cjs
 npm run build
 ```
 
-The offline runner selects 42 suites and blocks real worker construction,
-network connections and listening sockets. Current result: 414 tests pass,
+The offline runner selects 54 suites and blocks real worker construction,
+network connections and listening sockets. Current result: 515 tests pass,
 with one existing TODO for clustered resolver ownership/replacement. The TLS
 handshake tests use memory streams. Slow-mint cache tests use a child Node
 process with stubbed I/O; these are not real resolver-service tests.
+The expanded selection passes on Node22.23.2 and Node24.19.0 with Jest29.7.0.
+PR59_LOCKED_RECONCILIATION.md reconciles the newly delivered full PR report and
+records the Node22/Jest fixture correction. Runtime code is unchanged by that
+fixture-only follow-up.
 
 The full Jest suite is not a validation claim. HTTP listener, native binary,
 WASM and real-process integration suites are excluded from the offline command.

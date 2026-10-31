@@ -74,6 +74,9 @@
       "/scratch/",
       "/nuvio-proxy-2/",
       "/tests/load/"
+    ],
+    "testMatch": [
+      "**/?(*.)+(spec|test).[tj]s?(x)"
     ]
   },
   "overrides": {

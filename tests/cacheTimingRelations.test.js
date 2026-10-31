@@ -4,9 +4,11 @@ const { createTimingRelations } = require('../src/services/TimingRelations');
 const { createNativeTiming } = require('../src/services/NativeTiming');
 const { withTimingWork, currentTimingWork } = require('../src/services/TimingContext');
 
-let oldShared;
-beforeEach(() => { oldShared = process.env.RESOLVE_CACHE_SHARED; process.env.RESOLVE_CACHE_SHARED = 'false'; });
+let oldShared, oldTrust;
+beforeEach(() => { oldTrust = process.env.RESOLVER_TRUST_LEGACY_TCP; oldShared = process.env.RESOLVE_CACHE_SHARED; process.env.RESOLVE_CACHE_SHARED = 'false'; });
 afterEach(() => {
+  if (oldTrust === undefined) delete process.env.RESOLVER_TRUST_LEGACY_TCP;
+  else process.env.RESOLVER_TRUST_LEGACY_TCP = oldTrust;
   if (oldShared === undefined) delete process.env.RESOLVE_CACHE_SHARED;
   else process.env.RESOLVE_CACHE_SHARED = oldShared;
 });
@@ -100,6 +102,7 @@ test('cache derives only an allowlisted source label for timing', async () => {
 
 test('adopting a shared-cache result records no local source mint', async () => {
   process.env.RESOLVE_CACHE_SHARED = 'true';
+  process.env.RESOLVER_TRUST_LEGACY_TCP = 'true'; // Shared mock, not a default trust assertion.
   const originalFetch = global.fetch;
   global.fetch = jest.fn(async () => ({ ok: true, json: async () => ({ status: 'ok',
     streams: [{ url: 'https://example.test/' }], expiresAt: Date.now() + 60000 }) }));

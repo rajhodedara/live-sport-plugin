@@ -6,7 +6,7 @@ jest.mock('../src/container', () => {
   const registry = new Registry();
   return { resolve: name => name === 'iframeDomainRegistry' ? registry : undefined };
 });
-jest.mock('impit', () => { throw new Error('fixture: native impit disabled'); }, { virtual: true });
+jest.mock('impit', () => { throw new Error('fixture: native impit disabled'); });
 jest.mock('undici', () => {
   const actual = jest.requireActual('undici'), agents = [];
   return { ...actual, _testAgents: agents, Agent: class extends actual.Agent {

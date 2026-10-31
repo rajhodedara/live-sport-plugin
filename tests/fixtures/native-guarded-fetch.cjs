@@ -57,7 +57,7 @@ const nativeModule = { Impit: class extends Impit {
       sockets.add(socket); socket.on('error', () => {}); socket.once('close', () => sockets.delete(socket));
     });
     await new Promise(resolve => origin.listen(0, '127.0.0.1', resolve));
-    pool = createNativeGuardedFetch({ maxSlots: 2, slotOptions: {
+    pool = createNativeGuardedFetch({ maxSlots: 2, admissionWaitMs: 20, slotOptions: {
       nativeModule, resolve: async () => ['93.184.216.34'],
       dial(address) {
         assert.equal(address.host, '93.184.216.34'); assert.equal(address.port, 80);
@@ -83,7 +83,7 @@ const nativeModule = { Impit: class extends Impit {
       Host: 'untrusted', Connection: 'x-hop', 'X-Hop': 'transport-only'
     } })).json();
     assert.equal(isolated.headers.authorization, undefined); assert.equal(isolated.headers.cookie, undefined);
-    assert.equal(isolated.headers['x-api-key'], 'custom-retained'); assert.equal(isolated.headers['x-hop'], undefined);
+    assert.equal(isolated.headers['x-api-key'], undefined); assert.equal(isolated.headers['x-hop'], undefined);
     assert.equal(isolated.headers.host, 'a.example.org');
     const sameOrigin = await (await pool.fetch('http://a.example.org/r301', {
       method: 'POST', body: 'metadata', headers: { Authorization: 'fixture', 'Content-Type': 'text/plain' }

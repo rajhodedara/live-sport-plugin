@@ -1,5 +1,7 @@
 // Model tests for undici's explicit redirect loop; no public network or native binary.
-jest.mock('impit',()=>{throw new Error('test: native impit disabled');});
+jest.mock('impit',()=>({Impit:class{
+  constructor(){throw new Error('test: native impit disabled');}
+}}));
 jest.mock('undici',()=>({request:jest.fn(),Agent:class{}}));
 const {request}=require('undici');const {safeFetch,isImpitAvailable}=require('../src/impitClient');
 beforeAll(()=>expect(isImpitAvailable()).toBe(false));
