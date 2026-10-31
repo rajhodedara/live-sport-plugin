@@ -8,7 +8,7 @@ function fixture(baseUrl) {
     calls[name] = jest.fn(() => ({ fixture: name })); context[name] = calls[name];
   }
   // Replace only ESM imports/export syntax; execute the complete router logic.
-  const source = fs.readFileSync(path.join(__dirname, '../resolver/src/http/router.js'), 'utf8').replace(/^import .*\n/gm, '').replace('export async function route', 'async function route');
+  const source = fs.readFileSync(path.join(__dirname, '../resolver/src/http/router.js'), 'utf8').replace(/^import .*\r?\n/gm, '').replace('export async function route', 'async function route');
   vm.createContext(context); vm.runInContext(source, context);
   return { route: context.route, calls, run, serveStatic };
 }

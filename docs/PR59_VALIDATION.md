@@ -57,8 +57,8 @@ node scripts/test-pr59-offline.cjs
 npm run build
 ```
 
-The offline runner selects 55 suites and blocks real worker construction,
-network connections and listening sockets. Current result: 523 tests pass,
+The offline runner selects 60 suites and blocks real worker construction,
+network connections and listening sockets. Current result: 583 tests pass,
 with one existing TODO for clustered resolver ownership/replacement. The TLS
 handshake tests use memory streams. Slow-mint cache tests use a child Node
 process with stubbed I/O; these are not real resolver-service tests.

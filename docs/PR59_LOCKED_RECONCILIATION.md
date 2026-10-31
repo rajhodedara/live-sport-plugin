@@ -51,8 +51,11 @@ node scripts/test-pr59-offline.cjs
 
 Result on both Node22.23.2 and Node24.19.0 with installed Jest29.7.0:
 The original locked-fixture selection passed54 suites/515 tests and1 TODO.
-The current command includes8 existing TimStreams cases:55 suites/523 tests and
-1 TODO pass on both Node versions. No full Jest-suite pass is claimed.
+The stable-integration selection then included8 existing TimStreams cases:
+55 suites/523 tests and1 TODO on both Node versions. After the received
+Windows full-run fixture audit, the current command passes60 suites/583 tests
+and1 TODO on both versions; see PR59_MESSAGE39_RECONCILIATION.md.
+No full Jest-suite pass is claimed.
 The Node22 binary came from the official distribution with SHA256 checked against
 its official SHASUMS; existing local dependency versions were retained. This was
 not a fresh installation on Raj's host.

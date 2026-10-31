@@ -33,6 +33,7 @@ process.env.ENABLE_SPEED_PROBE = 'true';
 const { safeFetch } = require('../src/impitClient');
 const { verifyStreams } = require('../src/streams');
 const M3U8ParserService = require('../src/services/M3U8ParserService');
+const { ReadableStream } = require('node:stream/web');
 
 const PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:5\n#EXTINF:4.0,\nseg0.ts\n';
 
@@ -58,17 +59,21 @@ function makeCache() {
 }
 
 // A successful ranged segment response: 200 KB body + a Content-Range total.
-const segmentResponse = () => ({
+const segmentResponse = (contentRange = 'bytes 0-199999/4084906') => ({
   ok: true,
-  arrayBuffer: async () => Buffer.alloc(200000).buffer,
-  headers: { get: () => 'bytes 0-199999/4084906' },
+  body: new ReadableStream({ start(controller) {
+    controller.enqueue(new Uint8Array(200000));
+    controller.close();
+  } }),
+  arrayBuffer: jest.fn(() => { throw new Error('Probe must consume the bounded stream body'); }),
+  headers: { get: name => name.toLowerCase() === 'content-range' ? contentRange : null },
 });
 
 // VERIFY_ATTEMPTS and friends are read when streams.js loads, so these tests
 // run against the defaults (3 attempts, 9s total budget).
 beforeEach(() => {
   jest.clearAllMocks();
-  global.fetch = jest.fn().mockResolvedValue(segmentResponse());
+  global.fetch = jest.fn().mockImplementation(async () => segmentResponse());
 });
 
 describe('verifyStreams retry policy', () => {
@@ -205,11 +210,7 @@ describe('verifyStreams speed probe', () => {
 
   it('keeps the stream but skips speed scoring when Content-Range is missing', async () => {
     safeFetch.mockResolvedValue(ok());
-    global.fetch.mockResolvedValue({
-      ok: true,
-      arrayBuffer: async () => Buffer.alloc(200000).buffer,
-      headers: { get: () => null },
-    });
+    global.fetch.mockResolvedValue(segmentResponse(null));
 
     const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, makeCache());
 
@@ -234,11 +235,7 @@ describe('verifyStreams speed probe', () => {
 
     it('keeps the stream and does NOT set bitrate when Content-Range is missing (no crash)', async () => {
       safeFetch.mockResolvedValue(ok());
-      global.fetch.mockResolvedValue({
-        ok: true,
-        arrayBuffer: async () => Buffer.alloc(200000).buffer,
-        headers: { get: () => null }, // No Content-Range
-      });
+      global.fetch.mockResolvedValue(segmentResponse(null));
       const out = await verifyStreams(
         [{ ...stream(), resolution: 'HD' }],
         null, parser, makeCache()
