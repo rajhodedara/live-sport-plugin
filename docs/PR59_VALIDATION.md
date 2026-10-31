@@ -1,11 +1,15 @@
 # PR59 integration and validation
 
-This candidate integrates stable `94042c2d5d8251cd4dee83323c0b61bff9882043`
-with PR59 `29742a931a0dedf9aa7da56062b171a2b962a15d`. It is a draft for review,
-not a production deployment. It does not require merging PR61 first.
+This candidate integrates stable `a71e49f377a64a76f83104a2fdc03823df43cc84`
+with the reviewed published PR59 `e91e9b9f1f031ffde5447fab401942a121de3e5c`.
+It is a draft for review, not a production deployment. It does not require
+merging PR61 first. STABLE_A71_INTEGRATION.md records the latest integration.
 
 ## Resulting behavior
 
+- TimStreams retains stable's new API host and first-hop Referer at
+  tim-streams.com. The upstream QEMU and amd64/arm64 workflow declarations are
+  preserved; no real arm64 image build or execution is claimed here.
 - Leaf retains stable's per-install configuration, manifest-only relay and URL
   sanitization, and its metadata requests use ProviderOutbound.
 - SoccerFull's new manifest route and bounded segment probes use the shared
@@ -53,8 +57,8 @@ node scripts/test-pr59-offline.cjs
 npm run build
 ```
 
-The offline runner selects 54 suites and blocks real worker construction,
-network connections and listening sockets. Current result: 515 tests pass,
+The offline runner selects 55 suites and blocks real worker construction,
+network connections and listening sockets. Current result: 523 tests pass,
 with one existing TODO for clustered resolver ownership/replacement. The TLS
 handshake tests use memory streams. Slow-mint cache tests use a child Node
 process with stubbed I/O; these are not real resolver-service tests.

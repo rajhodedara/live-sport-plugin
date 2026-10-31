@@ -8,7 +8,9 @@ class TimStreamsProvider extends BaseProvider {
   constructor(opts) {
     super(opts);
     this.name = 'TimStreams';
-    this.apiUrl = 'https://timst.top/api/live-upcoming';
+    // Upstream moved to a new host: timst.top no longer resolves. The API
+    // path and payload shape are unchanged, so only the host changes here.
+    this.apiUrl = 'https://tim-streams.com/api/live-upcoming';
     
     this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
       const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
@@ -151,7 +153,7 @@ class TimStreamsProvider extends BaseProvider {
       const res = await this.proxyFetch(embedUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-          'Referer': 'https://timst.top/'
+          'Referer': 'https://tim-streams.com/'
         },
         signal: AbortSignal.timeout(10000)
       });

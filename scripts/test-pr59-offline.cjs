@@ -19,7 +19,7 @@ const suites = [
   'sharedLeaseProtocol', 'sharedLeaseOwnership', 'sharedSlowMintRecovery',
   'sharedClaimBounds', 'sharedClaimCleanup', 'sharedInvalidationRevision',
   'streamResolveConcurrency', 'resolverTlsHandshake',
-  'daddyLiveProvider', 'universalChannelIdentity',
+  'daddyLiveProvider', 'timStreamsProvider', 'universalChannelIdentity',
   'cacheTimingRelations', 'streamTimingWindow', 'pendingMintPruning',
   'skTechDashDrmProxy', 'manifestRecoveryIdentity'
 ].map(name => `tests/${name}.test.js`);

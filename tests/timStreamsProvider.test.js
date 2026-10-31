@@ -205,6 +205,9 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
     }
 
     provider.proxyFetch = jest.fn(async (url) => {
+      if (url === 'https://tim-streams.com/api/live-upcoming') {
+        return { ok: true, json: async () => ({ events: [] }) };
+      }
       if (url === embedUrl) {
         return {
           ok: true,
@@ -220,7 +223,15 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
       return { ok: false };
     });
 
+    await provider.getMatches();
     const result = await provider.extractM3u8(embedUrl);
+    expect(provider.proxyFetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://tim-streams.com/api/live-upcoming', embedUrl, tokenUrl
+    ]);
+    expect(provider.proxyFetch.mock.calls[1][1].headers.Referer).toBe('https://tim-streams.com/');
+    expect(provider.proxyFetch.mock.calls[2][1].headers).toMatchObject({
+      Referer: embedUrl, Origin: new URL(embedUrl).origin
+    });
     expect(result).not.toBeNull();
     expect(result.m3u8).toBe(finalM3u8);
     expect(result.referer).toBe('https://ehgembxe.cfd');
