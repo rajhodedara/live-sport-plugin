@@ -1,5 +1,9 @@
 # PR59 suite reconciliation (local follow-up to 27f35629)
 
+Historical evidence is retained below. Current Windows results, received
+Linux HTTP/native checks and focused acceptance are summarized in
+PR59_WINDOWS_UPDATED_REVIEW.md.
+
 The 414 tests/42 suites were the selected offline run:
 
 ```sh
@@ -50,14 +54,16 @@ Jest's testMatch is explicit for Jest JS/TS files; .test.mjs and Node .cjs tests
 belong to their Node runner, not Jest. They are not counted as passing by being
 excluded from the wrong runner.
 
-The expanded offline command now covers 60 suites, **583 passing tests** and
-one existing TODO. Seven pure resolver HOST tests pass separately; actual
-HTTP/native cases still need the corrected fixtures run in Raj's environment.
+The expanded offline command now covers 64 suites, **636 passing tests** and
+one existing TODO. Seven pure resolver HOST tests pass separately. Both complete
+Linux HTTP/native selections have now arrived: 11 suites/80 tests pass per PR.
 The fixture reconciliation does not change runtime logic. This candidate also
 includes the separate runtime correction described below.
 
 The received Windows full-run baseline comparison and the subsequent fixture
 repairs are recorded in [PR59_MESSAGE39_RECONCILIATION.md](PR59_MESSAGE39_RECONCILIATION.md).
+The updated Windows runs and latest focused follow-up are in
+[PR59_WINDOWS_UPDATED_REVIEW.md](PR59_WINDOWS_UPDATED_REVIEW.md).
 
 ## Shared invalidation correction
 
@@ -122,9 +128,10 @@ proven explanation of the original timeout.
 The locked-fixture54-suite selection passed515 tests plus1 TODO on both
 Node22.23.2 and Node24.19.0 with installed Jest29.7.0. The subsequent stable
 integration added the existing8-test TimStreams suite:55 suites/523 passing
-tests on both versions. The current fixture follow-up passes60 suites/583 tests
-plus1 existing TODO on both versions, as recorded in PR59_MESSAGE39_RECONCILIATION.md.
+tests on both versions. The current fixture follow-up passes64 suites/636 tests
+plus1 existing TODO on both versions, as recorded in PR59_WINDOWS_UPDATED_REVIEW.md.
 PR59_LOCKED_RECONCILIATION.md retains the historical failure analysis;
 STABLE_A71_INTEGRATION.md records the latest stable integration. Isolated
-transport acceptance and repaired-fixture reruns remain pending; the received
-Windows full-run baseline comparison has now been audited.
+transport acceptance and the focused cache/AK47/hosted follow-up remain pending;
+the updated Windows comparison and complete Linux HTTP/native selections have
+now been audited in PR59_WINDOWS_UPDATED_REVIEW.md.

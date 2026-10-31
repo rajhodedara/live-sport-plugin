@@ -4,23 +4,24 @@ const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const boundary = path.join(root, 'tests/fixtures/pr59-offline-boundary.cjs');
 const suites = [
-  'ssrfGuard', 'guardedOutboundTransport', 'nativeGuardedRotation', 'nativeLeaseCleanup',
+  'ssrfGuard', 'guardedOutboundTransport', 'guardedOutboundDeadlineModel.audit',
+  'nativeGuardedRotation', 'nativeLeaseCleanup',
   'nativeAdmissionQueue', 'nativeAdmissionReview', 'nativeAdmissionShared',
   'providerOutboundCompatibility', 'providerGuardRouting', 'providerSyncTimeout', 'providerHealth',
   'guardedPublicEntries', 'redirectHeaderPolicy', 'redirectCredentialIsolation',
   'impitRedirect', 'impitResponseUrl', 'sharedOutboundPolicy',
-  'segmentLengthService', 'streamSpeedProbeGuard', 'streamVerifyRetry',
+  'segmentLengthService', 'streamSpeedProbeGuard', 'streamVerifyRetry', 'liveVsLocalComparison.audit',
   'soccerFullProvider', 'soccerFullSegmentLength', 'soccerFullGuardIntegration', 'soccerFullPublishedUrl',
   'leafProvider', 'providerChildBuildImports', 'gasmIndiaPlayerCompletion', 'ppvChildCompletion',
   'resolverTransportConfig', 'resolverUnixClients', 'resolverPinnedClients', 'resolverPinnedIdentity',
   'resolverPublicIdentity', 'resolverProxyEvents', 'resolverConflictGate', 'resolverShutdownRace',
   'resolverUndiciMemoryTls',
   'resolverPortSafetyCharacterization', 'resolverTrustPolicy', 'resolverRequestUrl',
-  'resolverStaticErrors', 'isolatedNativePackaging', 'checkResolverRuntime', 'sharedCacheExpiry',
+  'resolverStaticErrors', 'isolatedNativePackaging', 'checkResolverRuntime', 'ownedResolverFixture', 'sharedCacheExpiry',
   'sharedLeaseProtocol', 'sharedLeaseOwnership', 'sharedSlowMintRecovery',
   'sharedClaimBounds', 'sharedClaimCleanup', 'sharedInvalidationRevision',
   'streamResolveConcurrency', 'resolverTlsHandshake',
-  'daddyLiveProvider', 'timStreamsProvider', 'universalChannelIdentity',
+  'daddyLiveProvider', 'timStreamsProvider', 'ak47LiveProvider', 'universalChannelIdentity',
   'cacheTimingRelations', 'streamTimingWindow', 'pendingMintPruning',
   'skTechDashDrmProxy', 'manifestRecoveryIdentity'
 ].map(name => `tests/${name}.test.js`);

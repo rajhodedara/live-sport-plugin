@@ -40,19 +40,22 @@ Two read-only reviews found no blocking integration issue. Whitespace checks
 pass. This is selected validation, not the full repository suite or CI status.
 
 The subsequent Windows full-run comparison has now been received and audited.
-The follow-up fixture repairs pass60 offline suites/583 tests plus1 existing
-TODO on both Node versions. See
+The initial follow-up fixture repairs passed60 offline suites/583 tests plus1
+existing TODO on both Node versions. See
 [PR59_MESSAGE39_RECONCILIATION.md](PR59_MESSAGE39_RECONCILIATION.md) for exact
 raw-run scope and remaining acceptance; PR61's integration review records its
 own additional selection.
+The updated Windows reports are now audited. The current follow-up passes64
+offline suites/636 tests plus1 TODO on both versions; see
+PR59_WINDOWS_UPDATED_REVIEW.md for the current results and focused checks.
 
 ## Acceptance still pending
 
-- Rerun the repaired fixtures on Windows. The received stable-vs-PR JSONs close
-  the previously missing baseline comparison, but precede these fixture repairs.
-- Resolve the PR59 full-run redirect/body deadline failure and supply the
-  separate real HTTP/native/cancellation results, including the six unreported
-  PR61 Linux suites, plus actual arm64 image checks.
+- Run the focused cache/AK47/live-host follow-up in PR59_WINDOWS_UPDATED_REVIEW.md.
+  Both updated full Windows JSONs have arrived; the previous path/VM/probe
+  fixture failures now pass. The Windows redirect/body deadline case also passes.
+- Both complete Linux HTTP/native selections now pass11 suites/80 tests. Actual
+  arm64 image checks and the separate deployed transport matrix remain pending.
 - Isolated pinned Unix/TLS matrix: successful controls, explicit wrong-pin/CA/
   hostname failures, both worker identities, restart/rotation and fail-closed
   behavior. In-memory TLS tests do not replace the deployed socket checks.

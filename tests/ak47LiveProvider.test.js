@@ -1,6 +1,7 @@
 'use strict';
 
 process.env.NODE_ENV = 'test';
+// This fixture supplies provider responses; importing it must not start workers.
 jest.mock('../src/services/StreamedWasmPool', () => ({ resolveWasmStream: jest.fn(), shutdown: jest.fn() }));
 jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn(async () => { throw new Error('Unexpected outbound I/O in AK47 fixture'); }) }));
 
@@ -16,8 +17,6 @@ describe('Ak47LiveProvider Unit & Integration Tests', () => {
   beforeEach(() => {
     provider = new Ak47LiveProvider({ cacheTtlMs: 5000 });
   });
-
-  afterEach(() => jest.useRealTimers());
 
   describe('AK47 Obfuscation Decryption Engine', () => {
     test('successfully decrypts double-base64 pair-swapped AES-128-CBC payloads', () => {
@@ -212,7 +211,6 @@ http://193.47.62.1:8080/live/game.m3u8
     });
 
     test('parses real event dates, formats solo event titles, and filters invisible events', async () => {
-      jest.useFakeTimers().setSystemTime(new Date('2026-10-25T13:00:00Z'));
       const mockEvents = [
         {
           event: JSON.stringify({
@@ -273,7 +271,14 @@ http://193.47.62.1:8080/live/game.m3u8
         return { status: 404, text: async () => '' };
       });
 
-      const matches = await provider.getMatches();
+      // Keep these dated events upcoming without changing real timer behavior.
+      const clock = jest.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 25, 13));
+      let matches;
+      try {
+        matches = await provider.getMatches();
+      } finally {
+        clock.mockRestore();
+      }
       expect(matches.length).toBe(2);
 
       const match1 = matches.find(m => m.title.includes('Real Madrid'));

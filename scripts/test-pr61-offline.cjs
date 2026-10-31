@@ -7,7 +7,7 @@ const env={...process.env,NODE_OPTIONS:`${process.env.NODE_OPTIONS||''} --requir
 function run(args){const r=spawnSync(process.execPath,args,{cwd:root,env,stdio:'inherit'});if(r.error)console.error(r.error.message);if(r.status!==0)process.exit(r.status||1);}
 run(['scripts/test-pr59-offline.cjs']);
 const names=[
-'ak47ManifestUaExperiment','ak47PlaylistHeaderOrder','ak47PlayerHeaderChain','ak47LiveProvider',
+'ak47ManifestUaExperiment','ak47PlaylistHeaderOrder','ak47PlayerHeaderChain',
 'basketballVideoRelativeLinks','bridgeIframe','cdnFeedIsolation','daddyLiveIframeIsolation','damiFeedIsolation',
 'embedIndiaInputValidation','embedStInputValidation','fullRacesMalformedCard','hockeyReplayCardUrls',
 'leafMalformedIsolation','leafSourceHostValidation.audit','liveTVRelativeIframe',

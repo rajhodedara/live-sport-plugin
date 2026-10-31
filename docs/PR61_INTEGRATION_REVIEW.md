@@ -61,10 +61,10 @@ node scripts/test-pr61-offline.cjs
 npm run build
 ```
 
-Current result: the inherited 60-suite PR59 selection passes 583 tests and has
-one existing TODO. The PR61 selection passes 400 tests in 53 suites. Seven
-additional Node-runner checks pass. Total: 983 Jest tests and seven Node tests
-across 113 Jest suites;
+Current result: the inherited 64-suite PR59 selection passes 636 tests and has
+one existing TODO. The PR61 selection passes 377 tests in 52 suites. Seven
+additional Node-runner checks pass. Total: 1013 Jest tests and seven Node tests
+across 116 Jest suites;
 no claim of a full repository suite pass. Worker construction, socket connects
 and listeners are blocked. The Node file's real-HTTP case is deliberately outside
 this offline command. Manifest route/cache/HLS tag cases invoke real handlers
@@ -112,13 +112,23 @@ upstream access errors.
 The locked PR59 report is reconciled in PR59_LOCKED_RECONCILIATION.md, and the
 subsequent raw stable/PR59/PR61 Windows comparison is audited in
 PR59_MESSAGE39_RECONCILIATION.md. This follow-up preserves all PR61 runtime and
-mapping changes. The combined command now passes 983 Jest tests and 7 Node tests
+mapping changes. The combined command now passes 1013 Jest tests and 7 Node tests
 on both Node 22.23.2 and Node 24.19.0, with 1 existing TODO. Its YAML fixture uses
 the exact native input path and asserts provider creation before testing event
 links. Both candidate builds passed at the stable integration; runtime source,
 dependencies and workflows have not changed in this test/documentation follow-up.
 
-These results do not close the PR59 redirect/body deadline failure in the
-received Windows full run, the unreported six-suite PR61 Linux HTTP/native
-selection, or the deployed pinned-transport/worker acceptance matrix. The
-supplied four JSONs contain Windows results, not those separate Linux runs.
+The updated full Windows reports and both complete Linux HTTP/native selections
+have now arrived; see PR59_WINDOWS_UPDATED_REVIEW.md. The Windows redirect/body
+case passes in both PRs, and each Linux selection passes 11 suites/80 tests.
+Updated Windows PR61 still has seven shared-cache failures and one newly
+observed hosted catalog timeout. The live test directly queries a deployed host
+and imports no candidate application code; it does not establish a PR61 runtime
+regression. The follow-up fixes its deadline ownership and failure visibility
+while retaining its status/metas assertions. Real cache/hosted results still
+need the focused run. The deployed pinned-transport/worker acceptance matrix
+and real provider/player checks also remain pending.
+
+AK47 now runs once in the inherited selection, with a narrow clock spy that
+restores in finally. PR61's own selection removes that duplicate; no case is
+lost. Owned-child and deadline/hosted models do not prove real integration.
