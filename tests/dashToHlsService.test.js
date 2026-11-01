@@ -174,6 +174,35 @@ describe('DashToHlsService', () => {
       const target = await svc.resolveSegment(makePayload(NITRO_MPD_URL), 'video', repId, 8520);
       expect(target.url).toContain('cenc_video_6_0_8520.mp4');
     });
+
+    test('resolves an out-of-window AUDIO number whose durations alternate (1.984/2.016 s)', async () => {
+      // The live audio window alternates 1.984/2.016 s at 44.1 kHz, so it is not
+      // "uniform". Gating synthesis on uniformity made every out-of-window audio
+      // segment 502 after ~60 s of playback, which froze the picture.
+      const svc = new DashToHlsService({});
+      const segments = [0, 1, 2, 3].map((i) => ({
+        number: 100 + i,
+        time: i * 88200,
+        durationSec: i % 2 ? 2.016 : 1.984,
+        url: `https://cdn.example/audio/seg_${100 + i}.mp4?m=1`
+      }));
+      const rep = {
+        kind: 'audio',
+        id: '7',
+        bandwidth: 128000,
+        timescale: 44100,
+        baseUrl: 'https://cdn.example/audio/',
+        mediaTemplate: 'https://cdn.example/audio/seg_$Number$.mp4?m=1',
+        segments
+      };
+      rep.segmentShape = svc._shapeOf(segments, rep.timescale);
+      expect(rep.segmentShape.uniform).toBe(false);
+
+      svc._streamContext = async () => ({ parsed: { videoReps: [], audioReps: [rep] }, policy: {} });
+      const target = await svc.resolveSegment(makePayload(NITRO_MPD_URL), 'audio', '7', 500);
+
+      expect(target.url).toBe('https://cdn.example/audio/seg_500.mp4?m=1');
+    });
   });
 
   describe('Akamai-style fixed-duration MPD (cbcs, $RepresentationID$, BaseURL)', () => {

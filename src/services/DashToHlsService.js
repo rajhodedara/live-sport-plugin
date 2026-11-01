@@ -405,15 +405,17 @@ class DashToHlsService {
   _shapeOf(segments, timescale) {
     if (!segments.length) return null;
     const first = segments[0];
-    const ticks = Math.round(first.durationSec * timescale);
-    const uniform = segments.every((s, i) =>
-      Math.abs(Math.round(s.durationSec * timescale) - ticks) <= 1 &&
-      s.number === first.number + i);
+    // Audio timelines alternate 1.984 s / 2.016 s (2 s does not divide evenly in
+    // 44.1 kHz samples), so "ticks" must be the mean, not the first segment's
+    // duration — otherwise the linear number->time map is off by ~1400 ticks.
+    const ticksEach = segments.map((s) => s.durationSec * timescale);
+    const mean = ticksEach.reduce((a, b) => a + b, 0) / ticksEach.length;
     return {
       n0: first.number,
       t0: first.time,
-      ticks,
-      uniform
+      ticks: Math.round(mean),
+      uniform: ticksEach.every((t) => Math.abs(t - mean) <= 1) &&
+        segments.every((s, i) => s.number === first.number + i)
     };
   }
 
@@ -527,6 +529,26 @@ class DashToHlsService {
     return entry;
   }
 
+  /** Builds a segment URL from the representation template alone. */
+  _synthesiseSegment(rep, policy, n) {
+    const shape = rep.segmentShape;
+    const time = shape ? Math.max(0, Math.round(shape.t0 + (n - shape.n0) * (shape.ticks || 0))) : 0;
+    const url = this._absolutize(fillSegmentTemplate(rep.mediaTemplate, {
+      representationId: rep.id,
+      bandwidth: rep.bandwidth,
+      number: n,
+      time
+    }), rep.baseUrl);
+    return { url, durationSec: shape ? shape.ticks / rep.timescale : 2, rep, policy };
+  }
+
+  /** Drops both MPD caches for this stream and re-reads it. */
+  async _refreshStreamContext(payload) {
+    this._mpdCache.delete(payload.mpdUrl);
+    this._ctxCache.delete(payload.mpdUrl);
+    return this._streamContext(payload);
+  }
+
   _repsFor(parsed, kind) {
     return kind === 'audio' ? parsed.audioReps : parsed.videoReps;
   }
@@ -535,8 +557,8 @@ class DashToHlsService {
    * @returns {Promise<{rep: object, policy: object}>}
    * @throws when the representation does not exist
    */
-  async resolveRepresentation(payload, kind, repId) {
-    const ctx = await this._streamContext(payload);
+  async resolveRepresentation(payload, kind, repId, options = {}) {
+    const ctx = options.refresh ? await this._refreshStreamContext(payload) : await this._streamContext(payload);
     const reps = this._repsFor(ctx.parsed, kind);
     const rep = repId
       ? reps.find((r) => String(r.id) === String(repId))
@@ -553,26 +575,33 @@ class DashToHlsService {
    * @returns {Promise<{url: string, durationSec: number, rep: object, policy: object}>}
    */
   async resolveSegment(payload, kind, repId, number) {
-    const { rep, policy } = await this.resolveRepresentation(payload, kind, repId);
+    let ctx = await this.resolveRepresentation(payload, kind, repId);
+    let { rep, policy } = ctx;
     const n = Number(number);
     if (!Number.isFinite(n)) throw new Error(`invalid segment number ${number}`);
 
     const exact = rep.segments.find((s) => s.number === n);
     if (exact) return { url: exact.url, durationSec: exact.durationSec, rep, policy };
 
-    const shape = rep.segmentShape;
-    if (!shape || !shape.uniform || !rep.mediaTemplate) {
-      throw new Error(`segment ${n} is outside the current ${kind} window`);
+    // A $Number$ template is a pure function of the segment number — it needs
+    // neither the window nor a fresh MPD. Resolving it from the network (the
+    // first version of this fix did) put an MPD round-trip in front of every
+    // audio segment once the player passed the cached window, which starved the
+    // player far worse than the original 502.
+    const needsTime = /\$Time(\$|%)/.test(String(rep.mediaTemplate || ''));
+    if (!rep.mediaTemplate || !needsTime) {
+      if (!rep.mediaTemplate) throw new Error(`segment ${n} is outside the current ${kind} window`);
+      return this._synthesiseSegment(rep, policy, n);
     }
-    const time = shape.t0 + (n - shape.n0) * shape.ticks;
-    const url = this._absolutize(fillSegmentTemplate(rep.mediaTemplate, {
-      representationId: rep.id,
-      bandwidth: rep.bandwidth,
-      number: n,
-      time
-    }), rep.baseUrl);
 
-    return { url, durationSec: shape.ticks / rep.timescale, rep, policy };
+    // $Time$ templates do need the timeline: re-read the MPD once, then fall back
+    // to the mean tick duration.
+    ctx = await this.resolveRepresentation(payload, kind, repId, { refresh: true });
+    rep = ctx.rep;
+    policy = ctx.policy;
+    const refreshed = rep.segments.find((s) => s.number === n);
+    if (refreshed) return { url: refreshed.url, durationSec: refreshed.durationSec, rep, policy };
+    return this._synthesiseSegment(rep, policy, n);
   }
 
   /* ──────────────────────────── Public API ──────────────────────────────── */
