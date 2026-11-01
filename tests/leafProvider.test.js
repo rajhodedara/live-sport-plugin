@@ -166,8 +166,8 @@ describe('LeafProvider Unit Tests', () => {
 
       const streams = await provider.resolveStream('streamed:golden-state-warriors-vs-memphis-grizzlies-2601690', 'basketball', 'Warriors vs Grizzlies');
 
-      // Must strictly filter out google.com (paywall redirect) and embed.st (streamed.su)
-      expect(streams).toHaveLength(2);
+      // Filters out non-papacito (embed.st) and unlocks paywalled Sky Sports F1 via channel slug fallback
+      expect(streams).toHaveLength(3);
 
       // Stream 1: 1080p FHD
       expect(streams[0].url).toBe(`${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent('https://papacito.cfd/m3u/1820218/live.m3u8?ft=temporary_jwt_token')}`);
@@ -181,15 +181,21 @@ describe('LeafProvider Unit Tests', () => {
       expect(streams[0].behaviorHints.proxyHeaders.request['Origin']).toBe('https://sports.highfly.to');
       expect(streams[0]._source).toBe('leaf');
 
-      // Stream 2: 720p HD
-      expect(streams[1].url).toBe(`${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt')}`);
-      expect(streams[1].resolution).toBe('720p');
-      expect(streams[1].quality).toBe('HD');
-      expect(streams[1].bitrate).toBe('3.5 Mbps');
-      expect(streams[1].name).toBe('Leaf [HD]');
-      expect(streams[1].title).toBe('(GSW Feed) HD');
-      expect(streams[1].behaviorHints.notWebReady).toBe(false);
-      expect(streams[1]._source).toBe('leaf');
+      // Stream 2: 4K UHD (Unlocked Premium Feed)
+      expect(streams[1].resolution).toBe('4K');
+      expect(streams[1].quality).toBe('4K UHD');
+      expect(streams[1].name).toBe('Leaf [4K UHD]');
+      expect(streams[1].title).toBe('(SKY SPORTS F1) 4K UHD');
+
+      // Stream 3: 720p HD
+      expect(streams[2].url).toBe(`${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt')}`);
+      expect(streams[2].resolution).toBe('720p');
+      expect(streams[2].quality).toBe('HD');
+      expect(streams[2].bitrate).toBe('3.5 Mbps');
+      expect(streams[2].name).toBe('Leaf [HD]');
+      expect(streams[2].title).toBe('(GSW Feed) HD');
+      expect(streams[2].behaviorHints.notWebReady).toBe(false);
+      expect(streams[2]._source).toBe('leaf');
     });
 
     test('drops the upstream install-nag stub instead of surfacing it as a stream', async () => {
@@ -269,6 +275,151 @@ describe('LeafProvider Unit Tests', () => {
       expect(res).toHaveLength(1);
       expect(res[0].url).toContain('/api/leaf/manifest.m3u8?url=');
       expect(res[0].url).toContain(encodeURIComponent('https://papacito.cfd/m3u/12345/live.m3u8?ft=token_val'));
+    });
+  });
+
+  describe('Broadcaster Normalization & Token Matching', () => {
+    test('normalizes Unicode superscripts (RAW, HD, FHD, DE)', () => {
+      expect(LeafProvider.normalizeBroadcasterName('RO: DIGI SPORT 1 ᴿᴬᵂ')).toBe('digi sport 1');
+      expect(LeafProvider.normalizeBroadcasterName('CZ: ONEPLAY SPORT 1 ᴴᴰ')).toBe('oneplay sport 1');
+      expect(LeafProvider.normalizeBroadcasterName('CH: BLUE SPORT D1 ᴅᴇ ғʜᴅ')).toBe('blue sport d1');
+    });
+
+    test('normalizes network and country prefixes (VIP:, UK:, RO:, TV:, NOW:, 4K:)', () => {
+      expect(LeafProvider.normalizeBroadcasterName('VIP: PREMIER SPORT 2 ᴿᴬᵂ')).toBe('premier sport 2');
+      expect(LeafProvider.normalizeBroadcasterName('UK: PREMIER SPORT 2 ᴿᴬᵂ')).toBe('premier sport 2');
+      expect(LeafProvider.normalizeBroadcasterName('TV: DAZN LALIGA 2 ᴿᴬᵂ')).toBe('dazn laliga 2');
+      expect(LeafProvider.normalizeBroadcasterName('NOW: SKY SPORTS MAIN EVENT ᴿᴬᵂ')).toBe('sky sports main event');
+      expect(LeafProvider.normalizeBroadcasterName('4K: SKY SPORTS MAIN EVENTS')).toBe('sky sports main events');
+    });
+
+    test('removes quality labels without damaging numeric or word broadcaster parts', () => {
+      expect(LeafProvider.normalizeBroadcasterName('ONEPLAY SPORT 1 HD')).toBe('oneplay sport 1');
+      expect(LeafProvider.normalizeBroadcasterName('DAZN 1 FAST+ FHD')).toBe('dazn 1 fast+');
+      expect(LeafProvider.normalizeBroadcasterName('PREMIER SPORTS 2 4K UHD')).toBe('premier sports 2');
+    });
+
+    test('deterministic token matching prevents false substring collision', () => {
+      // "sky sport 10" must not match "sky sport 1"
+      expect(provider._findChannelSlug('SKY SPORT 10')).toBeNull();
+      // "sky sport 1" must match "1968680"
+      expect(provider._findChannelSlug('SKY SPORT 1')).toBe('1968680');
+      // "sky sport 2" must match "1968679"
+      expect(provider._findChannelSlug('SKY SPORT 2')).toBe('1968679');
+    });
+
+    test('resolves newly verified Premier Sports 2 mapping (1562519)', () => {
+      expect(provider._findChannelSlug('UK: PREMIER SPORT 2 ᴿᴬᵂ')).toBe('1562519');
+      expect(provider._findChannelSlug('PREMIER SPORTS 2')).toBe('1562519');
+    });
+
+    test('cleans display label preserving broadcaster name and stripping junk', () => {
+      expect(LeafProvider.cleanDisplayLabel('🔒 Leaf (Strong) · UK: PREMIER SPORT 2 ᴿᴬᵂ')).toBe('UK: PREMIER SPORT 2 ᴿᴬᵂ');
+      expect(LeafProvider.cleanDisplayLabel('Leaf (Strong) · (A) SKY SPORT 1 RAW')).toBe('SKY SPORT 1 RAW');
+      expect(LeafProvider.cleanDisplayLabel('Leaf (Strong) · CH: BLUE SPORT D1 ᴅᴇ ғʜᴅ')).toBe('CH: BLUE SPORT D1 ᴅᴇ ғʜᴅ');
+    });
+  });
+
+  describe('3-Tier Slug Resolution Architecture', () => {
+    test('Tier 1: ingests and resolves dynamic catalog channels', () => {
+      provider.catalogChannelMap.set('custom regional network', 'slug-reg-999');
+      expect(provider._findChannelSlug('CUSTOM REGIONAL NETWORK')).toBe('slug-reg-999');
+      // Static mapping takes precedence
+      provider.catalogChannelMap.set('premier sports 2', 'fake-slug');
+      expect(provider._findChannelSlug('PREMIER SPORTS 2')).toBe('1562519');
+    });
+
+    test('Tier 3: learns broadcaster-to-slug mapping from unredacted streams and respects TTL', () => {
+      provider.learnedChannelMap.set('learned sports stream', {
+        slug: 'slug-learned-123',
+        timestamp: Date.now()
+      });
+      expect(provider._findChannelSlug('LEARNED SPORTS STREAM')).toBe('slug-learned-123');
+
+      // Expired learned mapping is ignored
+      provider.learnedChannelMap.set('expired sports stream', {
+        slug: 'slug-expired-999',
+        timestamp: Date.now() - 25 * 60 * 60 * 1000 // 25 hours ago
+      });
+      expect(provider._findChannelSlug('EXPIRED SPORTS STREAM')).toBeNull();
+    });
+
+    test('preserves Unicode RAW tag in StreamEntity metadata', async () => {
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          streams: [
+            {
+              name: 'Leaf (Strong) · RO: DIGI SPORT 1 ᴿᴬᵂ',
+              title: '1920x1080 · Stereo · ~9.5 Mbps · Leaf (Strong)',
+              url: 'https://papacito.cfd/m3u/1562920/live.m3u8?ft=valid_jwt'
+            }
+          ]
+        })
+      });
+
+      const res = await provider.resolveStream('streamed:fixture-test', 'football', 'Match');
+      expect(res).toHaveLength(1);
+      expect(res[0].name).toBe('Leaf [FHD RAW]');
+      expect(res[0].title).toBe('(RO: DIGI SPORT 1 ᴿᴬᵂ) FHD RAW');
+    });
+  });
+
+  describe('Multi-Catalog Discovery & Deduplication', () => {
+    test('deduplicates matches across multiple catalogs and harvests leaf channels', async () => {
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+        if (url.includes('sports_live.json')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              metas: [
+                { id: 'leaf:now-34334', name: '(FHD) : SKY SPORTS PREMIER LEAGUE' },
+                { id: 'streamed:shared-match-1', name: 'Arsenal vs Chelsea', category: 'football' }
+              ]
+            })
+          };
+        }
+        if (url.includes('sports_today.json')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              metas: [
+                { id: 'streamed:shared-match-1', name: 'Arsenal vs Chelsea', category: 'football' },
+                { id: 'streamed:today-match-2', name: 'Real Madrid vs Barcelona', category: 'football' }
+              ]
+            })
+          };
+        }
+        if (url.includes('sports_football.json')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              metas: [
+                { id: 'streamed:today-match-2', name: 'Real Madrid vs Barcelona', category: 'football' },
+                { id: 'streamed:football-match-3', name: 'Milan vs Inter', category: 'football' }
+              ]
+            })
+          };
+        }
+        return { ok: false, status: 404 };
+      });
+
+      const matches = await provider.getMatches();
+
+      // Exactly 3 unique matches must be returned (no duplicates across the 3 catalogs)
+      expect(matches).toHaveLength(3);
+      expect(matches.map(m => m.id)).toEqual([
+        'leaf_shared-match-1',
+        'leaf_today-match-2',
+        'leaf_football-match-3'
+      ]);
+
+      // Dynamic catalog channel leaf:now-34334 must be harvested into catalogChannelMap
+      expect(provider.catalogChannelMap.get('sky sports premier league')).toBe('now-34334');
     });
   });
 });
