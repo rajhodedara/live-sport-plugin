@@ -13,11 +13,6 @@
  */
 
 require('dotenv').config();
-
-// Ensure Leaf provider has an active fallback install config if not explicitly set in .env
-if (!process.env.LEAF_INSTALL_CONFIG && !process.env.LEAF_FREE_USER_ID && !process.env.LEAF_API_URL) {
-  process.env.LEAF_INSTALL_CONFIG = 'eyJmcmVlVXNlcklkIjoiMTJlYzNlMTQtMzNjOC00ZDQ4LThiNGUtM2EwMmM1NDgxODNjLjA5ZDJiNGZiNzE1YzQxOTYifQ';
-}
 const express = require('express');
 const cors    = require('cors');
 const { getRouter } = require('stremio-addon-sdk');
