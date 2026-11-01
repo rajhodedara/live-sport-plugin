@@ -63,7 +63,7 @@ function getProxyImpit(proxyUrl) {
   if (_impitProxyInstance !== undefined) return _impitProxyInstance;
   try {
     const { Impit } = require('impit');
-    _impitProxyInstance = new Impit({ proxyUrl });
+    _impitProxyInstance = new Impit({ browser: 'chrome142', proxyUrl });
     _impitProxyBornAt = Date.now();
     _impitProxyUrl = proxyUrl;
     console.log(`[impitClient] impit proxy client initialized with ${proxyUrl}`);
