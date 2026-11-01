@@ -23,7 +23,7 @@ const path = require('path');
 const { builder } = require('./manifest');
 const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
-const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
+const { PORT, BASE_URL, STREAM_BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
 const { isLocalDirectRequest } = require('./services/localRequest');
 const container = require('./container');
 const https = require('https');
@@ -874,7 +874,27 @@ app.use('/api', createProxyMiddleware({
 // A substring scan is far cheaper than JSON-parsing multi-megabyte hub
 // responses that carry no relative URLs, so payloads without any prefix are
 // passed through untouched. Keep in sync with the prefix lists in rewriteUrl.
-const REWRITE_SCAN_PREFIXES = ['/img', '/watch', '/api/manifest', '/api/dash', '/logo', '/api/mp4proxy', '/api/fastmp4', '/api/hlschunk', '/api/hls', '/hls/resource', '/api/soccerfull', '/posters', '/donate'];
+const STREAM_PREFIXES = [
+  '/api/manifest',
+  '/api/dash',
+  '/api/hls',
+  '/hls/resource',
+  '/api/soccerfull',
+  '/api/leaf',
+  '/api/mp4proxy',
+  '/api/fastmp4',
+  '/api/hlschunk'
+];
+
+const METADATA_PREFIXES = [
+  '/img',
+  '/watch',
+  '/logo',
+  '/posters',
+  '/donate'
+];
+
+const REWRITE_SCAN_PREFIXES = [...STREAM_PREFIXES, ...METADATA_PREFIXES];
 
 app.use((req, res, next) => {
   const isAddonRoute = req.path === '/manifest.json' || 
@@ -886,6 +906,7 @@ app.use((req, res, next) => {
   if (!isAddonRoute) return next();
 
   const currentBaseUrl = getRequestBaseUrl(req);
+  const effectiveStreamBaseUrl = STREAM_BASE_URL || currentBaseUrl;
   const originalWrite = res.write;
   const originalEnd = res.end;
   const chunks = [];
@@ -917,16 +938,31 @@ app.use((req, res, next) => {
 
         const rewriteUrl = (url) => {
           if (!url || typeof url !== 'string') return url;
-          // Relative URLs
-          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/api/dash') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/api/hls') || url.startsWith('/hls/resource') || url.startsWith('/api/soccerfull') || url.startsWith('/posters') || url.startsWith('/donate')) {
-            modified = true;
-            return `${currentBaseUrl}${url}`;
+          // Relative stream URLs -> dedicated stream subdomain (if configured)
+          for (const prefix of STREAM_PREFIXES) {
+            if (url.startsWith(prefix)) {
+              modified = true;
+              return `${effectiveStreamBaseUrl}${url}`;
+            }
           }
-          // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
-          if (match) {
+          // Relative metadata & static URLs -> main addon domain
+          for (const prefix of METADATA_PREFIXES) {
+            if (url.startsWith(prefix)) {
+              modified = true;
+              return `${currentBaseUrl}${url}`;
+            }
+          }
+          // Absolute URLs matching stream prefixes (e.g. localhost or legacy base)
+          const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          if (streamMatch) {
             modified = true;
-            return `${currentBaseUrl}${match[1]}`;
+            return `${effectiveStreamBaseUrl}${streamMatch[1]}`;
+          }
+          // Absolute URLs matching metadata prefixes
+          const metaMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          if (metaMatch) {
+            modified = true;
+            return `${currentBaseUrl}${metaMatch[1]}`;
           }
           return url;
         };
