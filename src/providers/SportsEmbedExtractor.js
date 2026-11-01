@@ -113,7 +113,12 @@ async function extractSportsEmbed(embedUrl) {
         resp = await impit.fetch('https://sportsembed.su/api/get', fetchArgs);
     } else {
         const https = require('https');
-        const keepAliveAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 10000 });
+        const adaptiveDnsResolver = require('../services/AdaptiveDnsResolver');
+        const keepAliveAgent = new https.Agent({
+          keepAlive: true,
+          keepAliveMsecs: 10000,
+          lookup: (hostname, opts, cb) => adaptiveDnsResolver.lookup(hostname, opts, cb)
+        });
         const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
         fetchArgs.agent = keepAliveAgent;
         resp = await fetch('https://sportsembed.su/api/get', fetchArgs);

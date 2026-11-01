@@ -13,7 +13,8 @@
 
 'use strict';
 
-const { request: undiciRequest, Agent } = require('undici');
+const { request: undiciRequest, Agent, setGlobalDispatcher } = require('undici');
+const adaptiveDnsResolver = require('./services/AdaptiveDnsResolver');
 // -- Singleton -----------------------------------------------------------------
 // undefined  = not yet probed
 // null       = probed and unavailable (native binary missing / bad arch)
@@ -149,10 +150,18 @@ function recordImpitTlsFailure(url) {
 
 // -- Shared undici keep-alive agent -------------------------------------------
 const _undiciAgent = new Agent({
-  connect: { timeout: 20000, rejectUnauthorized: false },
+  connect: {
+    timeout: 20000,
+    rejectUnauthorized: false,
+    lookup: (hostname, opts, cb) => adaptiveDnsResolver.lookup(hostname, opts, cb),
+  },
   keepAliveTimeout: 15000,
   keepAliveMaxTimeout: 30000,
 });
+
+try {
+  setGlobalDispatcher(_undiciAgent);
+} catch (_) {}
 
 // Enough for the mirror 301s observed in production, small enough that a rogue
 // redirect loop costs about what a single timed-out request costs.
@@ -345,8 +354,18 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
     };
   }
 
+  let targetHostname = null;
+  try {
+    targetHostname = new URL(url).hostname;
+  } catch (_) {}
+
+  const isKnownPoisoned = targetHostname && !proxyUrl && adaptiveDnsResolver.isPoisonedHost(targetHostname);
+
   // -- Path A: impit ---------------------------------------------------------
-  if (impit) {
+  // If the target host has already tripped the DNS circuit breaker (e.g. ISP sinkholing to
+  // 127.0.0.1), impit will fail since it uses OS getaddrinfo. Skip impit to avoid burning
+  // retry latency and go straight to undici which routes via adaptive secure DNS.
+  if (impit && !isKnownPoisoned) {
     let lastErr = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // The caller gave up (deadline hit upstream); stop burning its budget.
@@ -411,6 +430,12 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
           // be the proxy's fault, and the proxied path must never fall back
           // to undici anyway (it would bypass the proxy).
           if (!proxyUrl) recordImpitTlsFailure(url);
+          break;
+        }
+        // If impit failed because of connection refused to loopback (127.0.0.1) or DNS failure,
+        // trip the circuit breaker immediately and fall back to undici without further retries.
+        if (targetHostname && (errMsg.includes('127.0.0.1') || errMsg.includes('dns error') || errMsg.includes('Host desconocido') || errMsg.includes('ConnectionRefused'))) {
+          adaptiveDnsResolver.markPoisoned(targetHostname, 'impit-sinkhole-detected');
           break;
         }
         if (attempt < maxAttempts) {
