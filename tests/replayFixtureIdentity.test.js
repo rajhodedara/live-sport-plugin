@@ -156,4 +156,133 @@ describe('replay fixture identity from the real-provider catalog', () => {
       'Golden State Valkyries vs Atlanta Dream - WNBA - Full Game Replay - October 15, 2026', '', 'basketballvideo');
     expect(new MatchAggregator({}).isSameEvent(datedTitle, known)).toBe(true);
   });
+
+  // All seventeen title/date contradictions retained in the fresh real cache.
+  test.each([
+    ['Clermont Auvergne v Racing 92', '31 May', '2026-05-14', '2026-05-31'],
+    ['Toulon v Bordeaux Begles', '31 May', '2026-05-14', '2026-05-31'],
+    ['Montpellier v Pau', '30 May', '2026-05-14', '2026-05-30'],
+    ['Montauban v La Rochelle', '30 May', '2026-05-14', '2026-05-30'],
+    ['La Rochelle v Toulouse', '17 May', '2026-05-14', '2026-05-17'],
+    ['Castres Olympique v Montpellier', '16 May', '2026-05-14', '2026-05-16'],
+    ['Pau v Clermont', '16 May', '2026-05-14', '2026-05-16'],
+    ['Racing 92 v Toulon', '16 May', '2026-05-14', '2026-05-16'],
+    ['Stade Francais v Lyon', '9 May', '2026-05-14', '2026-05-09'],
+    ['Racing 92 v La Rochelle', '10 May', '2026-05-14', '2026-05-10'],
+    ['Toulon v Toulouse', '9 May', '2026-05-14', '2026-05-09'],
+    ['Bayonne v Bordeaux Begles', '9 May', '2026-05-14', '2026-05-09'],
+    ['Pau v Castres Olympique', '9 May', '2026-05-14', '2026-05-09'],
+    ['Perpignan v La Rochelle', '25 April', '2026-04-14', '2026-04-25'],
+    ['Lyon v Castres Olympique', '25 April', '2026-04-14', '2026-04-25'],
+    ['Montauban v Racing 92', '25 April', '2026-04-14', '2026-04-25'],
+    ['Toulouse v Clermont', '26 April', '2026-04-14', '2026-04-26']
+  ])('fresh calendar replay date agrees with its title claim: %s %s', async (teams, day, wrongDate, expected) => {
+    const [saved] = await aggregate([replay('rz_top14',
+      `${teams} - Rugby Full Match Replay - Top 14 - ${day} 2026`, wrongDate, 'replayzone',
+      { category: 'rugby', league: 'Top 14' })]);
+    expect(saved.date).toBe(expected);
+    expect(JSON.parse(saved._replayIdentityClaims)[0][1]).toBe(Date.parse(expected));
+  });
+
+  test.each([
+    ['rz_brisbane', 'Brisbane Lions v Carlton Blues - Full Match Replay - 8, May 2026 - AFL', 'replayzone', '2026-05-08'],
+    ['mlb_game3', 'Los Angeles Dodgers vs New York Yankees World Series Game 3 Full Game Replay Oct 28, 2024 MLB', 'mlblive', '2024-10-28'],
+    ['mlb_game2', 'New York Yankees vs Los Angeles Dodgers World Series Game 2 Full Game Replay Oct 26, 2024 MLB', 'mlblive', '2024-10-26'],
+    ['mlb_2023', 'Arizona Diamondbacks vs Texas Rangers Game 2 Full Game Replay Oct 28, 2023 MLB World Series', 'mlblive', '2023-10-28'],
+    ['rz_abbreviated', 'Chicago Cubs vs Atlanta Braves Full Game Replay Oct. 28, 2026', 'replayzone', '2026-10-28'],
+    ['rz_dayfirst', 'Chicago Cubs vs Atlanta Braves Full Game Replay 28, Oct. 2026', 'replayzone', '2026-10-28']
+  ])('recovers bounded textual date forms before retention: %s', async (id, title, provider, expected) => {
+    const row = replay(id, title, '', provider);
+    const claim = new MatchAggregator({})._precompute(row).replayClaims[0];
+    expect(claim.time).toBe(Date.parse(expected));
+    expect(claim.dayOnly).toBe(true);
+    const saved = await aggregate([row]);
+    if (expected < '2025-11-01') expect(saved).toEqual([]);
+    else expect(saved[0].date).toBe(expected);
+  });
+
+  test.each(['February 30, 2026', '29 Feb. 2026', '11/12/2026', 'Octoberfest 15, 2026', 'Oct 28, 20260'])
+  ('does not promote invalid or ambiguous title dates into evidence: %s', text => {
+    const row = replay('rz_unknown', `Chicago Cubs vs Atlanta Braves - ${text}`, '', 'replayzone');
+    expect(new MatchAggregator({})._precompute(row).replayClaims[0].time).toBe(0);
+  });
+
+  test('a precise UTC kickoff retains its time across a different local title day', async () => {
+    const date = '2026-10-16T02:00:00Z';
+    const [saved] = await aggregate([replay('livetv_precise',
+      'Houston Rockets vs Oklahoma City Thunder - NBA Preseason - October 15, 2026', date)]);
+    expect(saved.date).toBe(date);
+    expect(JSON.parse(saved._replayIdentityClaims)[0].slice(1, 3)).toEqual([Date.parse(date), false]);
+  });
+
+  test.each([false, true])('cached replay constraints retain their existing date anchor (multiple=%s)', async multiple => {
+    const row = replay('rz_cached',
+      'Houston Rockets vs Oklahoma City Thunder - NBA Preseason - October 14, 2026', '2026-10-15', 'replayzone');
+    const claims = [['replayzone', Date.parse('2026-10-15'), true, '', row.id]];
+    if (multiple) claims.push(['livetv', Date.parse('2026-10-16T02:00:00Z'), false, '', 'livetv_cached']);
+    row._replayIdentityClaims = JSON.stringify(claims);
+    const [saved] = await aggregate([], JSON.parse(JSON.stringify([row])));
+    expect(saved.date).toBe('2026-10-15');
+    expect(saved._replayIdentityClaims).toBe(JSON.stringify(claims));
+  });
+
+  test.each([
+    ['HSG Wetzlar vs MT Melsungen', 'Handball Bundesliga'],
+    ['ThSV Eisenach vs Füchse Berlin', 'Handball Bundesliga'],
+    ['VfL Gummersbach vs HBW Balingen-Weilstetten', 'Handball Bundesliga'],
+    ['HSG Nordhorn-Lingen vs Dessau-Roßlauer HV', 'Handball 2. Bundesliga'],
+    ['VfL Lübeck-Schwartau vs VfL Eintracht Hagen', 'Handball 2. Bundesliga'],
+    ['SC DHfK Leipzig vs TV 05/07 Hüttenberg', 'Handball 2. Bundesliga']
+  ])('explicit handball league uses the supported other category: %s', async (title, league) => {
+    const [saved] = await aggregate([replay('dlv_handball', title, String(Date.now()), 'daddylive',
+      { category: 'football', league, status: 'live' })]);
+    expect(saved.category).toBe('other');
+  });
+
+  test.each(['football', 'other'])('explicit handball stays separate from same-club %s listings', async category => {
+    const title = 'HSG Wetzlar vs MT Melsungen';
+    const handball = replay('dlv_handball', title, String(Date.now()), 'daddylive',
+      { category: 'football', league: 'Handball Bundesliga', status: 'live' });
+    const differentSport = { ...handball, id: 'dlv_other', category, league: 'Bundesliga', aliasIds: [handball.id],
+      sources: [{ source: 'offline-fixtures', id: 'other-sport' }] };
+    const agg = new MatchAggregator({});
+    expect(agg.isSameEvent(handball, differentSport)).toBe(false);
+    expect(agg.isSameEvent(differentSport, handball)).toBe(false);
+    expect(await aggregate([handball, differentSport])).toHaveLength(2);
+  });
+
+  test('explicit handball evidence survives cache reuse without extra sport metadata', async () => {
+    const title = 'HSG Wetzlar vs MT Melsungen';
+    const handball = replay('dlv_handball', title, '2026-10-31', 'replayzone',
+      { category: 'football', league: 'Handball Bundesliga' });
+    const first = await aggregate([handball]);
+    expect(first[0].category).toBe('other');
+    const second = await aggregate([
+      replay('rz_unknown_sport', title, '2026-10-31', 'replayzone', { category: 'other', league: '' }),
+      replay('rz_same_handball', title, '2026-10-31', 'replayzone', { category: 'other', league: 'Handball Bundesliga' })
+    ], JSON.parse(JSON.stringify(first)));
+    expect(second).toHaveLength(2);
+    expect(second.find(row => row.id === 'dlv_handball').sources).toHaveLength(2);
+    expect(second.find(row => row.id === 'rz_unknown_sport').sources).toHaveLength(1);
+  });
+
+  test('explicit handball league does not relabel continuous channels', async () => {
+    const channel = replay('dlv_ch_187_sport', 'Sport 1', '', 'daddylive',
+      { category: 'networks', league: 'Handball Bundesliga', status: '' });
+    const [saved] = await aggregate([channel]);
+    expect(saved.category).toBe('networks');
+    expect(new MatchAggregator({}).isSameEvent(saved, { ...saved, league: '' })).toBe(true);
+  });
+
+  test.each(['Canada. CFL', 'Canadian Football League'])('explicit %s uses the supported American football category', async league => {
+    const [saved] = await aggregate([replay('livetv_montreal-saskatchewan-20261012',
+      'Montreal vs Saskatchewan - Canada. CFL', '2026-10-12T18:00:00Z', 'livetv', {category: 'other', league})]);
+    expect(saved.category).toBe('american_football');
+  });
+
+  test('an unqualified CFL token does not invent a sport category', async () => {
+    const [saved] = await aggregate([replay('livetv_generic', 'Example vs Other', '2026-10-12T18:00:00Z', 'livetv',
+      {category: 'other', league: 'CFL'})]);
+    expect(saved.category).toBe('other');
+  });
 });

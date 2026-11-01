@@ -2,7 +2,7 @@
 
 The real-provider catalog follow-up is documented in
 PR61_REAL_CATALOG_REVIEW.md. It records concrete ingestion/lookup corrections,
-the current121-suite/1068-Jest-plus7-Node selection and the remaining new-catalog
+the current121-suite/1112-Jest-plus7-Node selection and the remaining new-catalog
 and provider/player acceptance. Earlier totals below are historical snapshots.
 
 The candidate starts from published PR61

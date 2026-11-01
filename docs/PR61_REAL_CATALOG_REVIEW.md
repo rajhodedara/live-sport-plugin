@@ -75,6 +75,48 @@ additional broadcaster matches, no lost previous matches and no changed
 previous targets. This is lookup evidence: Vavoo contributed zero real sources
 in this run, so it does not establish real Vavoo enrichment or playback.
 
+## Fresh 7fe6165 catalog and metadata follow-up
+
+The next real sync produced 9,710 rows with SHA256
+`c31b33e55574fc7055bd70b2d86f14f2287190121370afa67b6b6ed8d5a36010`.
+All canonical IDs are unique and resolve through the candidate cache lookup;
+unique aliases and the inspected old channel bookmarks also resolve. The old
+Villanova alias is intentionally ambiguous. Retained-source lineage accounts
+for 1,551 of the 1,635-row increase through separation, rather than discovery
+of that many new games. The observed WNBA/NBA game splits and December11
+promotional date are present in the real data.
+
+That sync exposed remaining metadata inconsistencies. Seventeen ReplayZone
+calendar rows displayed upstream dates that disagreed with their explicit title
+dates and already chosen identity claims. Fresh calendar replay rows now use
+that same validated title day for persistence, sorting and retention. Precise
+UTC kickoffs and existing cached claim/date anchors remain unchanged. This
+aligns metadata with the chosen identity evidence; it does not independently
+verify that the upstream title describes the video correctly.
+
+Bounded textual parsing also accepts the observed `8, May 2026` and abbreviated
+`Oct` forms. Invalid calendars and ambiguous numeric dates remain unknown. Old
+2023/2024 rows whose historical date becomes known can expire under existing
+retention; this patch does not change retention windows. Standalone MLB/Hockey
+still use the existing24-hour active filter rather than the longer source list.
+
+Six rows explicitly labelled Handball Bundesliga were displayed as football.
+They now use the supported `other` category, retaining a separate explicit-sport
+guard against same-club football/unknown fixtures. Continuous channels are
+unaffected. An observed `Canada. CFL` generic row uses `american_football`;
+an unqualified CFL token does not infer a sport.
+
+The 2,854 entries without dates comprise 2,824 continuous channels and30
+undated AK47 listings. They are not2,854 broken fixture dates. Leaf and Vavoo
+were not configured in this run. In particular, a reversed team order between
+an opaque TimStreams ID and its display title does not establish a Leaf error:
+the inspected canonical/alias lookups succeed and Leaf uses its own source ID.
+
+The actual new stderr shows MLB's fallback reason as native capacity, confirming
+the diagnostic correction despite the forwarded prose still saying undefined.
+FullRaces also reports a partial category fetch failure. Degradation remains
+visible; neither these logs nor more AK47 associations establish playback.
+
 ## Verification and review
 
 The new failures were reproduced before their fixes using real-catalog-derived
@@ -88,8 +130,8 @@ Both Node22.23.2 and Node24.19.0 pass the complete selected offline command:
 node scripts/test-pr61-offline.cjs
 ```
 
-Results: inherited64 suites/636 passing tests plus PR61's57 suites/432 passing
-tests = **121 suites/1,068 passing Jest tests**, seven additional Node tests and
+Results: inherited64 suites/636 passing tests plus PR61's57 suites/476 passing
+tests = **121 suites/1,112 passing Jest tests**, seven additional Node tests and
 one existing TODO. The boundary blocks sockets/listeners and actual workers.
 This is not a full repository green-suite claim.
 

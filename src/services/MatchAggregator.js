@@ -51,17 +51,19 @@ const DAY_MS = 86400000;
 const MAX_REPLAY_CLAIMS = 32;
 const REPLAY_DAY_PROVIDERS = new Set(['basketballvideo', 'hockeyreplays', 'nflvideo', 'mlblive', 'soccerfull']);
 const REPLAY_MONTHS = 'january february march april may june july august september october november december'.split(' ');
-const REPLAY_MONTH_PATTERN = REPLAY_MONTHS.join('|');
+const REPLAY_MONTH_PATTERN = [...new Set(REPLAY_MONTHS.flatMap(month =>
+  [month, month.slice(0, 3), ...(month === 'september' ? ['sept'] : [])]))].join('|');
 const REPLAY_TITLE_DATES = [
-  new RegExp(`\\b(${REPLAY_MONTH_PATTERN})\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`, 'i'),
-  new RegExp(`\\b(\\d{1,2})\\s+(${REPLAY_MONTH_PATTERN}),?\\s+(20\\d{2})\\b`, 'i')
+  new RegExp(`\\b(${REPLAY_MONTH_PATTERN})\\.?\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`, 'i'),
+  new RegExp(`\\b(\\d{1,2}),?\\s+(${REPLAY_MONTH_PATTERN})\\.?,?\\s+(20\\d{2})\\b`, 'i')
 ];
 
 function _replayTitleDay(title) {
   for (let i = 0; i < REPLAY_TITLE_DATES.length; i++) {
     const match = REPLAY_TITLE_DATES[i].exec(title);
     if (!match) continue;
-    const month = REPLAY_MONTHS.indexOf(match[i === 0 ? 1 : 2].toLowerCase());
+    const monthText = match[i === 0 ? 1 : 2].toLowerCase();
+    const month = REPLAY_MONTHS.findIndex(name => name.startsWith(monthText));
     const day = Number(match[i === 0 ? 2 : 1]);
     const year = Number(match[3]);
     const time = Date.UTC(year, month, day);
@@ -713,7 +715,20 @@ class MatchAggregator {
       : null;
 
     let rawCategory = e && e.category ? String(e.category) : '';
-    if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
+    // Handball is not a manifest category. Keep its explicit league evidence
+    // separately so displaying it as "other" cannot merge it into football or
+    // an unknown-sport fixture between the same clubs. The league survives cache
+    // cloning; no inferred sport field needs to be persisted on the row.
+    const isHandball = !isChannel && /\bhandball\b/.test(leagueLower);
+    if (isHandball) {
+      rawCategory = 'other';
+      if (e) e.category = 'other';
+    } else if (!isChannel && rawCategory === 'other' && /\b(?:canada\s*\.\s*cfl|canadian football league)\b/.test(leagueLower)) {
+      // The real LiveTV feed labels the Canadian Football League explicitly,
+      // despite supplying the generic category "other".
+      rawCategory = 'american_football';
+      if (e) e.category = rawCategory;
+    } else if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
       rawCategory = 'basketball';
       if (e) e.category = 'basketball';
     }
@@ -737,6 +752,7 @@ class MatchAggregator {
     return {
       id,
       category: rawCategory,
+      isHandball,
       squad: (isChannel || isMotorsport) ? null : eventSquadIdentity(e || {}),
       date,
       replayClaims: isReplay && !isMotorsport ? _replayClaims(e, date, title) : [],
@@ -824,6 +840,8 @@ class MatchAggregator {
       if (p1.norm === p2.norm) return true;
       return false;
     }
+
+    if (Boolean(p1.isHandball) !== Boolean(p2.isHandball)) return false;
 
     // 1. Category mismatch guard
     // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
@@ -1130,6 +1148,18 @@ class MatchAggregator {
           }
 
         const pre = this._precompute(match);
+        // Fresh calendar replays already trust an explicit validated title day
+        // for identity. Use that same day for sorting, filtering and retention,
+        // rather than retaining a contradictory upstream day or today's display
+        // fallback. Cached claims retain their existing date/precision anchors.
+        if (!Object.prototype.hasOwnProperty.call(match, '_replayIdentityClaims') && pre.replayClaims.length === 1) {
+          const claim = pre.replayClaims[0];
+          const titleDay = _replayTitleDay(String(match.title));
+          if (claim.dayOnly && titleDay && claim.time === titleDay) {
+            match.date = new Date(titleDay).toISOString().slice(0, 10);
+            pre.date = titleDay;
+          }
+        }
         let idx = -1;
         const uniqueReplay = pre.replayClaims.length > 0;
         let ambiguousReplay = false;
