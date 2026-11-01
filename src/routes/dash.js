@@ -130,7 +130,12 @@ function createDashRouter(service, options = {}) {
   const tracksByRep = new Map(); // repCacheKey -> Map<trackId, TrackInfo>
   const inflight = new Map();
   const prefetching = new Set();
-  const prefetchEnabled = options.prefetch !== false;
+  // Off by default: at 8 Mbps the upstream pipe is the bottleneck, so fetching
+  // ahead only competes with the segment the player is waiting for (measured
+  // 5.7 s for a prefetched number vs 2.4 s cold). Enable with DASH_PREFETCH=1
+  // on a host that has headroom.
+  const prefetchEnabled = options.prefetch === true ||
+    (options.prefetch !== false && /^(1|true|on)$/i.test(String(process.env.DASH_PREFETCH || '')));
   const limit = createLimiter(MAX_CONCURRENT);
 
   const sanitize = (headers) => (typeof service._sanitizeUpstreamHeaders === 'function'

@@ -453,7 +453,7 @@ describe('GET /api/dash/* routes', () => {
 
   test('prefetches the next segments so the player gets them warm', async () => {
     const app = express();
-    app.use(dashRouter.createDashRouter(svc, { fetcher: prefetchFetcher, signWith: signer }));
+    app.use(dashRouter.createDashRouter(svc, { fetcher: prefetchFetcher, signWith: signer, prefetch: true }));
     const srv = http.createServer(app);
     await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     const local = `http://127.0.0.1:${srv.address().port}`;
