@@ -103,6 +103,7 @@ class MlbLiveProvider extends BaseProvider {
     super(opts);
     this.name = 'MLBLive';
     this.sourceName = 'mlblive';
+    this.lastScheduleOk = null;
     this.baseUrl = 'https://mlblive.net';
     this.defaultHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -253,6 +254,7 @@ class MlbLiveProvider extends BaseProvider {
   }
 
   async getMatches() {
+    this.lastScheduleOk = true;
     const endpoints = [
       `${this.baseUrl}/2026-mlb-full-game-replays`,
       `${this.baseUrl}/world-series-replays`
@@ -264,6 +266,8 @@ class MlbLiveProvider extends BaseProvider {
     for (const url of endpoints) {
       try {
         const html = await this.fetchPage.fire(url);
+        // A breaker fallback must remain visible when the other page succeeds.
+        if (html == null) this.lastScheduleOk = false;
         if (!html) continue;
         const parsed = this._parseMatchCards(html);
         for (const m of parsed) {
@@ -273,6 +277,7 @@ class MlbLiveProvider extends BaseProvider {
           }
         }
       } catch (err) {
+        this.lastScheduleOk = false;
         console.warn(`[MLBLive] Warning fetching ${url}:`, err.message);
       }
     }

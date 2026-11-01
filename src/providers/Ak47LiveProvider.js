@@ -25,6 +25,7 @@ class Ak47LiveProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
     this.name = 'Ak47Live';
+    this.lastScheduleOk = null;
     this._cache = null;
     this._lastFetchTime = 0;
     let ttl = 180000;
@@ -222,6 +223,9 @@ class Ak47LiveProvider extends BaseProvider {
       return this._cache;
     }
 
+    // Playlist rows can survive a failed events feed; retain that distinction
+    // for provider health, including when this result is later cached.
+    this.lastScheduleOk = false;
     const matchesMap = new Map();
     const finishedSlugs = new Set();
     const finishedTeamPairs = new Set();
@@ -349,6 +353,7 @@ class Ak47LiveProvider extends BaseProvider {
               matchesMap.set(matchId, match);
             }
           }
+          this.lastScheduleOk = true;
         }
       }
     } catch (err) {

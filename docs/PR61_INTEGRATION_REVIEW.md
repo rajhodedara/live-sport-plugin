@@ -1,5 +1,10 @@
 # PR61 integration review
 
+The real-provider catalog follow-up is documented in
+PR61_REAL_CATALOG_REVIEW.md. It records concrete ingestion/lookup corrections,
+the current121-suite/1068-Jest-plus7-Node selection and the remaining new-catalog
+and provider/player acceptance. Earlier totals below are historical snapshots.
+
 The candidate starts from published PR61
 `c952b588b14277dadae133764da589c97e3088c0` and now includes stable
 `a71e49f377a64a76f83104a2fdc03823df43cc84`. The local PR59 integration

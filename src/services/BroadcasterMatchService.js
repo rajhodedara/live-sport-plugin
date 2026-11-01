@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const ChannelCountryService = require('./ChannelCountryService');
 
 const COUNTRY_ALIASES = {
   'united kingdom': ['uk', 'gb', 'great britain', 'england'],
@@ -69,6 +70,13 @@ class BroadcasterMatchService {
     this._countryAliases = new Map();
     for (const [country, aliases] of Object.entries(COUNTRY_ALIASES)) {
       for (const alias of [country, ...aliases]) this._countryAliases.set(alias, country);
+    }
+    // Provider country codes come from this same metadata (including RO/BG/HR).
+    // Keep established aliases such as MENA -> Arabia as the canonical group.
+    for (const { name, country } of ChannelCountryService.getRules()) {
+      const canonical = this._countryAliases.get(fold(name)) || this._countryAliases.get(fold(country)) || fold(country);
+      this._countryAliases.set(fold(name), canonical);
+      this._countryAliases.set(fold(country), canonical);
     }
     this._initialized = false;
     this._init();

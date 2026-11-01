@@ -142,7 +142,8 @@ class SoccerFullProvider extends BaseProvider {
         }
       }
 
-      // If no explicit date in slug, leave empty for unanchored upstream fixture merge
+      // Missing date stays unknown; it must not identify a dated meeting just
+      // because another archive lists the same two teams.
       const matchDate = dateMs ? String(dateMs) : '';
 
       // Extract numeric ID if present

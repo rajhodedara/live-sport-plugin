@@ -1,4 +1,5 @@
 const CircuitBreaker = require('opossum');
+const { safeErrorMessage } = require('./ProviderHealthService');
 
 // Per-call budget for every wrapped provider operation. Exported so callers
 // that set their own inner timeout (DaddyLive's schedule fetch) can stay
@@ -48,8 +49,10 @@ class CircuitBreakerService {
 
     const breaker = new CircuitBreaker(asyncFunction, options);
 
-    breaker.fallback((err) => {
-      const reason = err ? err.message : 'Unknown';
+    breaker.fallback((...args) => {
+      // Opossum appends the error after the original action arguments.
+      const err = args[args.length - 1];
+      const reason = err ? safeErrorMessage(err) : 'Unknown';
       console.warn(`[CircuitBreaker] ${name} Fallback triggered. Reason: ${reason}`);
       return null;
     });

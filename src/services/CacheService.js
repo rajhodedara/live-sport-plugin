@@ -336,13 +336,19 @@ class CacheService {
       this._rebuildIndices();
     }
 
+    // Strong fixture keys are not legacy provider-source identifiers.
+    const strongFixtureId = /^dlv_event_[a-f0-9]{24}$/.test(matchId);
     // Fast O(1) Indexed Lookups
-    for (const index of [this._byId, this._byAlias, this._bySourceId]) {
+    for (const index of strongFixtureId ? [this._byId, this._byAlias] : [this._byId, this._byAlias, this._bySourceId]) {
       if (index.has(matchId)) {
         const found = index.get(matchId);
         return found ? this._cloneMatch(found) : null;
       }
     }
+
+    // New DaddyLive fixture keys identify exact event metadata. A missing key
+    // must not be reinterpreted as a source fragment or another day's title.
+    if (strongFixtureId) return null;
 
     // Legacy partial source IDs must be whole tokens and identify one event.
     const sourceMatch = uniqueMatch(matches, m => Array.isArray(m.sources) &&

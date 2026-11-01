@@ -159,9 +159,11 @@ class CdnLiveProvider extends BaseProvider {
         const identityKey = ident.identityKey;
         const channelNumber = ident.channelNumber;
         const slug = canonicalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        const legacySlug = ident.legacyCanonicalTitle?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
         const entity = new MatchEntity({
           id: `cdn_ch_${c.code || 'xx'}_${slug}`,
+          ...(legacySlug && legacySlug !== slug ? { aliasIds: [`cdn_ch_${c.code || 'xx'}_${legacySlug}`] } : {}),
           title: canonicalTitle,
           region: region || undefined,
           baseTitle: canonicalTitle,

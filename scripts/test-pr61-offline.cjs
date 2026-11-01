@@ -19,6 +19,8 @@ const names=[
 'pr61ManifestScenarios','pr61PlaybackScenarios',
 'broadcasterMatchService','broadcasterMappingIdentity','matchMappingIdentity',
 'cacheMatchIdentity','pr61MappingScenarios','cacheServiceFindMatch',
+'circuitBreakerFallbackDiagnostic','partialProviderScheduleHealth',
+'daddyFixtureCanonicalIdentity','realCatalogCountryIdentity','replayFixtureIdentity',
 'matchAggregatorDates','matchAggregatorDiacritics','matchAggregatorFootballAliases',
 'motorsportSessionIsolation','adversarialMotorsportVerification','replayNormalizationAndMerge',
 'matchCacheFileIdentity','emptyMatchCachePolling'

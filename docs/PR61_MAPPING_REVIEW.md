@@ -1,5 +1,10 @@
 # PR61 source and event mapping correction
 
+The real-catalog follow-up in PR61_REAL_CATALOG_REVIEW.md records newly
+reproduced fixture-ID, replay date/game and country-metadata defects and their
+corrections. Its verification totals and migration notes are current for that
+follow-up; the synthetic scenarios below remain useful narrower evidence.
+
 This local follow-up builds on the integrated PR61 candidate 7d72771 and its
 PR59 dependency f240afd. It addresses reproducible association mistakes. It is
 not evidence that the Discord playback photos were caused by these defects.
@@ -25,7 +30,8 @@ not evidence that the Discord playback photos were caused by these defects.
   supported. Participant qualifiers stay attached to their competitor; only
   event-wide metadata may be inherited by both sides.
 - Exact IDs respect existing date/session guards and explicit team/squad
-  contradictions. The date thresholds are unchanged. TBA placeholders can
+  contradictions. Live/motorsport windows are unchanged; replay date/game
+  evidence follows PR61_REAL_CATALOG_REVIEW.md. TBA placeholders can
   acquire their real teams under the same ID without being treated as a
   contradictory matchup. Source deduplication preserves country context, and
   broadcaster enrichment forwards it instead of retaining only a channel name.

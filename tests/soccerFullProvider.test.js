@@ -245,7 +245,7 @@ describe('SoccerFullProvider', () => {
       expect(isReplayMatch(match)).toBe(true);
     });
 
-    test('merges seamlessly with existing ReplayZone fixture and preserves default artwork', () => {
+    test('keeps an undated SoccerFull replay separate until fixture date evidence exists', () => {
       const aggregator = container.resolve('matchAggregator');
       const rzMatch = {
         id: 'rz_coventry-city-vs-newcastle-united-12-10-2026',
@@ -279,8 +279,10 @@ describe('SoccerFullProvider', () => {
       // 2. Date unanchored
       expect(sfMatch.date).toBe('');
 
-      // 3. MatchAggregator recognizes as same event
-      expect(aggregator.isSameEvent(rzMatch, sfMatch)).toBe(true);
+      // Same teams alone cannot identify which archived meeting this is.
+      expect(aggregator.isSameEvent(rzMatch, sfMatch)).toBe(false);
+      // A real supplied fixture date can establish the compatible meeting.
+      expect(aggregator.isSameEvent(rzMatch, { ...sfMatch, date: rzMatch.date })).toBe(true);
     });
     test('ReplayZone strictly excludes soccer entries so SoccerFull is the dedicated provider', async () => {
       const ReplayZoneProvider = require('../src/providers/ReplayZoneProvider');
