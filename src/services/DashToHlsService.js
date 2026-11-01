@@ -1,15 +1,20 @@
 /**
- * DashToHlsService — Zero-bandwidth MPEG-DASH → HLS v7 converter
+ * DashToHlsService — MPEG-DASH → HLS v7 converter
  *
- * Converts encrypted ClearKey DASH manifests (.mpd) from AK47 Sports and
- * SK Tech (Amazon Nitro / Akamai CDNs) into standard HLS playlists:
+ * Two modes, decided per representation:
  *
- *   - Master playlist  (#EXT-X-STREAM-INF + #EXT-X-MEDIA audio group)
- *   - Media playlists  (#EXT-X-MAP + #EXT-X-KEY:METHOD=SAMPLE-AES-CTR)
+ *  1. PROXY (default, `cenc` streams): the playlist points at this server
+ *     (`/api/dash/init.mp4`, `/api/dash/segment.mp4`) and the router decrypts
+ *     each CENC fragment in memory before serving plaintext fMP4. No
+ *     `#EXT-X-KEY` is emitted — the output is a standard unencrypted HLS v7
+ *     stream that plays on ExoPlayer / hls.js / AVPlayer.
  *
- * The server NEVER proxies media: every segment URL points directly at the
- * upstream CDN. Only the ~KB-sized MPD XML is fetched server-side and the
- * 16-byte AES key is served from /api/dash/key.ts.
+ *  2. DIRECT (clear streams, or when the proxy is switched off): every media
+ *     URL points at the upstream CDN and the server only serves ~KB of text.
+ *
+ * The service never touches ISO-BMFF bytes itself — that is `cenc/*`. It owns
+ * manifest parsing, live-window computation, playlist rendering and the
+ * representation/segment lookup the proxy routes need.
  *
  * Playlist shape mirrors the production-proven pattern:
  *   #EXT-X-MEDIA-SEQUENCE is the DASH $Number$ of the first window segment,
@@ -20,6 +25,7 @@
 
 const { XMLParser } = require('fast-xml-parser');
 const { safeFetch } = require('../impitClient');
+const { buildPolicy, assertAllowed } = require('./DashUpstream');
 
 // Akamai/CloudFront edges 403 Dalvik UAs on manifest paths; always present a
 // desktop browser UA unless the feed carries a more specific non-Dalvik UA.
@@ -28,6 +34,8 @@ const DALVIK_UA_RE = /dalvik/i;
 
 const MPD_CACHE_TTL_MS = 3000;
 const MPD_CACHE_MAX_ENTRIES = 120;
+const CTX_CACHE_TTL_MS = Number(process.env.DASH_CTX_TTL_MS) || 60000;
+const CTX_CACHE_MAX_ENTRIES = 60;
 const MAX_WINDOW_SEGMENTS = 15;
 const LIVE_EDGE_TRIM_SEGMENTS = 1; // clock-derived playlists only: stay behind live edge
 
@@ -38,6 +46,12 @@ const ALWAYS_ARRAY_TAGS = new Set([
   'SegmentTimeline', 'S', 'Role', 'AudioChannelConfiguration', 'FramePacking',
   'EssentialProperty', 'SupplementalProperty'
 ]);
+
+/** Default for the decrypting proxy. `DASH_PROXY_ENABLED=false` is the kill switch. */
+function proxyEnabledFromEnv(env = process.env) {
+  const flag = String(env.DASH_PROXY_ENABLED || '').toLowerCase();
+  return !(flag === '0' || flag === 'false' || flag === 'off');
+}
 
 function asArray(value) {
   if (value === undefined || value === null) return [];
@@ -88,6 +102,10 @@ class DashToHlsService {
   constructor(options = {}) {
     this._fetcher = options.fetcher || safeFetch;
     this._mpdCache = new Map(); // mpdUrl -> { ts, parsed }
+    this._ctxCache = new Map(); // mpdUrl -> { ts, parsed, policy }
+    this.proxyEnabled = options.proxyEnabled !== undefined
+      ? Boolean(options.proxyEnabled)
+      : proxyEnabledFromEnv();
     this._parser = new XMLParser({
       ignoreAttributes: false,
       attributeNamePrefix: '@_',
@@ -124,6 +142,9 @@ class DashToHlsService {
     const cached = this._mpdCache.get(mpdUrl);
     if (cached && Date.now() - cached.ts < MPD_CACHE_TTL_MS) return cached.parsed;
 
+    // The MPD URL is signed, but a private/reserved target must never be
+    // fetched even if a provider ever emits one.
+    assertAllowed(mpdUrl);
     const res = await this._fetcher(mpdUrl, {
       headers: this._sanitizeUpstreamHeaders(headers),
       timeoutMs: 10000,
@@ -195,24 +216,32 @@ class DashToHlsService {
 
         const repBase = this._resolveBase(asArray(representation.BaseURL).map(nodeText), periodBase);
         const protection = this._readProtection(asArray(representation.ContentProtection)) || asProtection;
+        const representationId = String(representation['@_id'] !== undefined ? representation['@_id'] : '');
+        const bandwidth = Number(representation['@_bandwidth'] || 0);
 
         const rep = {
           kind,
-          id: String(representation['@_id'] !== undefined ? representation['@_id'] : ''),
-          bandwidth: Number(representation['@_bandwidth'] || 0),
+          id: representationId,
+          bandwidth,
           codecs: String(representation['@_codecs'] || ''),
           width: Number(representation['@_width'] || 0),
           height: Number(representation['@_height'] || 0),
           lang: String(representation['@_lang'] || lang || ''),
           encryption: protection ? protection.scheme : null,
+          scheme: protection ? protection.value : '',
+          timescale: Number(repTemplate.timescale || 1) || 1,
+          baseUrl: repBase,
+          // Absolute $Number$/$Time$ template — the proxy routes synthesise
+          // segment URLs from this, never from a client-supplied URL.
+          mediaTemplate: this._absolutize(String(repTemplate.media), repBase),
           initUrl: repTemplate.initialization
             ? this._absolutize(fillSegmentTemplate(repTemplate.initialization, {
-              representationId: String(representation['@_id'] || ''), bandwidth: Number(representation['@_bandwidth'] || 0), number: 0, time: 0
+              representationId, bandwidth, number: 0, time: 0
             }), repBase)
             : '',
           segments: this._computeSegments(repTemplate, {
-            representationId: String(representation['@_id'] || ''),
-            bandwidth: Number(representation['@_bandwidth'] || 0),
+            representationId,
+            bandwidth,
             baseUrl: repBase,
             dynamic,
             availabilityStartTime,
@@ -221,6 +250,7 @@ class DashToHlsService {
           })
         };
         if (rep.segments.length === 0) continue;
+        rep.segmentShape = this._shapeOf(rep.segments, rep.timescale);
 
         (kind === 'video' ? videoReps : audioReps).push(rep);
       }
@@ -366,6 +396,27 @@ class DashToHlsService {
     return segments;
   }
 
+  /**
+   * Describes the window as a linear (number → time) mapping when it is
+   * uniform. The proxy routes use it to synthesise URLs for segment numbers
+   * that have already slid out of the freshly parsed window (a paused player
+   * asking for n-3 must still get bytes, not a 404).
+   */
+  _shapeOf(segments, timescale) {
+    if (!segments.length) return null;
+    const first = segments[0];
+    const ticks = Math.round(first.durationSec * timescale);
+    const uniform = segments.every((s, i) =>
+      Math.abs(Math.round(s.durationSec * timescale) - ticks) <= 1 &&
+      s.number === first.number + i);
+    return {
+      n0: first.number,
+      t0: first.time,
+      ticks,
+      uniform
+    };
+  }
+
   /* ────────────────────────────── Rendering ─────────────────────────────── */
 
   _keyLine(reqBase, key, encryption) {
@@ -374,11 +425,18 @@ class DashToHlsService {
     return `#EXT-X-KEY:METHOD=${encryption},URI="${keyUrl}",KEYFORMAT="identity",KEYFORMATVERSIONS="1"`;
   }
 
-  _childPlaylistUrl(reqBase, name, dRaw) {
-    return `${reqBase}/api/dash/${name}.m3u8?d=${dRaw}`;
+  _childPlaylistUrl(reqBase, name, token) {
+    return `${reqBase}/api/dash/${name}.m3u8?d=${token}`;
   }
 
-  renderMaster(parsed, reqBase, dRaw) {
+  /** True when this representation must be decrypted and re-served by us. */
+  isProxied(rep) {
+    // `cbcs` (SAMPLE-AES) is deliberately not proxied: CTR-decrypting it would
+    // produce plausible-looking garbage. It keeps the legacy direct behaviour.
+    return Boolean(this.proxyEnabled && rep && rep.encryption === 'SAMPLE-AES-CTR' && rep.scheme !== 'cbcs');
+  }
+
+  renderMaster(parsed, reqBase, token) {
     const video = parsed.videoReps[0];
     const audio = parsed.audioReps[0];
 
@@ -389,7 +447,7 @@ class DashToHlsService {
         `NAME="${audio.lang || 'Audio'}"`, 'DEFAULT=YES', 'AUTOSELECT=YES'
       ];
       if (audio.lang) attrs.push(`LANGUAGE="${audio.lang}"`);
-      attrs.push(`URI="${this._childPlaylistUrl(reqBase, 'audio', dRaw)}"`);
+      attrs.push(`URI="${this._childPlaylistUrl(reqBase, 'audio', token)}"`);
       lines.push(`#EXT-X-MEDIA:${attrs.join(',')}`);
     }
 
@@ -399,21 +457,38 @@ class DashToHlsService {
     if (video.width && video.height) streamAttrs.push(`RESOLUTION=${video.width}x${video.height}`);
     if (audio) streamAttrs.push(`AUDIO="${HLS_AUDIO_GROUP_ID}"`);
     lines.push(`#EXT-X-STREAM-INF:${streamAttrs.join(',')}`);
-    lines.push(this._childPlaylistUrl(reqBase, 'video', dRaw));
+    lines.push(this._childPlaylistUrl(reqBase, 'video', token));
 
     return lines.join('\n') + '\n';
   }
 
-  renderMediaPlaylist(rep, reqBase, key, dRaw) {
+  renderMediaPlaylist(rep, reqBase, key, token) {
     const first = rep.segments[0];
     const maxDuration = rep.segments.reduce((max, s) => Math.max(max, s.durationSec), 0);
+    const proxied = this.isProxied(rep);
+    const kind = rep.kind;
 
     const lines = [
       '#EXTM3U',
       '#EXT-X-VERSION:7',
       `#EXT-X-TARGETDURATION:${Math.max(1, Math.ceil(maxDuration))}`,
-      `#EXT-X-MEDIA-SEQUENCE:${first.number}`
+      `#EXT-X-MEDIA-SEQUENCE:${first.number}`,
+      '#EXT-X-INDEPENDENT-SEGMENTS'
     ];
+
+    if (proxied) {
+      // No #EXT-X-KEY at all: the bytes we serve are plaintext fMP4.
+      const repParam = rep.id ? `&r=${encodeURIComponent(rep.id)}` : '';
+      if (rep.initUrl) {
+        lines.push(`#EXT-X-MAP:URI="${reqBase}/api/dash/init.mp4?d=${token}&k=${kind}${repParam}"`);
+      }
+      for (const seg of rep.segments) {
+        lines.push(`#EXTINF:${seg.durationSec.toFixed(3)},`);
+        lines.push(`${reqBase}/api/dash/segment.mp4?d=${token}&k=${kind}${repParam}&n=${seg.number}`);
+      }
+      return lines.join('\n') + '\n';
+    }
+
     const keyLine = this._keyLine(reqBase, key, rep.encryption);
     if (keyLine) lines.push(keyLine);
     if (rep.initUrl) lines.push(`#EXT-X-MAP:URI="${rep.initUrl}"`);
@@ -425,20 +500,97 @@ class DashToHlsService {
     return lines.join('\n') + '\n';
   }
 
-  /* ──────────────────────────── Public API ──────────────────────────────── */
+  /* ──────────────────────── Representation lookup ───────────────────────── */
 
-  async buildMaster(payload, dRaw, reqBase) {
+  /**
+   * Parsed MPD + allowlist policy for a stream, cached longer than the raw MPD
+   * (a segment request every 2 s must not turn into an MPD fetch every 3 s).
+   */
+  async _streamContext(payload) {
+    const key = payload.mpdUrl;
+    const cached = this._ctxCache.get(key);
+    if (cached && Date.now() - cached.ts < CTX_CACHE_TTL_MS) return cached;
+
     const parsed = await this._fetchParsedMpd(payload.mpdUrl, payload.headers);
-    return this.renderMaster(parsed, reqBase, dRaw);
+    const urls = [payload.mpdUrl];
+    for (const rep of [...parsed.videoReps, ...parsed.audioReps]) {
+      if (rep.initUrl) urls.push(rep.initUrl);
+      if (rep.mediaTemplate) urls.push(rep.mediaTemplate.replace(/\$(Number|Time)[^$]*\$/g, '0'));
+    }
+    const policy = buildPolicy(payload.mpdUrl, urls);
+
+    const entry = { ts: Date.now(), parsed, policy };
+    this._ctxCache.set(key, entry);
+    if (this._ctxCache.size > CTX_CACHE_MAX_ENTRIES) {
+      this._ctxCache.delete(this._ctxCache.keys().next().value);
+    }
+    return entry;
   }
 
-  async buildMediaPlaylist(payload, kind, dRaw, reqBase) {
+  _repsFor(parsed, kind) {
+    return kind === 'audio' ? parsed.audioReps : parsed.videoReps;
+  }
+
+  /**
+   * @returns {Promise<{rep: object, policy: object}>}
+   * @throws when the representation does not exist
+   */
+  async resolveRepresentation(payload, kind, repId) {
+    const ctx = await this._streamContext(payload);
+    const reps = this._repsFor(ctx.parsed, kind);
+    const rep = repId
+      ? reps.find((r) => String(r.id) === String(repId))
+      : reps[0];
+    if (!rep) throw new Error(`MPD exposes no ${kind} representation ${repId || ''}`.trim());
+    return { rep, policy: ctx.policy };
+  }
+
+  /**
+   * Maps a DASH $Number$ (what the playlist advertised) back to a URL.
+   * Numbers that already slid out of the window are synthesised from the
+   * template when the window is uniform — a player that pauses must not wedge.
+   *
+   * @returns {Promise<{url: string, durationSec: number, rep: object, policy: object}>}
+   */
+  async resolveSegment(payload, kind, repId, number) {
+    const { rep, policy } = await this.resolveRepresentation(payload, kind, repId);
+    const n = Number(number);
+    if (!Number.isFinite(n)) throw new Error(`invalid segment number ${number}`);
+
+    const exact = rep.segments.find((s) => s.number === n);
+    if (exact) return { url: exact.url, durationSec: exact.durationSec, rep, policy };
+
+    const shape = rep.segmentShape;
+    if (!shape || !shape.uniform || !rep.mediaTemplate) {
+      throw new Error(`segment ${n} is outside the current ${kind} window`);
+    }
+    const time = shape.t0 + (n - shape.n0) * shape.ticks;
+    const url = this._absolutize(fillSegmentTemplate(rep.mediaTemplate, {
+      representationId: rep.id,
+      bandwidth: rep.bandwidth,
+      number: n,
+      time
+    }), rep.baseUrl);
+
+    return { url, durationSec: shape.ticks / rep.timescale, rep, policy };
+  }
+
+  /* ──────────────────────────── Public API ──────────────────────────────── */
+
+  async buildMaster(payload, token, reqBase) {
     const parsed = await this._fetchParsedMpd(payload.mpdUrl, payload.headers);
-    const reps = kind === 'audio' ? parsed.audioReps : parsed.videoReps;
+    return this.renderMaster(parsed, reqBase, token);
+  }
+
+  async buildMediaPlaylist(payload, kind, token, reqBase) {
+    const parsed = await this._fetchParsedMpd(payload.mpdUrl, payload.headers);
+    const reps = this._repsFor(parsed, kind);
     const rep = reps && reps[0];
     if (!rep) throw new Error(`MPD exposes no ${kind} representation`);
-    return this.renderMediaPlaylist(rep, reqBase, payload.key, dRaw);
+    return this.renderMediaPlaylist(rep, reqBase, payload.key, token);
   }
 }
 
 module.exports = DashToHlsService;
+module.exports.fillSegmentTemplate = fillSegmentTemplate;
+module.exports.proxyEnabledFromEnv = proxyEnabledFromEnv;

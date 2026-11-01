@@ -6,6 +6,7 @@ const crypto = require('crypto');
 const Ak47LiveProvider = require('../src/providers/Ak47LiveProvider');
 const MatchEntity = require('../src/domain/MatchEntity');
 const StreamEntity = require('../src/domain/StreamEntity');
+const { verifyPayload } = require('../src/services/DashPayload');
 const container = require('../src/container');
 
 describe('Ak47LiveProvider Unit & Integration Tests', () => {
@@ -208,6 +209,7 @@ http://193.47.62.1:8080/live/game.m3u8
     });
 
     test('parses real event dates, formats solo event titles, and filters invisible events', async () => {
+      const nowSpy = jest.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 9, 25, 15, 0, 0));
       const mockEvents = [
         {
           event: JSON.stringify({
@@ -283,6 +285,7 @@ http://193.47.62.1:8080/live/game.m3u8
       expect(match2.title).toBe('Horse Racing');
       expect(match2.team1).toBeNull();
       expect(match2.team2).toBeNull();
+      nowSpy.mockRestore();
     });
   });
 
@@ -483,7 +486,9 @@ http://193.47.62.1:8080/live/game.m3u8
         expect(stream.url).toMatch(/\/api\/dash\/index\.m3u8\?d=.+$/);
         expect(stream.behaviorHints.notWebReady).toBe(false);
 
-        const payload = JSON.parse(Buffer.from(stream.url.split('d=')[1], 'base64url').toString('utf8'));
+        const verified = verifyPayload(stream.url.split('d=')[1]);
+        expect(verified.ok).toBe(true);
+        const payload = verified.payload;
         expect(payload.mpdUrl).toBe(MPD_URL);
         expect(payload.key).toBe(KEY_HEX);
         expect(payload.kid).toBe(KID_HEX);
@@ -505,7 +510,9 @@ http://193.47.62.1:8080/live/game.m3u8
         });
 
         expect(resolved.length).toBe(1);
-        const payload = JSON.parse(Buffer.from(resolved[0].url.split('d=')[1], 'base64url').toString('utf8'));
+        const verifiedToken = verifyPayload(resolved[0].url.split('d=')[1]);
+        expect(verifiedToken.ok).toBe(true);
+        const payload = verifiedToken.payload;
         expect(payload.mpdUrl).toBe(MPD_URL); // no |Referer=... suffix
         expect(payload.key).toBe(KEY_HEX);
         expect(payload.kid).toBe(KID_HEX);
