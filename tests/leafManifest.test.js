@@ -84,6 +84,15 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       expect(() => parseUpstreamManifest(antipiracyPlaylist, 'url')).toThrow('Upstream returned anti-piracy trap');
     });
 
+    test('throws error if stream_notice trap playlist is returned', () => {
+      const streamNoticePlaylist = [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:11',
+        'https://w1.papacito.cfd/leaf/stream_notice/1793376749/seg_005.ts'
+      ].join('\n');
+      expect(() => parseUpstreamManifest(streamNoticePlaylist, 'url')).toThrow('Upstream returned anti-piracy trap');
+    });
+
     test('throws error if no papacito leaf segments found', () => {
       const emptyPlaylist = [
         '#EXTM3U',
@@ -117,21 +126,36 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       expect(segmentCount).toBe(8);
     });
 
-    test('increments MEDIA-SEQUENCE as time advances', () => {
+    test('clamps to edge when stream starts, then slides freely as time advances', () => {
       const now = Date.now();
-      const sessionData = {
+      // 1. Initial 36s (6 segments): clamped to edge (2000) because 2006 - 8 < 2000
+      const initialData = {
         cdnBase: 'https://w1.papacito.cfd',
         slug: '632410',
         session: '1793459956',
         edge: 2000,
         targetDuration: 6,
         discontinuitySeq: 0,
-        at: now - 36000 // 36 seconds in the past = 6 segments forward
+        at: now - 36000
       };
+      const p1 = generateSlidingPlaylist(initialData);
+      expect(p1).toContain('#EXT-X-MEDIA-SEQUENCE:2000');
+      expect(p1).toContain('https://w1.papacito.cfd/leaf/632410/1793459956/seg_2000.ts');
 
-      const playlist = generateSlidingPlaylist(sessionData);
-      // elapsedSec = 36s -> seqOffset = 6 -> currentSeq = 2000 + 6 - 1 = 2005 -> mediaSeq = 2005 - 8 + 1 = 1998
-      expect(playlist).toContain('https://w1.papacito.cfd/leaf/632410/1793459956/seg_2005.ts');
+      // 2. Advanced 60s (10 segments): liveEdge = 2010 -> mediaSeq = 2010 - 8 = 2002
+      const advancedData = {
+        cdnBase: 'https://w1.papacito.cfd',
+        slug: '632410',
+        session: '1793459956',
+        edge: 2000,
+        targetDuration: 6,
+        discontinuitySeq: 0,
+        at: now - 60000
+      };
+      const p2 = generateSlidingPlaylist(advancedData);
+      expect(p2).toContain('#EXT-X-MEDIA-SEQUENCE:2002');
+      expect(p2).toContain('https://w1.papacito.cfd/leaf/632410/1793459956/seg_2002.ts');
+      expect(p2).toContain('https://w1.papacito.cfd/leaf/632410/1793459956/seg_2009.ts');
     });
   });
 

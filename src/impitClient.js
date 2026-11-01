@@ -106,6 +106,12 @@ function isDembedTarget(url) {
   return url.includes('dembed.st');
 }
 
+function isLeafTarget(url) {
+  if (!url || typeof url !== 'string') return false;
+  return url.includes('sports.highfly.to') ||
+         (url.includes('papacito.cfd') && !url.includes('w1.papacito.cfd'));
+}
+
 // -- impit TLS skip list ------------------------------------------------------
 // rustls (impit's TLS) validates certificates against a curated root store and
 // deterministically rejects some sites Node accepts (livetv.sx serves a chain
@@ -340,7 +346,8 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
   const warpProxyUrl = process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL;
   const isDamitv = isDamitvTarget(url);
   const isDembed = isDembedTarget(url);
-  const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
+  const isLeaf = isLeafTarget(url);
+  const proxyUrl = opts.proxyUrl || ((isDamitv || isLeaf) && warpProxyUrl ? warpProxyUrl : null);
   // Direct (non-proxied) requests to hosts whose certificate chain impit
   // deterministically rejects skip the doomed TLS handshake entirely and go
   // straight to the undici path below.
@@ -554,4 +561,4 @@ function isImpitAvailable() {
   return getImpit() !== null;
 }
 
-module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget, readLimitedBody };
+module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget, isLeafTarget, readLimitedBody };

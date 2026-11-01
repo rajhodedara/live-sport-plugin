@@ -35,7 +35,7 @@ function parseUpstreamManifest(body, targetUrl) {
     throw new Error('Upstream returned non-m3u8 body');
   }
 
-  if (/_antipiracy|antipiracy/i.test(body)) {
+  if (/_antipiracy|antipiracy|stream_notice/i.test(body)) {
     throw new Error('Upstream returned anti-piracy trap');
   }
 
@@ -131,10 +131,10 @@ function generateSlidingPlaylist(sessionData) {
   const dur = sessionData.targetDuration || 6;
   const seqOffset = Math.floor(elapsedSec / dur);
 
-  // Buffer: latest segment is 1 segment behind current live wall-clock edge to prevent 404s
-  const currentSeq = Math.max(sessionData.edge, sessionData.edge + seqOffset - 1);
+  // Live edge advances continuously with wall clock; mediaSeq slides naturally
+  const liveEdge = sessionData.edge + seqOffset;
   const windowSize = 8;
-  const mediaSeq = Math.max(sessionData.edge, currentSeq - windowSize + 1);
+  const mediaSeq = Math.max(sessionData.edge, liveEdge - windowSize);
 
   const lines = [
     '#EXTM3U',
