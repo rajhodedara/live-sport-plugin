@@ -3,14 +3,20 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../impitClient');
 const { BASE_URL } = require('../config');
-const staticChannels = require('../data/leafChannels.json');
 
-// Upstream per-install config path:
+// Upstream replaced the old shared-token API with a per-install config path:
 //   https://sports.highfly.to/<base64url(config)>/{catalog,stream}/sport/...
+// The config blob is what the official configure page issues
+// (sports.highfly.to/configure -> Turnstile -> install link) and decodes to
+// {"freeUserId":"<uuid>.<hash>"}. That blob is the account selector, so it is
+// read from LEAF_INSTALL_CONFIG - never hardcoded. A shared literal is exactly
+// what upstream revokes, and it is a per-install identity, not a build input.
+//
+// The old shared master token is deliberately gone: papacito.cfd answers 403
+// "Authentication required" to it and the stream route replies with the
+// "please reinstall" stub, so a locally minted signed URL could only ever
+// produce a broken stream.
 const DEFAULT_ORIGIN = 'https://sports.highfly.to';
-const LEARNED_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-const RAW_REGEX = /\bRAW\b|[\u1D3F][\u1D2C][\u1D42]/i;
 
 function toBase64Url(json) {
   return Buffer.from(JSON.stringify(json))
@@ -18,10 +24,6 @@ function toBase64Url(json) {
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '');
-}
-
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 class LeafProvider extends BaseProvider {
@@ -33,23 +35,6 @@ class LeafProvider extends BaseProvider {
       process.env.LEAF_API_URL || process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID
     );
     this._installNagWarned = false;
-
-    // Build static alias map and sorted keys for token matching
-    this.staticAliasMap = new Map();
-    for (const ch of staticChannels) {
-      if (!ch || !ch.id) continue;
-      for (const alias of ch.aliases || []) {
-        const norm = LeafProvider.normalizeBroadcasterName(alias);
-        if (norm && !this.staticAliasMap.has(norm)) {
-          this.staticAliasMap.set(norm, ch.id);
-        }
-      }
-    }
-    this.sortedStaticKeys = [...this.staticAliasMap.keys()].sort((a, b) => b.length - a.length);
-
-    // Dynamic caches
-    this.catalogChannelMap = new Map(); // alias -> slug
-    this.learnedChannelMap = new Map(); // alias -> { slug, timestamp }
 
     if (this.circuitBreaker) {
       this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
@@ -63,55 +48,12 @@ class LeafProvider extends BaseProvider {
   }
 
   /**
-   * Normalize raw broadcaster string into a canonical search token.
-   * Strips lock emojis, Leaf branding, country/source prefixes (UK:, VIP:, RO:, etc.),
-   * Unicode superscripts (RAW, HD, FHD), and quality tags.
-   *
-   * @param {string} rawStr
-   * @returns {string}
-   */
-  static normalizeBroadcasterName(rawStr) {
-    if (!rawStr || typeof rawStr !== 'string') return '';
-    return rawStr
-      .replace(/[\u{1F512}\u{1F513}]/gu, '') // lock emojis
-      .replace(/^\s*Leaf\b\s*(?:\([^)]*\))?\s*[·:\-–]?\s*/i, '') // "Leaf (Strong) ·"
-      .replace(/\bStrong\b/gi, '')
-      .replace(/^\s*(?:TV|UK|VIP|RO|CH|CZ|US|NOW|4K|ES|FR|DE|IT|PL|PT)\s*[:|-]\s*/i, '')
-      .replace(/\s*\([a-z0-9\s]*\)/gi, '') // parentheticals like (A), (FHD)
-      .replace(/\s*\[[a-z0-9\s]*\]/gi, '')
-      .replace(/[\u1D3F\u1D2C\u1D42]/g, '') // ᴿᴬᵂ
-      .replace(/[\u1D34\u1D30]/g, '')       // ᴴᴰ
-      .replace(/[\u028F\u029C\u1D05]/g, '') // ғʜᴅ
-      .replace(/[\u1D05\u1D07]/g, '')      // ᴅᴇ
-      .replace(/\b(?:raw|fhd|hd|4k|uhd)\b/gi, '')
-      .replace(/[^a-z0-9+]/gi, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .toLowerCase();
-  }
-
-  /**
-   * Clean channel display label for StreamEntity title.
-   * Strips lock emojis, Leaf branding, parenthetical junk, but keeps country/channel name.
-   *
-   * @param {string} rawName
-   * @returns {string}
-   */
-  static cleanDisplayLabel(rawName) {
-    if (!rawName || typeof rawName !== 'string') return '';
-    return rawName
-      .replace(/[\u{1F512}\u{1F513}]/gu, '')
-      .replace(/^\s*Leaf\b\s*(?:\([^)]*\))?\s*[·:\-–]?\s*/i, '')
-      .replace(/\s*\([a-z0-9\s]*\)/gi, '')
-      .replace(/\bStrong\b/gi, '')
-      .replace(/^\s*[:\-–]\s*/, '')
-      .replace(/\s*\.{2,}\s*$/, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-  }
-
-  /**
    * Build the upstream base for the per-install config path.
+   *
+   * LEAF_API_URL stays a whole-base override on purpose: production parks the
+   * source on a dead local port (http://127.0.0.1:9/leaf-disabled) to disable
+   * leaf without shipping code, and that kill switch must keep working
+   * verbatim - every request fails fast and the provider returns [].
    *
    * @returns {string}
    */
@@ -127,7 +69,12 @@ class LeafProvider extends BaseProvider {
   }
 
   /**
-   * Upstream install nag detector.
+   * Upstream retires the free stream API by answering every stream id with a
+   * single fake entry that points at /configure ("Please reinstall the addon /
+   * we have updated our free addon"). That payload used to reach the player and
+   * is what renders as the "this stream is stolen, install the official addon"
+   * notice, so it is dropped here: an empty list is the honest answer, never a
+   * stream tile that is really an advert.
    *
    * @param {Array} streamsList
    * @returns {boolean}
@@ -159,8 +106,8 @@ class LeafProvider extends BaseProvider {
   }
 
   /**
-   * Fetch live sporting matches across Highfly catalogues (sports_live, sports_today, sports_football).
-   * Strictly filters OUT all 24/7 TV channels and deduplicates matches by clean event ID.
+   * Fetch live sporting matches from Highfly live catalog.
+   * Strictly filters OUT all 24/7 TV channels.
    *
    * @returns {Promise<Array<MatchEntity>>}
    */
@@ -182,97 +129,71 @@ class LeafProvider extends BaseProvider {
   }
 
   async _fetchLiveMatchesInternal() {
-    const catalogNames = ['sports_live', 'sports_today', 'sports_football'];
-    const fetchPromises = catalogNames.map(async (cat) => {
-      const url = `${this.apiUrl}/catalog/sport/${cat}.json`;
-      const res = await impitClient.safeFetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-          'Accept': 'application/json'
-        },
-        timeoutMs: 8000
-      });
-
-      if (!res || !res.ok) {
-        throw new Error(`HTTP ${res ? res.status : 'No response'}`);
-      }
-
-      return res.json();
+    const url = `${this.apiUrl}/catalog/sport/sports_live.json`;
+    const res = await impitClient.safeFetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'Accept': 'application/json'
+      },
+      timeoutMs: 8000
     });
 
-    const results = await Promise.allSettled(fetchPromises);
-    const seenMatches = new Map();
+    if (!res || !res.ok) {
+      throw new Error(`HTTP ${res ? res.status : 'No response'}`);
+    }
 
-    for (const r of results) {
-      if (r.status !== 'fulfilled' || !r.value) continue;
-      const metas = Array.isArray(r.value.metas) ? r.value.metas : [];
+    const data = await res.json();
+    const metas = data && Array.isArray(data.metas) ? data.metas : [];
+    const matches = [];
 
-      for (const item of metas) {
-        if (!item || !item.id || !item.name) continue;
+    for (const item of metas) {
+      if (!item || !item.id || !item.name) continue;
 
-        // Phase 3: Ingest 24/7 leaf:* channels into dynamic catalog channel map
-        if (item.id.startsWith('leaf:')) {
-          const slug = item.id.replace(/^leaf:/, '');
-          const norm = LeafProvider.normalizeBroadcasterName(item.name);
-          if (norm) {
-            this.catalogChannelMap.set(norm, slug);
-          }
-          continue;
-        }
-
-        // Exclude networks and 24/7 channels
-        if (item.category === 'networks' || item.isChannel) {
-          continue;
-        }
-
-        const cleanId = item.id.replace(/^streamed:/, '');
-        if (seenMatches.has(cleanId)) continue;
-
-        const category = this.normalizeCategory(item.category || (Array.isArray(item.genres) ? item.genres[0] : 'other'));
-
-        let matchDate = '0';
-        if (item.releaseInfo && typeof item.releaseInfo === 'string' && item.releaseInfo !== 'LIVE') {
-          const cleaned = item.releaseInfo.replace('·', '').replace(/\s+/g, ' ').trim();
-          const d = new Date(cleaned);
-          if (!isNaN(d.getTime())) matchDate = String(d.getTime());
-        } else {
-          const tsMatch = String(item.id).match(/[-_](1\d{9}|1\d{12})$/);
-          if (tsMatch) {
-            const tsVal = Number(tsMatch[1]);
-            const epochMs = tsMatch[1].length === 10 ? tsVal * 1000 : tsVal;
-            if (epochMs > 0 && Number.isFinite(epochMs)) matchDate = String(epochMs);
-          }
-        }
-
-        seenMatches.set(cleanId, new MatchEntity({
-          id: `leaf_${cleanId}`,
-          aliasIds: [item.id, cleanId],
-          title: item.name,
-          category,
-          date: matchDate,
-          status: 'live',
-          sources: [{
-            source: 'leaf',
-            id: item.id,
-            name: item.name
-          }]
-        }));
+      // Strictly exclude 24/7 channels (IDs starting with leaf: or networks category)
+      if (item.id.startsWith('leaf:') || item.category === 'networks' || item.isChannel) {
+        continue;
       }
+
+      const cleanId = item.id.replace(/^streamed:/, '');
+      const category = this.normalizeCategory(item.category || (Array.isArray(item.genres) ? item.genres[0] : 'other'));
+
+      let matchDate = '0';
+      if (item.releaseInfo && typeof item.releaseInfo === 'string' && item.releaseInfo !== 'LIVE') {
+        const cleaned = item.releaseInfo.replace('·', '').replace(/\s+/g, ' ').trim();
+        const d = new Date(cleaned);
+        if (!isNaN(d.getTime())) matchDate = String(d.getTime());
+      } else {
+        const tsMatch = String(item.id).match(/[-_](1\d{9}|1\d{12})$/);
+        if (tsMatch) {
+          const tsVal = Number(tsMatch[1]);
+          const epochMs = tsMatch[1].length === 10 ? tsVal * 1000 : tsVal;
+          if (epochMs > 0 && Number.isFinite(epochMs)) matchDate = String(epochMs);
+        }
+      }
+
+      matches.push(new MatchEntity({
+        id: `leaf_${cleanId}`,
+        aliasIds: [item.id, cleanId],
+        title: item.name,
+        category,
+        date: matchDate,
+        status: 'live',
+        sources: [{
+          source: 'leaf',
+          id: item.id,
+          name: item.name
+        }]
+      }));
     }
 
-    // If all catalog queries failed and no matches were gathered, raise error for circuit breaker
-    if (seenMatches.size === 0 && results.every((r) => r.status === 'rejected')) {
-      const firstErr = results[0]?.reason;
-      throw new Error(firstErr ? firstErr.message : 'All catalog queries failed');
-    }
-
-    return Array.from(seenMatches.values());
+    return matches;
   }
 
   /**
    * Resolve live streams for a match.
    * Strictly isolates Leaf (papacito.cfd) streams and forwards the upstream
-   * signed playback URL untouched.
+   * signed playback URL untouched, because the signature is the only
+   * authorisation the CDN accepts and it cannot be minted locally.
    *
    * @param {string} sourceId
    * @param {string} matchCategory
@@ -297,58 +218,6 @@ class LeafProvider extends BaseProvider {
       console.warn(`[${this.name}] Failed to resolve streams for ${targetId}: ${err.message}`);
       return [];
     }
-  }
-
-  /**
-   * Find channel slug for a paywalled stream using the 3-tier architecture:
-   * Tier 1: Static Master Dictionary (leafChannels.json)
-   * Tier 2: Dynamic Catalog Ingest (sports_live leaf:* entries)
-   * Tier 3: Opportunistic Learning Cache
-   *
-   * Uses deterministic word-boundary token matching.
-   *
-   * @param {string} rawName
-   * @returns {string|null}
-   */
-  _findChannelSlug(rawName) {
-    const norm = LeafProvider.normalizeBroadcasterName(rawName);
-    if (!norm) return null;
-
-    // 1. Direct O(1) Hash Map lookups
-    if (this.staticAliasMap.has(norm)) {
-      return this.staticAliasMap.get(norm);
-    }
-    if (this.catalogChannelMap.has(norm)) {
-      return this.catalogChannelMap.get(norm);
-    }
-    const learned = this.learnedChannelMap.get(norm);
-    if (learned && Date.now() - learned.timestamp < LEARNED_CACHE_TTL_MS) {
-      return learned.slug;
-    }
-
-    // 2. Deterministic word-boundary token matching (longest key first)
-    for (const key of this.sortedStaticKeys) {
-      const boundaryRegex = new RegExp(`(?:^|\\s)${escapeRegex(key)}(?:\\s|$)`);
-      if (boundaryRegex.test(norm)) {
-        return this.staticAliasMap.get(key);
-      }
-    }
-
-    // Check dynamic catalog keys with word boundary
-    for (const [key, slug] of this.catalogChannelMap.entries()) {
-      const boundaryRegex = new RegExp(`(?:^|\\s)${escapeRegex(key)}(?:\\s|$)`);
-      if (boundaryRegex.test(norm)) {
-        return slug;
-      }
-    }
-
-    // Fallback to compatibility map if provided statically
-    for (const [k, slug] of Object.entries(LeafProvider.CHANNEL_SLUG_MAP)) {
-      const boundaryRegex = new RegExp(`(?:^|\\s)${escapeRegex(k)}(?:\\s|$)`);
-      if (boundaryRegex.test(norm)) return slug;
-    }
-
-    return null;
   }
 
   async _resolveStreamsInternal(targetId) {
@@ -378,53 +247,14 @@ class LeafProvider extends BaseProvider {
     for (const st of streamsList) {
       if (!st || !st.url) continue;
 
-      let directUrl = st.url;
-
-      // When upstream returns a paywalled redirect (e.g. google.com), attempt direct channel resolution
-      if (!directUrl.includes('papacito.cfd') || directUrl.includes('google.com')) {
-        const slug = this._findChannelSlug(st.name || st.title || '');
-        if (slug) {
-          try {
-            const chanUrl = `${this.apiUrl}/stream/sport/leaf:${encodeURIComponent(slug)}.json`;
-            const chanRes = await impitClient.safeFetch(chanUrl, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-                'Accept': 'application/json'
-              },
-              timeoutMs: 4000
-            });
-            if (chanRes && chanRes.ok) {
-              const chanData = await chanRes.json();
-              const firstValid = (chanData.streams || []).find((s) => s && s.url && s.url.includes('papacito.cfd') && s.url.includes('?'));
-              if (firstValid) {
-                directUrl = firstValid.url;
-              }
-            }
-          } catch (_) {}
-        }
-      }
-
       // STRICT ISOLATION: Discard any stream that is not papacito.cfd (no streamed.pk, no paywalled redirects)
-      if (!directUrl.includes('papacito.cfd')) continue;
+      if (!st.url.includes('papacito.cfd')) continue;
 
-      // Forward upstream signed playback URL only
-      if (!directUrl.includes('?')) continue;
-
-      // Phase 4: Opportunistic Learning from unredacted Papacito stream URLs
-      const papMatch = directUrl.match(/papacito\.cfd\/m3u\/([a-zA-Z0-9_-]+)\/live\.m3u8\?ft=/);
-      if (papMatch) {
-        const discoveredSlug = papMatch[1];
-        const norm = LeafProvider.normalizeBroadcasterName(st.name || st.title || '');
-        if (norm && norm.length >= 4 && !/^(stream|live|match|video|link)\b/i.test(norm)) {
-          if (!this.staticAliasMap.has(norm) && !this.catalogChannelMap.has(norm)) {
-            const existing = this.learnedChannelMap.get(norm);
-            if (!existing || existing.slug === discoveredSlug) {
-              this.learnedChannelMap.set(norm, { slug: discoveredSlug, timestamp: Date.now() });
-            }
-          }
-        }
-      }
-
+      // Forward the upstream signed playback URL only. A papacito URL without a
+      // query string carries no signature, and the signature cannot be minted
+      // locally, so it would answer 403 "Authentication required" at the CDN.
+      if (!st.url.includes('?')) continue;
+      const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
       const manifestProxyUrl = `${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent(directUrl)}`;
@@ -432,18 +262,19 @@ class LeafProvider extends BaseProvider {
       const rawName = st.name || '';
       const rawTitle = st.title || '';
 
-      // Determine resolution & quality (supporting superscripts 4K, FHD, HD)
+      // Determine resolution & quality
       let resolution = '1080p';
       let quality = 'FHD';
-      if (/3840x2160|4k|uhd/i.test(rawTitle) || /\b4k\b/i.test(rawName)) {
+      if (/3840x2160|4k/i.test(rawTitle) || /4k/i.test(rawName)) {
         resolution = '4K';
         quality = '4K UHD';
-      } else if (/1280x720|720p|hd|[\u1D34][\u1D30]/i.test(rawTitle) || /\b(720p|hd)\b|[\u1D34][\u1D30]/i.test(rawName)) {
+      } else if (/1280x720|720p/i.test(rawTitle) || /720p/i.test(rawName)) {
         resolution = '720p';
         quality = 'HD';
       }
 
-      // Bitrate as display label ("6.2 Mbps")
+      // Bitrate as display label ("6.2 Mbps") matching the addon-wide
+      // convention in streams.js — raw bps renders as "6200000" in the UI.
       let bitrate = null;
       const bitrateMatch = rawTitle.match(/~?([\d.]+)\s*Mbps/i);
       if (bitrateMatch) {
@@ -453,16 +284,22 @@ class LeafProvider extends BaseProvider {
           : `${Math.round(bps / 1000)} kbps`;
       }
 
-      // Channel label cleanup
-      const channelLabel = LeafProvider.cleanDisplayLabel(rawName);
-
-      // Unicode superscript RAW support (ᴿᴬᵂ)
-      const isRaw = RAW_REGEX.test(rawName) || RAW_REGEX.test(rawTitle);
-      const qualityTag = isRaw ? `${quality} RAW` : quality;
+      // Channel label cleanup: strip the upstream "🔒 Leaf (Strong) ·" branding
+      // entirely (no lock emoji, no "Strong") plus parenthetical junk like
+      // "(A)..." so streams.js' first-parens extraction picks the broadcaster.
+      let channelLabel = rawName
+        .replace(/🔒/g, '')
+        .replace(/^\s*Leaf\b\s*(?:\([^)]*\))?\s*[·:\-–]?\s*/i, '')
+        .replace(/\s*\([^)]*\)/g, '')
+        .replace(/\bStrong\b/gi, '')
+        .replace(/^\s*[:\-–]\s*/, '')
+        .replace(/\s*\.{2,}\s*$/, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 
       resolved.push(new StreamEntity({
-        name: `Leaf [${qualityTag}]`,
-        title: channelLabel ? `(${channelLabel}) ${qualityTag}` : `Leaf Stream · ${qualityTag}`,
+        name: `Leaf [${quality}]`,
+        title: channelLabel ? `(${channelLabel}) ${quality}` : `Leaf Stream · ${quality}`,
         url: manifestProxyUrl,
         resolution,
         quality,
@@ -482,14 +319,6 @@ class LeafProvider extends BaseProvider {
     }
 
     return resolved;
-  }
-}
-
-// Backward compatibility export with all verified channels
-LeafProvider.CHANNEL_SLUG_MAP = {};
-for (const ch of staticChannels) {
-  for (const alias of ch.aliases || []) {
-    LeafProvider.CHANNEL_SLUG_MAP[alias.toLowerCase().trim()] = ch.id;
   }
 }
 
