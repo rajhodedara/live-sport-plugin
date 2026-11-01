@@ -129,6 +129,8 @@ function createDashRouter(service, options = {}) {
   const segmentCache = new LruCache({ max: SEGMENT_CACHE_MAX, ttlMs: SEGMENT_CACHE_TTL_MS });
   const tracksByRep = new Map(); // repCacheKey -> Map<trackId, TrackInfo>
   const inflight = new Map();
+  const prefetching = new Set();
+  const prefetchEnabled = options.prefetch !== false;
   const limit = createLimiter(MAX_CONCURRENT);
 
   const sanitize = (headers) => (typeof service._sanitizeUpstreamHeaders === 'function'
@@ -198,6 +200,31 @@ function createDashRouter(service, options = {}) {
     return engine.decryptSegment(raw, { tracks, keysByKid: keysFor(payload) }).buf;
   }
 
+  /**
+   * Warms the next segments while the player is still busy with this one.
+   *
+   * The proxy has to download and decrypt a whole 2 MB segment before it can
+   * answer, so every request costs the full store-and-forward latency. Fetching
+   * n+1 and n+2 in the background turns that into a pipeline: by the time the
+   * player asks, the bytes are already in the cache. Best effort — a failed
+   * prefetch must never affect playback.
+   */
+  function prefetchAhead(payload, kind, rep, policy, number, ahead = 2) {
+    for (let k = 1; k <= ahead; k++) {
+      const n = number + k;
+      const key = `${streamHash(payload.mpdUrl)}|${kind}|${rep.id}|${n}`;
+      if (segmentCache.get(key) || inflight.has(key) || prefetching.has(key)) continue;
+      prefetching.add(key);
+      if (prefetching.size > 1024) prefetching.clear();
+      singleFlight(inflight, key, () => limit(async () => {
+        const target = await service.resolveSegment(payload, kind, rep.id, n);
+        const buf = await fetchDecryptedSegment(payload, kind, target.rep, target.policy, target.url);
+        segmentCache.set(key, buf);
+        return buf;
+      })).catch(() => {}).finally(() => prefetching.delete(key));
+    }
+  }
+
   /* ── token verification, applied to every endpoint ─────────────────────── */
 
   const requireToken = (req, res, next) => {
@@ -226,7 +253,7 @@ function createDashRouter(service, options = {}) {
       const reqBase = getRequestBaseUrl(req);
       const body = kind === 'master'
         ? await service.buildMaster(req.dashPayload, signed, reqBase)
-        : await service.buildMediaPlaylist(req.dashPayload, kind, signed, reqBase);
+        : await service.buildMediaPlaylist(req.dashPayload, kind, signed, reqBase, req.query.r);
 
       setStreamHeaders(res);
       res.status(200);
@@ -281,6 +308,8 @@ function createDashRouter(service, options = {}) {
           fetchDecryptedSegment(req.dashPayload, kind, target.rep, target.policy, target.url)));
         segmentCache.set(cacheKey, buf);
       }
+
+      if (prefetchEnabled) prefetchAhead(req.dashPayload, kind, target.rep, target.policy, number, 2);
 
       setStreamHeaders(res);
       res.status(200);

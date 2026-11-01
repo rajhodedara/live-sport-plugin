@@ -316,7 +316,8 @@ describe('GET /api/dash/* routes', () => {
     };
 
     const app = express();
-    app.use(dashRouter.createDashRouter(svc, { fetcher, signWith: signer }));
+    // prefetch off: these tests count upstream fetches per number
+    app.use(dashRouter.createDashRouter(svc, { fetcher, signWith: signer, prefetch: false }));
     server = http.createServer(app);
     server.listen(0, '127.0.0.1', () => {
       baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -332,6 +333,15 @@ describe('GET /api/dash/* routes', () => {
   beforeEach(() => { calls.length = 0; });
 
   const payload = makePayload(NITRO_MPD_URL);
+
+  const prefetchSeen = [];
+  const prefetchFetcher = async (url) => {
+    prefetchSeen.push(url);
+    if (/\.mpd/.test(url)) return { ok: true, status: 200, url, text: async () => readFixture('nitro-live.mpd') };
+    if (/init\.mp4/.test(url)) return { ok: true, status: 200, url, arrayBuffer: async () => Buffer.from(initBuf) };
+    return { ok: true, status: 200, url, arrayBuffer: async () => Buffer.from(segmentBuf) };
+  };
+  void prefetchSeen;
 
   test('master playlist is served for a signed token', async () => {
     const res = await fetch(`${baseUrl}/api/dash/index.m3u8?d=${token(payload)}`);
@@ -428,6 +438,38 @@ describe('GET /api/dash/* routes', () => {
     const res = await fetch(`${baseUrl}/api/dash/index.m3u8?d=${evil}`);
     expect(res.status).toBe(403);
     expect(calls.some((c) => c.includes('169.254'))).toBe(false);
+  });
+
+  test('master playlist advertises every video rendition so ABR can step down', async () => {
+    const res = await fetch(`${baseUrl}/api/dash/index.m3u8?d=${token(payload)}`);
+    const body = await res.text();
+    const variants = body.split('\n').filter((l) => l.startsWith('#EXT-X-STREAM-INF'));
+    expect(variants.length).toBeGreaterThan(1);
+    // each variant points at its own representation
+    const uris = body.split('\n').filter((l) => l.includes('/api/dash/video.m3u8'));
+    expect(new Set(uris.map((u) => u.match(/&r=([^&]+)/)[1])).size).toBe(uris.length);
+    expect(variants[0]).toMatch(/BANDWIDTH=8\d{6}/); // highest first
+  });
+
+  test('prefetches the next segments so the player gets them warm', async () => {
+    const app = express();
+    app.use(dashRouter.createDashRouter(svc, { fetcher: prefetchFetcher, signWith: signer }));
+    const srv = http.createServer(app);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const local = `http://127.0.0.1:${srv.address().port}`;
+    const seen = [];
+    try {
+      const url = `${local}/api/dash/segment.mp4?d=${token(payload)}&k=video&r=${repId}&n=9100`;
+      expect((await fetch(url)).status).toBe(200);
+      await new Promise((r) => setTimeout(r, 400)); // let the background fetches land
+      for (const u of prefetchSeen) {
+        const m = u.match(/[?&]n=(\d+)/);
+        if (m) expect([9101, 9102]).toContain(Number(m[1]));
+      }
+      expect(prefetchSeen.length).toBeGreaterThan(0);
+    } finally {
+      await new Promise((r) => srv.close(r));
+    }
   });
 
   test('key.ts still answers for playlists already cached by players', async () => {

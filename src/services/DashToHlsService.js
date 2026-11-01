@@ -427,8 +427,9 @@ class DashToHlsService {
     return `#EXT-X-KEY:METHOD=${encryption},URI="${keyUrl}",KEYFORMAT="identity",KEYFORMATVERSIONS="1"`;
   }
 
-  _childPlaylistUrl(reqBase, name, token) {
-    return `${reqBase}/api/dash/${name}.m3u8?d=${token}`;
+  _childPlaylistUrl(reqBase, name, token, repId) {
+    const rep = repId ? `&r=${encodeURIComponent(repId)}` : '';
+    return `${reqBase}/api/dash/${name}.m3u8?d=${token}${rep}`;
   }
 
   /** True when this representation must be decrypted and re-served by us. */
@@ -439,7 +440,6 @@ class DashToHlsService {
   }
 
   renderMaster(parsed, reqBase, token) {
-    const video = parsed.videoReps[0];
     const audio = parsed.audioReps[0];
 
     const lines = ['#EXTM3U', '#EXT-X-VERSION:7'];
@@ -453,13 +453,19 @@ class DashToHlsService {
       lines.push(`#EXT-X-MEDIA:${attrs.join(',')}`);
     }
 
-    const streamAttrs = [`BANDWIDTH=${video.bandwidth + (audio ? audio.bandwidth : 0)}`];
-    const codecs = [video.codecs, audio ? audio.codecs : ''].filter(Boolean).join(',');
-    if (codecs) streamAttrs.push(`CODECS="${codecs}"`);
-    if (video.width && video.height) streamAttrs.push(`RESOLUTION=${video.width}x${video.height}`);
-    if (audio) streamAttrs.push(`AUDIO="${HLS_AUDIO_GROUP_ID}"`);
-    lines.push(`#EXT-X-STREAM-INF:${streamAttrs.join(',')}`);
-    lines.push(this._childPlaylistUrl(reqBase, 'video', token));
+    // Every video rendition is advertised, not just the top one. The proxy
+    // delivers a 2 MB segment in 1.5-3 s on a busy VPS link, so a single 8 Mbps
+    // variant leaves ABR nothing to fall back on and the player rebuffers. With
+    // the ladder exposed it simply steps down until the pipe keeps up.
+    for (const video of parsed.videoReps) {
+      const streamAttrs = [`BANDWIDTH=${video.bandwidth + (audio ? audio.bandwidth : 0)}`];
+      const codecs = [video.codecs, audio ? audio.codecs : ''].filter(Boolean).join(',');
+      if (codecs) streamAttrs.push(`CODECS="${codecs}"`);
+      if (video.width && video.height) streamAttrs.push(`RESOLUTION=${video.width}x${video.height}`);
+      if (audio) streamAttrs.push(`AUDIO="${HLS_AUDIO_GROUP_ID}"`);
+      lines.push(`#EXT-X-STREAM-INF:${streamAttrs.join(',')}`);
+      lines.push(this._childPlaylistUrl(reqBase, 'video', token, video.id));
+    }
 
     return lines.join('\n') + '\n';
   }
@@ -611,11 +617,13 @@ class DashToHlsService {
     return this.renderMaster(parsed, reqBase, token);
   }
 
-  async buildMediaPlaylist(payload, kind, token, reqBase) {
+  async buildMediaPlaylist(payload, kind, token, reqBase, repId) {
     const parsed = await this._fetchParsedMpd(payload.mpdUrl, payload.headers);
-    const reps = this._repsFor(parsed, kind);
-    const rep = reps && reps[0];
-    if (!rep) throw new Error(`MPD exposes no ${kind} representation`);
+    const reps = this._repsFor(parsed, kind) || [];
+    const rep = repId
+      ? reps.find((r) => String(r.id) === String(repId))
+      : reps[0];
+    if (!rep) throw new Error(`MPD exposes no ${kind} representation ${repId || ''}`.trim());
     return this.renderMediaPlaylist(rep, reqBase, payload.key, token);
   }
 }
