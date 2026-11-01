@@ -38,9 +38,16 @@ function getSecret(explicit) {
     ephemeralSeed = crypto.randomBytes(32);
     if (!warned) {
       warned = true;
-      console.warn(
-        '[DashPayload] DASH_SIGN_SECRET is not set — using a per-process random secret. ' +
-        'Signed DASH links will break across restarts and across pm2 cluster workers.'
+      // This is the failure mode that took production down to 50% 403s on
+      // 2026-11-01: with no DASH_SIGN_SECRET, every pm2 cluster worker invents
+      // its own key, so a playlist minted by worker A is rejected by worker B.
+      // It looks like flaky networking, never like a config error — hence the
+      // error level in production.
+      const log = process.env.NODE_ENV === 'production' ? console.error : console.warn;
+      log(
+        '[DashPayload] DASH_SIGN_SECRET is not set — signing with a per-process random key. ' +
+        'Every pm2 cluster worker will use a DIFFERENT key and /api/dash playlist ' +
+        'requests will return 403 at random. Set DASH_SIGN_SECRET in .env.'
       );
     }
   }

@@ -46,9 +46,10 @@ json = { mpdUrl, key, kid, headers, e? }
   Nothing else reaches the upstream request (no header injection via the token).
 - Verification is length-checked before `timingSafeEqual` (which throws on length mismatch — that
   would turn a 403 into a 500).
-- Secret: `DASH_TOKEN_KEY`, falling back to the same shared app key the byte-range
-  signer uses (`APP_SECRET` / `SESSION_SECRET`). If none is set a per-process random key is
-  generated and a warning is logged: tokens then do not survive a restart or a pm2 cluster hop.
+- Secret: `DASH_SIGN_SECRET` (the only name the code reads). If it is unset the signer falls back to a
+  per-process random key — in a pm2 **cluster** that means worker A mints a playlist worker B rejects,
+  i.e. random 403s. The process logs this at `console.error` level in production. Keep the value
+  identical on every worker by putting it in `.env`.
 
 ## 4. Modules
 
@@ -155,7 +156,7 @@ All three of these were invisible to synthetic fixtures and cost a full live deb
 
 | Var | Default | Meaning |
 |---|---|---|
-| `DASH_TOKEN_KEY` | APP_SECRET / SESSION_SECRET, then a random per-process key | HMAC key for `d` |
+| `DASH_SIGN_SECRET` | per-process random (logged as an error in production) | HMAC key for `d` — must be identical on every worker |
 | `DASH_PROXY_ENABLED` | `true` | decrypting proxy on/off |
 | `DASH_TOKEN_TTL` | `21600` | seconds; expiry on playlist/segment tokens |
 | `DASH_SEGMENT_CACHE_MAX` | `96` | segment LRU entries |
@@ -183,7 +184,8 @@ play"; this can.
 
 ## 12. Rollout
 
-1. Set `DASH_TOKEN_KEY` (shared across workers).
+1. Set `DASH_SIGN_SECRET` in `.env` (shared across workers). Verify with `pm2 ls`: two workers online,
+   then hit one playlist URL over ~20 fresh connections — any `403` means the workers disagree.
 2. Deploy; verify one channel end-to-end (hls.js console: no `keySystemNoKeys`).
 3. `DASH_PROXY_ENABLED=false` drops cenc channels (503) without shipping a broken playlist — the
    rollback is "channel disappears", not "channel spins".
