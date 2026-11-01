@@ -74,7 +74,16 @@ router.get('/api/soccerfull/manifest', async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
   if (!targetUrl) return res.status(400).send('Missing url');
-  if (!isAllowedTarget(targetUrl)) return res.status(403).send('Blocked target');
+  if (!isAllowedTarget(targetUrl)) {
+    // If it's a valid external URL, redirect directly to upstream CDN so client never gets 403
+    try {
+      const p = new URL(targetUrl);
+      if (p.protocol === 'https:' || p.protocol === 'http:') {
+        return res.redirect(302, targetUrl);
+      }
+    } catch (_) {}
+    return res.status(403).send('Blocked target');
+  }
 
   const baseUrl = getRequestBaseUrl(req);
   const cacheKey = JSON.stringify([targetUrl, baseUrl]);

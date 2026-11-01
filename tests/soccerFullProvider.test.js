@@ -520,5 +520,42 @@ describe('SoccerFullProvider', () => {
       expect(s.behaviorHints.notWebReady).toBe(false);
       expect(s.isTikTok).toBe(true);
     });
+    test('extracts direct CDN m3u8 URL without manifest proxy wrapping when hosted externally', async () => {
+      const undici = require('undici');
+      const extCdnUrl = 'https://s12-s501740.s1q2105.com/hls/testcode/master.m3u8?token=123';
+      const artHtml = '<!doctype html><html><body><div class="artplayer-app"></div><script>var m3u8Url = "' + extCdnUrl + '";</script></body></html>';
+
+      jest.spyOn(undici, 'request')
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: { text: async () => artHtml }
+        })
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: { text: async () => '#EXTM3U' }
+        });
+
+      const streams = await provider._resolveServerStream({ sid: '18313', label: 'EXTENDED in En' }, 'https://soccerfull.net/match.html');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.url).toBe(extCdnUrl);
+      expect(s.url).not.toContain('/api/soccerfull/manifest');
+      expect(s.behaviorHints.notWebReady).toBe(false);
+      expect(s.behaviorHints.proxyHeaders.request.Referer).toBe('https://soccerfull.net/');
+    });
+
+    test('ignores post-id when default iframe /play/<sid> exists to avoid cross-match pollution', () => {
+      const realMatchHtml = `
+        <div id="video" post-id="4789"></div>
+        <iframe src="/play/18308" width="100%"></iframe>
+        <a href="?sid=18308" class="video-server bt_active">Full Match</a>
+        <a href="?sid=18300" class="video-server">Full Match</a>
+      `;
+      const servers = provider._extractServerOptions(realMatchHtml);
+      const sids = servers.map(s => s.sid);
+      expect(sids).toContain('18308');
+      expect(sids).toContain('18300');
+      expect(sids).not.toContain('4789');
+    });
   });
 });

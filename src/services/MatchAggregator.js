@@ -124,7 +124,7 @@ const COMPOUND_ALIASES = [
     [/\bsporting\s*gijon\b/g, 'sportinggijon'],
     [/\bsporting\s*(?:cp|clube\s*de\s*portugal|lisbon)\b/g, 'sportingcp'],
     [/\bathletic\s*(club|bilbao)\b/g, 'athleticbilbao'],
-    [/\bbayer(\s*04)?\s*leverkusen\b/g, 'bayerleverkusen'],
+    [/\bbayer(\s*04)?\s*leverkusen\b|\bleverkusen\b/g, 'bayerleverkusen'],
     [/\bborussia\s*m[oö]nchengladbach\b|\bm['’]?gladbach\b/g, 'monchengladbach'],
     [/\bpsv(\s*eindhoven)?\b/g, 'psveindhoven'],
     [/\bfeyenoord(\s*rotterdam)?\b/g, 'feyenoord'],

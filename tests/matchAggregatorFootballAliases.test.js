@@ -58,4 +58,10 @@ describe('MatchAggregator Football Club Aliases and Variants', () => {
     const e2 = { id: 'dlv8', title: 'Sporting CP vs Real Oviedo', category: 'football', date: '1792082700000' };
     expect(agg.isSameEvent(e1, e2)).toBe(false);
   });
+
+  test('merges Bayer Leverkusen across official name and short name (Bayer Leverkusen vs Leverkusen)', () => {
+    const e1 = { id: 'sf_4785', title: 'Bayer Leverkusen vs VfB Stuttgart', category: 'football', date: '1793460600000', status: 'finished' };
+    const e2 = { id: 'livetv_1', title: 'Leverkusen vs Stuttgart', category: 'football', date: '1793460600000', status: 'finished' };
+    expect(agg.isSameEvent(e1, e2)).toBe(true);
+  });
 });
