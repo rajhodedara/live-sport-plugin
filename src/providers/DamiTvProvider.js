@@ -267,7 +267,19 @@ class DamiTvProvider extends BaseProvider {
     return stream;
   }
 
+  /**
+   * Opt-out gate. DamiTV's /c/ channels are TikTok restreams: each segment is a
+   * zlib-compressed PNG container, so serving them means inflating and relaying
+   * every segment through this host. That bandwidth is not wanted here, so the
+   * provider can be switched off with DAMITV_ENABLED=false. Enabled everywhere
+   * else by default, so an unset env changes nothing.
+   */
+  isEnabled() {
+    return process.env.DAMITV_ENABLED !== 'false';
+  }
+
   async getMatches() {
+    if (!this.isEnabled()) return [];
     const matches = [];
     const seenSanitizedIds = new Set();
 
@@ -458,6 +470,7 @@ class DamiTvProvider extends BaseProvider {
 
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
+    if (!this.isEnabled()) return streams;
 
     const embedUrl = src.url || src.embedUrl || '';
     if (!embedUrl || !embedUrl.startsWith('http')) return streams;
