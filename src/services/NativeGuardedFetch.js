@@ -8,11 +8,11 @@ const { createNativeGuardedSlot } = require('./NativeGuardedSlot');
 const { readLimitedBody } = require('../impitClient');
 const { OutboundBlockedError, assertOutboundUrl } = require('./GuardedOutbound');
 const { filterRedirectHeaders, shouldDropRedirectBody } = require('./RedirectHeaderPolicy');
+const { selectGuardedEgress } = require('./GuardedEgressPolicy');
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
 const HARD_BODY_LIMIT = 8 * 1024 * 1024;
 const error = (code, message) => Object.assign(new Error(message), { code });
-const isDamitv = host => host === 'damitv.st' || host.endsWith('.damitv.st');
 
 async function withSignal(operation, signal) {
   let abort;
@@ -175,9 +175,7 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
       if (options.redirect !== undefined && !['manual', 'follow', 'error'].includes(options.redirect)) throw new TypeError('Invalid redirect policy');
       // Preserve the selected egress/profile across CDN redirects, as one
       // existing native client does. A redirect must not silently leave WARP.
-      const proxyUrl = Object.hasOwn(options, 'proxyUrl') ? options.proxyUrl :
-        isDamitv(url.hostname) ? process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL : null;
-      const profile = options.profile || (proxyUrl || isDamitv(url.hostname) ? 'vanilla' : 'chrome');
+      const { proxyUrl, profile } = selectGuardedEgress(url, options);
       const deadline = performance.now() + timeoutMs;
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(new DOMException('Native fetch deadline', 'TimeoutError')), timeoutMs);

@@ -4,6 +4,7 @@ const { fetchUndici: fetch } = require('../../services/ProviderOutbound');
 const SkTechCrypto = require('./SkTechCrypto');
 const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
 const { BASE_URL } = require('../../config');
+const { signPayload: signDashPayload } = require('../../services/DashPayload');
 
 const BASE_API_URL = 'https://dk01-64n.pages.dev/';
 const DEFAULT_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -465,12 +466,12 @@ class SkTechMatchResolver {
         const key = (parts[1] || '').trim();
 
         if (/^[0-9a-fA-F]{32}$/.test(key)) {
-          const payload = Buffer.from(JSON.stringify({
+          const payload = signDashPayload({
             mpdUrl: parsed.url,
             key: key.toLowerCase(),
             kid: kid.toLowerCase(),
             headers: parsed.headers || {}
-          })).toString('base64url');
+          });
 
           dashStreams.push({
             name: '⚡ Direct Stream',

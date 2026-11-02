@@ -1,6 +1,7 @@
 'use strict';
 
-const { providerRequestHeaders, isDamitvTarget } = require('./ProviderRequestHeaders');
+const { providerRequestHeaders } = require('./ProviderRequestHeaders');
+const { selectGuardedEgress } = require('./GuardedEgressPolicy');
 const DEFAULT_LIMIT = 1024 * 1024;
 let singleton, nativePool;
 
@@ -21,14 +22,13 @@ function createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay = abortab
     if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 1 || maxBodyBytes > 8 * 1024 * 1024) throw new RangeError('Invalid guarded response limit');
     const attempts = options.attempts ?? 3;
     if (!Number.isInteger(attempts) || attempts < 1 || attempts > 3) throw new RangeError('Invalid guarded attempt count');
-    const proxyUrl = options.proxyUrl || (isDamitvTarget(url) && (process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL)) || null;
+    const { proxyUrl, profile } = selectGuardedEgress(url, options);
     const supplied = providerRequestHeaders(url, options.headers);
     const pairs = Array.isArray(supplied) && supplied.length && !Array.isArray(supplied[0])
       ? Array.from({ length: Math.ceil(supplied.length / 2) }, (_, i) => [supplied[i * 2], supplied[i * 2 + 1]])
       : supplied;
     const headers = pairs && Object.prototype.toString.call(pairs) === '[object Object]'
       ? pairs : Object.fromEntries(new Headers(pairs || {}));
-    const profile = options.profile || (proxyUrl || isDamitvTarget(url) ? 'vanilla' : 'chrome');
     const controller = new AbortController();
     const signal = AbortSignal.any([controller.signal, ...(options.signal ? [options.signal] : [])]);
     const deadline = performance.now() + timeoutMs;

@@ -171,17 +171,19 @@ describe('LeafProvider Unit Tests', () => {
       expect(streams).toHaveLength(2);
 
       // Stream 1: 1080p FHD
-      expect(streams[0].url).toBe(`${BASE_URL}/api/manifest?url=${encodeURIComponent('https://papacito.cfd/m3u/1820218/live.m3u8?ft=temporary_jwt_token')}&referer=${encodeURIComponent('https://sports.highfly.to/')}&origin=${encodeURIComponent('https://sports.highfly.to')}`);
+      expect(streams[0].url).toBe(`${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent('https://papacito.cfd/m3u/1820218/live.m3u8?ft=temporary_jwt_token')}`);
       expect(streams[0].resolution).toBe('1080p');
       expect(streams[0].quality).toBe('FHD');
       expect(streams[0].bitrate).toBe('6.2 Mbps');
       expect(streams[0].name).toBe('Leaf [FHD]');
       expect(streams[0].title).toBe('(US: NBC SPORTS BAY AREA) FHD');
       expect(streams[0].behaviorHints.notWebReady).toBe(false);
+      expect(streams[0].behaviorHints.proxyHeaders.request['Referer']).toBe('https://sports.highfly.to/');
+      expect(streams[0].behaviorHints.proxyHeaders.request['Origin']).toBe('https://sports.highfly.to');
       expect(streams[0]._source).toBe('leaf');
 
       // Stream 2: 720p HD
-      expect(streams[1].url).toBe(`${BASE_URL}/api/manifest?url=${encodeURIComponent('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt')}&referer=${encodeURIComponent('https://sports.highfly.to/')}&origin=${encodeURIComponent('https://sports.highfly.to')}`);
+      expect(streams[1].url).toBe(`${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent('https://papacito.cfd/m3u/1413072/live.m3u8?ft=another_jwt')}`);
       expect(streams[1].resolution).toBe('720p');
       expect(streams[1].quality).toBe('HD');
       expect(streams[1].bitrate).toBe('3.5 Mbps');
@@ -266,7 +268,7 @@ describe('LeafProvider Unit Tests', () => {
       });
       const res = await customProvider.resolveStream('streamed:tennis-match', 'tennis', 'Match');
       expect(res).toHaveLength(1);
-      expect(res[0].url).toContain('/api/manifest?url=');
+      expect(res[0].url).toContain('/api/leaf/manifest.m3u8?url=');
       expect(res[0].url).toContain(encodeURIComponent('https://papacito.cfd/m3u/12345/live.m3u8?ft=token_val'));
     });
   });

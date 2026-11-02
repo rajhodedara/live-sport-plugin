@@ -5,6 +5,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
+const { signPayload: signDashPayload } = require('../services/DashPayload');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 
 const DEFAULT_REFERER = 'http://www.fawanews.sc/';
@@ -481,12 +482,12 @@ class Ak47LiveProvider extends BaseProvider {
                   }
                 }
 
-                const payload = Buffer.from(JSON.stringify({
+                const payload = signDashPayload({
                   mpdUrl: dashLink,
                   key: clearKey.toLowerCase(),
                   kid: clearKid.toLowerCase(),
                   headers: dashHeaders
-                })).toString('base64url');
+                });
 
                 return [new StreamEntity({
                   name: 'Ak47Live',
@@ -535,6 +536,11 @@ class Ak47LiveProvider extends BaseProvider {
                     }
                   }
                 }
+                if (referer && referer !== DEFAULT_REFERER && (!src.origin || origin === DEFAULT_ORIGIN)) {
+                  try {
+                    origin = new URL(referer).origin;
+                  } catch (_) {}
+                }
               } else if (selected.tokenApi) {
                 try {
                   const tokenObj = typeof selected.tokenApi === 'string' ? JSON.parse(selected.tokenApi) : selected.tokenApi;
@@ -557,7 +563,19 @@ class Ak47LiveProvider extends BaseProvider {
                         directLink = parsedJson.playback_url || parsedJson.url || '';
                       } catch (_) {
                         const matchHls = tokenBody.match(/hlsManifestUrl":"([^"]+)"/);
-                        if (matchHls) directLink = matchHls[1];
+                        if (matchHls) {
+                          directLink = matchHls[1];
+                        } else {
+                          const matchSrc = tokenBody.match(/"src"\s*:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/i) ||
+                                           tokenBody.match(/(?:source:\s*["']|playback_url["']:\s*["'])(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
+                          if (matchSrc) {
+                            directLink = matchSrc[1];
+                            referer = tokenObj.api;
+                            try {
+                              origin = new URL(referer).origin;
+                            } catch (_) {}
+                          }
+                        }
                       }
                       if (directLink) streamUrl = directLink;
                     }

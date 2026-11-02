@@ -63,7 +63,7 @@ function getProxyImpit(proxyUrl) {
   if (_impitProxyInstance !== undefined) return _impitProxyInstance;
   try {
     const { Impit } = require('impit');
-    _impitProxyInstance = new Impit({ proxyUrl });
+    _impitProxyInstance = new Impit({ browser: 'chrome142', proxyUrl });
     _impitProxyBornAt = Date.now();
     _impitProxyUrl = proxyUrl;
     console.log(`[impitClient] impit proxy client initialized with ${proxyUrl}`);
@@ -97,6 +97,8 @@ function getVanillaImpit() {
 }
 
 const { isDamitvTarget, isDembedTarget, providerRequestHeaders } = require('./services/ProviderRequestHeaders');
+
+const { isLeafTarget } = require('./services/GuardedEgressPolicy');
 
 // -- impit TLS skip list ------------------------------------------------------
 // rustls (impit's TLS) validates certificates against a curated root store and
@@ -312,12 +314,18 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
   const warpProxyUrl = process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL;
   const isDamitv = isDamitvTarget(url);
   const isDembed = isDembedTarget(url);
-  const proxyUrl = opts.proxyUrl || (isDamitv && warpProxyUrl ? warpProxyUrl : null);
+  const isLeaf = isLeafTarget(url);
+  const proxyUrl = opts.proxyUrl || ((isDamitv || isLeaf) && warpProxyUrl ? warpProxyUrl : null);
   // Direct (non-proxied) requests to hosts whose certificate chain impit
   // deterministically rejects skip the doomed TLS handshake entirely and go
   // straight to the undici path below.
   const impit = proxyUrl ? getProxyImpit(proxyUrl)
     : (isDamitv ? (getVanillaImpit() || getImpit()) : (impitTlsBlocked(url) ? null : getImpit()));
+  if (proxyUrl && !impit) {
+    const error = new Error('[impitClient] Proxy client unavailable; refusing direct fallback');
+    error.code = 'EPROXYUNAVAILABLE';
+    throw error;
+  }
   const maxAttempts = Math.max(1, attempts);
 
   headers = providerRequestHeaders(url, headers);
@@ -499,4 +507,4 @@ function isImpitAvailable() {
   return getImpit() !== null;
 }
 
-module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget, readLimitedBody };
+module.exports = { safeFetch, isImpitAvailable, getImpit, isDamitvTarget, isDembedTarget, isLeafTarget, readLimitedBody };

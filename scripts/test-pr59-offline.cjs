@@ -23,7 +23,10 @@ const suites = [
   'streamResolveConcurrency', 'resolverTlsHandshake',
   'daddyLiveProvider', 'timStreamsProvider', 'ak47LiveProvider', 'universalChannelIdentity',
   'cacheTimingRelations', 'streamTimingWindow', 'pendingMintPruning',
-  'skTechDashDrmProxy', 'manifestRecoveryIdentity'
+  'skTechDashDrmProxy', 'manifestRecoveryIdentity',
+  'stableStreamSplitIntegration', 'leafGuardedEgressIntegration',
+  'leafManifestGuardIntegration', 'legacyProxyInitialization', 'leafSelectiveProxy',
+  'dashPayload', 'dashCencEngine', 'leafPublicationPolicyIntegration'
 ].map(name => `tests/${name}.test.js`);
 let jestEntry;
 try { jestEntry = require.resolve('jest/bin/jest'); }
