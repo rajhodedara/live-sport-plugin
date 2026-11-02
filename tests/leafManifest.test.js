@@ -3,7 +3,14 @@
 const http = require('node:http');
 const express = require('express');
 const leafManifestRoute = require('../src/routes/leafManifest');
-const { parseUpstreamManifest, generateSlidingPlaylist, sessionCache } = leafManifestRoute;
+const {
+  parseUpstreamManifest,
+  generateSlidingPlaylist,
+  sanitizeManifestBody,
+  getOrFetchLiveManifest,
+  manifestCache,
+  sessionCache
+} = leafManifestRoute;
 const impitClient = require('../src/impitClient');
 
 describe('LeafManifest Synthetic Generator Unit Tests', () => {
@@ -25,6 +32,7 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
   });
 
   beforeEach(() => {
+    manifestCache.clear();
     sessionCache.clear();
   });
 
@@ -33,6 +41,7 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       safeFetchSpy.mockRestore();
       safeFetchSpy = null;
     }
+    manifestCache.clear();
     sessionCache.clear();
   });
 
@@ -219,6 +228,150 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       const res = await get('/api/leaf/manifest.m3u8?url=https%3A%2F%2Fpapacito.cfd%2Fm3u%2Ffail%2Flive.m3u8');
 
       expect(res.status).toBe(502);
+    });
+
+    test('preserves authenticated segment query tokens (?a=...) in live manifest response', async () => {
+      const mockRawPlaylist = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXT-X-MEDIA-SEQUENCE:100',
+        '#EXTINF:6.000,',
+        'https://w1.papacito.cfd/leaf/test_slug/test_session/seg_101.ts?a=signedTokenHash123&exp=1793500000',
+        '#EXTINF:6.000,',
+        'https://w1.papacito.cfd/leaf/test_slug/test_session/seg_102.ts?a=signedTokenHash456&exp=1793500000'
+      ].join('\n');
+
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => mockRawPlaylist
+      });
+
+      const res = await get('/api/leaf/manifest.m3u8?url=https%3A%2F%2Fpapacito.cfd%2Fm3u%2Ftest_slug%2Flive.m3u8%3Fft%3Dtoken123');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toContain('https://w1.papacito.cfd/leaf/test_slug/test_session/seg_101.ts?a=signedTokenHash123&exp=1793500000');
+      expect(res.body).toContain('https://w1.papacito.cfd/leaf/test_slug/test_session/seg_102.ts?a=signedTokenHash456&exp=1793500000');
+    });
+
+    test('reconstructs targetUrl when unencoded ampersands are split by query parser', async () => {
+      const mockRawPlaylist = [
+        '#EXTM3U',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXTINF:6.000,',
+        'https://w1.papacito.cfd/leaf/test/seg_1.ts?a=tok'
+      ].join('\n');
+
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () => mockRawPlaylist
+      });
+
+      // Simulates client requesting unencoded &ft=
+      const res = await get('/api/leaf/manifest.m3u8?url=https://papacito.cfd/m3u/test/live.m3u8?param=1&ft=token_val');
+
+      expect(res.status).toBe(200);
+      expect(safeFetchSpy).toHaveBeenCalledWith(
+        'https://papacito.cfd/m3u/test/live.m3u8?param=1&ft=token_val',
+        expect.any(Object)
+      );
+    });
+
+    test('falls back to stale manifest with 2s backoff on transient upstream error', async () => {
+      const initialPlaylist = '#EXTM3U\n#EXT-X-TARGETDURATION:6\nhttps://w1.papacito.cfd/leaf/test/seg_1.ts?a=tok';
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        text: async () => initialPlaylist
+      });
+
+      const url = 'https://papacito.cfd/m3u/stale/live.m3u8';
+      const first = await getOrFetchLiveManifest(url);
+      expect(first).toBe(initialPlaylist + '\n');
+
+      // Fast forward past expiresAt but before staleUntil
+      const cached = manifestCache.get(url);
+      cached.expiresAt = Date.now() - 100;
+
+      // Upstream now fails
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockRejectedValueOnce(new Error('Gateway Timeout 504'));
+
+      const second = await getOrFetchLiveManifest(url);
+      expect(second).toBe(initialPlaylist + '\n');
+      expect(cached.expiresAt).toBeGreaterThan(Date.now()); // Extended backoff to prevent stampede
+    });
+  });
+
+  describe('sanitizeManifestBody()', () => {
+    test('preserves all query parameters on absolute segment URLs', () => {
+      const raw = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXTINF:6.000,',
+        'https://w1.papacito.cfd/leaf/stream/123/seg_1.ts?a=token_xyz&t=999'
+      ].join('\n');
+
+      const sanitized = sanitizeManifestBody(raw, 'https://papacito.cfd/m3u/stream/live.m3u8');
+      expect(sanitized).toContain('https://w1.papacito.cfd/leaf/stream/123/seg_1.ts?a=token_xyz&t=999');
+    });
+
+    test('prepends cdnBase to relative segment URLs while preserving query parameters', () => {
+      const raw = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-TARGETDURATION:6',
+        '#EXTINF:6.000,',
+        '/leaf/stream/123/seg_1.ts?a=hash1',
+        '#EXTINF:6.000,',
+        'leaf/stream/123/seg_2.ts?a=hash2'
+      ].join('\n');
+
+      const sanitized = sanitizeManifestBody(raw, 'https://papacito.cfd/m3u/stream/live.m3u8');
+      expect(sanitized).toContain('https://w1.papacito.cfd/leaf/stream/123/seg_1.ts?a=hash1');
+      expect(sanitized).toContain('https://w1.papacito.cfd/leaf/stream/123/seg_2.ts?a=hash2');
+    });
+
+    test('rewrites master playlist variant streams back to /api/leaf/manifest.m3u8', () => {
+      const master = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:3',
+        '#EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080',
+        'chunklist_1080p.m3u8?ft=auth123',
+        '#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720',
+        'https://papacito.cfd/m3u/test/chunklist_720p.m3u8?ft=auth123'
+      ].join('\n');
+
+      const sanitized = sanitizeManifestBody(master, 'https://papacito.cfd/m3u/test/live.m3u8');
+      expect(sanitized).toContain('/api/leaf/manifest.m3u8?url=https%3A%2F%2Fpapacito.cfd%2Fm3u%2Ftest%2Fchunklist_1080p.m3u8%3Fft%3Dauth123');
+      expect(sanitized).toContain('/api/leaf/manifest.m3u8?url=https%3A%2F%2Fpapacito.cfd%2Fm3u%2Ftest%2Fchunklist_720p.m3u8%3Fft%3Dauth123');
+    });
+
+    test('does not let comments spoof the CDN base host', () => {
+      const raw = [
+        '#EXTM3U',
+        '#EXT-X-COMMENT: https://fake-malicious-site.com/track',
+        '#EXTINF:6.000,',
+        '/leaf/stream/123/seg_1.ts?a=hash1'
+      ].join('\n');
+
+      const sanitized = sanitizeManifestBody(raw, 'https://papacito.cfd/m3u/stream/live.m3u8');
+      expect(sanitized).toContain('https://w1.papacito.cfd/leaf/stream/123/seg_1.ts?a=hash1');
+      expect(sanitized).not.toContain('fake-malicious-site.com/leaf');
+    });
+
+    test('rejects honeypot trap manifests with stream_notice or _antipiracy', () => {
+      const honeypot1 = '#EXTM3U\nhttps://w1.papacito.cfd/leaf/stream_notice/123/seg_1.ts';
+      const honeypot2 = '#EXTM3U\nhttps://w1.papacito.cfd/_antipiracy/v2/seg_1.ts';
+
+      expect(() => sanitizeManifestBody(honeypot1, 'url')).toThrow('Upstream returned anti-piracy trap');
+      expect(() => sanitizeManifestBody(honeypot2, 'url')).toThrow('Upstream returned anti-piracy trap');
+    });
+
+    test('rejects non-m3u8 payload', () => {
+      expect(() => sanitizeManifestBody('<html>error</html>', 'url')).toThrow('Upstream returned non-m3u8 body');
     });
   });
 });
