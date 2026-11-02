@@ -12,6 +12,7 @@
     "test:e2e-client": "node scripts/test-e2e-simulated-client.js",
     "test:sanity": "node scripts/test-e2e-simulated-client.js",
     "test:247": "node scripts/test-247-channels.js",
+    "test:regress:ak47": "node scripts/regress-ak47-live.js",
     "test:compare-live": "node scripts/compare-live-vs-local.js",
     "compare:live-streams": "node scripts/compare-live-matches.js",
     "generate:provider": "node scripts/generate-provider.js",
@@ -73,6 +74,7 @@
       "/test-scripts/",
       "/scratch/",
       "/nuvio-proxy-2/",
+        "/review-checkouts/",
       "/tests/load/"
     ],
     "testMatch": [

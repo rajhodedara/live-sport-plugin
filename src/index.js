@@ -25,7 +25,7 @@ const path = require('path');
 const { builder } = require('./manifest');
 const { handleCatalog, handleMeta, isReplayMatch } = require('./catalog');
 const { handleStream } = require('./streams');
-const { PORT, BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
+const { PORT, BASE_URL, STREAM_BASE_URL, getRequestBaseUrl, getLocalIp } = require('./config');
 const { isLocalDirectRequest } = require('./services/localRequest');
 const container = require('./container');
 const https = require('https');
@@ -844,6 +844,7 @@ app.get('/img', async (req, res) => {
 // absent, all fetches silently use undici — streams continue to work.
 app.use(require('./routes/streamProxy'));
 app.use(require('./routes/manifest'));
+app.use(require('./routes/leafManifest'));
 app.use(require('./routes/hlsResource'));
 app.use(require('./routes/embed'));
 // Zero-bandwidth DASH→HLS converter (must stay above the /api resolver proxy)
@@ -879,7 +880,33 @@ app.use('/api', createProxyMiddleware({
 // A substring scan is far cheaper than JSON-parsing multi-megabyte hub
 // responses that carry no relative URLs, so payloads without any prefix are
 // passed through untouched. Keep in sync with the prefix lists in rewriteUrl.
-const REWRITE_SCAN_PREFIXES = ['/img', '/watch', '/api/manifest', '/api/soccerfull/manifest', '/api/dash', '/logo', '/api/mp4proxy', '/api/fastmp4', '/api/hlschunk', '/api/hls', '/hls', '/posters', '/donate'];
+const STREAM_PREFIXES = [
+  '/api/manifest',
+  '/api/dash',
+  '/api/hls',
+  '/hls/resource',
+  '/api/soccerfull',
+  '/api/leaf',
+  '/api/mp4proxy',
+  '/api/fastmp4',
+  '/api/hlschunk'
+];
+
+const METADATA_PREFIXES = [
+  '/img',
+  '/watch',
+  '/logo',
+  '/posters',
+  '/donate'
+];
+
+const REWRITE_SCAN_PREFIXES = [...STREAM_PREFIXES, ...METADATA_PREFIXES];
+// Match complete endpoint names or their path/file forms, never a lookalike
+// such as /api/leaflet. Generic upstream /hls paths are not addon endpoints.
+const matchesRewritePrefix = (url, prefix) => url === prefix ||
+  url.startsWith(`${prefix}/`) || url.startsWith(`${prefix}?`) ||
+  url.startsWith(`${prefix}#`) ||
+  (url.startsWith(`${prefix}.`) && /^\.[A-Za-z0-9]+(?:[?#]|$)/.test(url.slice(prefix.length)));
 
 app.use((req, res, next) => {
   const isAddonRoute = req.path === '/manifest.json' || 
@@ -891,6 +918,7 @@ app.use((req, res, next) => {
   if (!isAddonRoute) return next();
 
   const currentBaseUrl = getRequestBaseUrl(req);
+  const effectiveStreamBaseUrl = STREAM_BASE_URL || currentBaseUrl;
   const originalWrite = res.write;
   const originalEnd = res.end;
   const chunks = [];
@@ -922,16 +950,32 @@ app.use((req, res, next) => {
 
         const rewriteUrl = (url) => {
           if (!url || typeof url !== 'string') return url;
-          // Relative URLs
-          if (url.startsWith('/img') || url.startsWith('/watch') || url.startsWith('/api/manifest') || url.startsWith('/api/soccerfull/manifest') || url.startsWith('/api/dash') || url.startsWith('/logo') || url.startsWith('/api/mp4proxy') || url.startsWith('/api/fastmp4') || url.startsWith('/api/hlschunk') || url.startsWith('/api/hls') || url.startsWith('/hls') || url.startsWith('/posters') || url.startsWith('/donate')) {
-            modified = true;
-            return `${currentBaseUrl}${url}`;
+          // Relative stream URLs -> dedicated stream subdomain (if configured)
+          for (const prefix of STREAM_PREFIXES) {
+            if (matchesRewritePrefix(url, prefix)) {
+              modified = true;
+              return `${effectiveStreamBaseUrl}${url}`;
+            }
           }
-          // Absolute URLs with legacy/static base or localhost/LAN IP
-          const match = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|api\/manifest|api\/soccerfull\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
-          if (match) {
+          // Relative metadata & static URLs -> main addon domain
+          for (const prefix of METADATA_PREFIXES) {
+            if (matchesRewritePrefix(url, prefix)) {
+              modified = true;
+              return `${currentBaseUrl}${url}`;
+            }
+          }
+          // Absolute URLs matching known addon stream endpoints. Keep generic
+          // CDN /hls/ paths untouched; only /hls/resource belongs to the addon.
+          const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          if (streamMatch) {
             modified = true;
-            return `${currentBaseUrl}${match[1]}`;
+            return `${effectiveStreamBaseUrl}${streamMatch[1]}`;
+          }
+          // Absolute URLs matching metadata prefixes
+          const metaMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:img|watch|logo|posters|donate)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          if (metaMatch) {
+            modified = true;
+            return `${currentBaseUrl}${metaMatch[1]}`;
           }
           return url;
         };

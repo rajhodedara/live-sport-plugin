@@ -37,19 +37,24 @@ function getLocalIp() {
 
 const PORT = parseInt(process.env.PORT, 10) || 7000;
 
+const STREAM_BASE_URL = (
+  process.env.STREAM_URL ||
+  process.env.STREAM_BASE_URL ||
+  ''
+).replace(/\/$/, '');
+
 function getRequestBaseUrl(req) {
   if (!req) return BASE_URL;
-  if (process.env.ADDON_URL) return process.env.ADDON_URL.replace(/\/$/, '');
 
   // Protocol extraction (handles reverse proxies, Cloudflare, ngrok)
-  let proto = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  let proto = (req.headers && (req.headers['x-forwarded-proto'] || req.protocol)) || 'http';
   if (typeof proto === 'string' && proto.includes(',')) {
     proto = proto.split(',')[0].trim();
   }
-  if (req.headers['x-forwarded-ssl'] === 'on') {
+  if (req.headers && req.headers['x-forwarded-ssl'] === 'on') {
     proto = 'https';
   }
-  if (req.headers['cf-visitor']) {
+  if (req.headers && req.headers['cf-visitor']) {
     try {
       const visitor = JSON.parse(req.headers['cf-visitor']);
       if (visitor && visitor.scheme) proto = visitor.scheme;
@@ -57,10 +62,22 @@ function getRequestBaseUrl(req) {
   }
 
   // Host extraction (handles X-Forwarded-Host, Host header)
-  let host = req.headers['x-forwarded-host'] || (req.get && req.get('host')) || req.headers.host;
+  let host = req.headers && (req.headers['x-forwarded-host'] || (req.get && req.get('host')) || req.headers.host);
   if (typeof host === 'string' && host.includes(',')) {
     host = host.split(',')[0].trim();
   }
+
+  // If request specifically came through the dedicated streaming subdomain/host, preserve it
+  if (host && STREAM_BASE_URL) {
+    try {
+      const streamHost = new URL(STREAM_BASE_URL).host;
+      if (host === streamHost || host.startsWith('stream.')) {
+        return `${proto}://${host}`.replace(/\/$/, '');
+      }
+    } catch (_) {}
+  }
+
+  if (process.env.ADDON_URL) return process.env.ADDON_URL.replace(/\/$/, '');
 
   if (host) {
     if (host.startsWith('localhost') || host.startsWith('127.0.0.1')) {
@@ -79,4 +96,4 @@ const BASE_URL = (
   `http://${getLocalIp()}:${PORT}`                              // Local dev fallback to LAN IP
 ).replace(/\/$/, '');                                           // Strip trailing slash if any
 
-module.exports = { PORT, BASE_URL, getLocalIp, getRequestBaseUrl };
+module.exports = { PORT, BASE_URL, STREAM_BASE_URL, getLocalIp, getRequestBaseUrl };

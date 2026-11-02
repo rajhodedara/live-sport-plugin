@@ -1,5 +1,9 @@
 # PR61 corrections from the real provider catalog
 
+The latest stable d1b2b626 integration, new9641-row evidence and operator
+requirements are documented in STABLE_D1_INTEGRATION.md. This report retains
+the original catalog findings and corrections.
+
 The isolated November 1 catalog exposed concrete association and lookup defects.
 This follow-up corrects those defects without changing PR59's resolver transport,
 outbound guards, capacity limits or shared resolve-cache protocol.
@@ -130,15 +134,17 @@ Both Node22.23.2 and Node24.19.0 pass the complete selected offline command:
 node scripts/test-pr61-offline.cjs
 ```
 
-Results: inherited64 suites/636 passing tests plus PR61's57 suites/476 passing
-tests = **121 suites/1,112 passing Jest tests**, seven additional Node tests and
+Results after stable integration: inherited72 suites/741 passing tests plus
+PR61's57 suites/477 passing tests = **129 suites/1,218 passing Jest tests**,
+seven additional Node tests and
 one existing TODO. The boundary blocks sockets/listeners and actual workers.
 This is not a full repository green-suite claim.
 
 `npm run build` passes on Node22 with npm offline mode using cached ncc0.45.0
-and copyfiles2.4.1. No dependency or workflow declaration changed. Nineteen
-copied runtime files were checked and17 static imports resolved without loading
-the runtime; this does not execute native/WASM providers. Two independent
+and copyfiles2.4.1. No dependency lock or workflow declaration changed. The
+earlier catalog-only check covered19 copied runtime files and17 static imports
+without loading the runtime; this does not execute native/WASM providers.
+Current guarded-policy packaging is checked again by the integration. Two independent
 review passes identified and closed the old-channel bookmark regression and
 expired replay date-recovery bug. The latter also has a data-flow mutation
 check: reverting only its guard combines two rows; the fix preserves both.

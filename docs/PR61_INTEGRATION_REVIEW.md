@@ -1,9 +1,10 @@
 # PR61 integration review
 
-The real-provider catalog follow-up is documented in
-PR61_REAL_CATALOG_REVIEW.md. It records concrete ingestion/lookup corrections,
-the current121-suite/1112-Jest-plus7-Node selection and the remaining new-catalog
-and provider/player acceptance. Earlier totals below are historical snapshots.
+The latest integration with stable d1b2b626 is documented in
+STABLE_D1_INTEGRATION.md. The current selection passes129 suites/1218 Jest
+tests plus7 Node tests, with one existing TODO. PR61_REAL_CATALOG_REVIEW.md
+records the ingestion/lookup corrections. Earlier totals and ancestry below
+are historical snapshots; actual addon and provider/player acceptance remains.
 
 The candidate starts from published PR61
 `c952b588b14277dadae133764da589c97e3088c0` and now includes stable

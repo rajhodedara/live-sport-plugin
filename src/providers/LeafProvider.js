@@ -3,6 +3,7 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../services/ProviderOutbound');
 const { BASE_URL } = require('../config');
+const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 
 // Upstream replaced the old shared-token API with a per-install config path:
 //   https://sports.highfly.to/<base64url(config)>/{catalog,stream}/sport/...
@@ -247,22 +248,17 @@ class LeafProvider extends BaseProvider {
     for (const st of streamsList) {
       if (!st || typeof st.url !== 'string' || !st.url) continue;
 
-      // Match the actual host rather than a domain-looking substring in a
-      // path, query, credentials, or an unrelated hostname.
-      let sourceUrl;
-      try { sourceUrl = new URL(st.url); } catch (_) { continue; }
-      const host = sourceUrl.hostname.toLowerCase();
-      if (!['http:', 'https:'].includes(sourceUrl.protocol) || sourceUrl.username || sourceUrl.password ||
-          (host !== 'papacito.cfd' && !host.endsWith('.papacito.cfd'))) continue;
+      // Publish only targets accepted by the Leaf manifest route.
+      try { validateLeafManifestUrl(st.url); } catch (_) { continue; }
 
       // Forward the upstream signed playback URL only. A papacito URL without a
       // query string carries no signature, and the signature cannot be minted
       // locally, so it would answer 403 "Authentication required" at the CDN.
-      if (!st.url.includes('?')) continue;
+      if (!new URL(st.url).search) continue;
       const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
-      const manifestProxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(directUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+      const manifestProxyUrl = `${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent(directUrl)}`;
 
       const rawName = typeof st.name === 'string' ? st.name : '';
       const rawTitle = typeof st.title === 'string' ? st.title : '';
@@ -310,7 +306,14 @@ class LeafProvider extends BaseProvider {
         quality,
         bitrate,
         behaviorHints: {
-          notWebReady: false
+          notWebReady: false,
+          proxyHeaders: {
+            request: {
+              'Referer': referer,
+              'Origin': origin,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+            }
+          }
         },
         _source: 'leaf'
       }));
