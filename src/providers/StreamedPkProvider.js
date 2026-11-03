@@ -105,6 +105,7 @@ class StreamedPkProvider extends BaseProvider {
 
           matches.push(new MatchEntity({
             id: `spk_${item.id}`,
+            aliasIds: [item.id],
             title: item.title,
             category: finalCategory,
             status: status,

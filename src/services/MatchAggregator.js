@@ -1465,7 +1465,7 @@ class MatchAggregator {
     //   3 past-in-retention kickoff already passed but still inside 24h window
     // Entries within each priority tier retain their original relative order (stable sort).
     try {
-      const CARRY_FORWARD_PROVIDERS = ['daddylive'];
+      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf'];
       const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 600);
       const nowForCarry = Date.now();
       const retentionMs = 24 * 3600 * 1000;
@@ -1547,7 +1547,32 @@ class MatchAggregator {
         } else {
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync and no valid entries were available to carry forward.`);
         }
-        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length);
+
+        // Backfill missing provider sources onto existing active matches that lost this source
+        const activeMatchMap = new Map();
+        for (const m of activeMatches) {
+          if (m && m.id) activeMatchMap.set(m.id, m);
+          if (m && Array.isArray(m.aliasIds)) {
+            for (const aid of m.aliasIds) if (aid) activeMatchMap.set(aid, m);
+          }
+        }
+        let sourcesCarried = 0;
+        for (const prev of previous) {
+          if (!prev || !Array.isArray(prev.sources)) continue;
+          const prevSources = prev.sources.filter(s => s && s.source === provider);
+          if (prevSources.length === 0) continue;
+          const curr = (prev.id && activeMatchMap.get(prev.id)) ||
+            (Array.isArray(prev.aliasIds) && prev.aliasIds.map(aid => activeMatchMap.get(aid)).find(Boolean));
+          if (curr && Array.isArray(curr.sources) && !curr.sources.some(s => s && s.source === provider)) {
+            curr.sources.push(...prevSources.map(s => ({ ...s })));
+            sourcesCarried++;
+          }
+        }
+        if (sourcesCarried > 0) {
+          console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
+        }
+
+        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length + sourcesCarried);
       }
     } catch (carryErr) {
       console.error('[MatchAggregator] Provider carry-forward failed:', carryErr.message);

@@ -974,7 +974,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
