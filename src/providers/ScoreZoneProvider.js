@@ -370,7 +370,14 @@ class ScoreZoneProvider extends BaseProvider {
       title: `ScoreZone | ${ch.name}${ch.quality ? ' — ' + ch.quality : ''}`,
       url: `${BASE_URL}/api/scorezone/manifest/${encodeURIComponent(effectiveSourceId)}/${encodeURIComponent(ch.id)}.m3u8`,
       behaviorHints: {
-        notWebReady: false
+        notWebReady: true,
+        proxyHeaders: {
+          request: {
+            'Referer': 'https://scorezonetv.live/',
+            'Origin': 'https://scorezonetv.live',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+          }
+        }
       },
       sourceName: 'scorezone',
       _source: 'scorezone'
