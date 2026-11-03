@@ -144,6 +144,9 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
   const absoluteUrl = resolveSegmentUrl(segmentUri, manifestUrl);
 
   if (absoluteUrl.includes('.m3u8')) {
+    if (typeof opts.toPlaylistUrl === 'function') {
+      return opts.toPlaylistUrl(absoluteUrl, opts);
+    }
     return buildManifestProxyUrl(absoluteUrl, opts);
   }
 
@@ -235,7 +238,9 @@ function rewriteHlsTagUris(line, manifestUrl, opts = {}) {
               || tag === '#EXT-X-IMAGE-STREAM-INF';
             const isSegmentReference = tag === '#EXT-X-PART' || tag === '#EXT-X-PRELOAD-HINT';
             const rewrittenUri = isPlaylistReference
-              ? buildManifestProxyUrl(resolveSegmentUrl(value, manifestUrl), opts)
+              ? (typeof opts.toPlaylistUrl === 'function'
+                  ? opts.toPlaylistUrl(resolveSegmentUrl(value, manifestUrl), opts)
+                  : buildManifestProxyUrl(resolveSegmentUrl(value, manifestUrl), opts))
               : isSegmentReference
                 ? rewriteHlsUri(value, manifestUrl, opts)
                 : resolved.toString();

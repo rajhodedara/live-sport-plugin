@@ -27,6 +27,7 @@ function isEventStreamSource(src) {
 }
 
 const SOURCE_PRIORITY = {
+  scorezone: 1,
   leaf: 1,
   daddylive: 1,
   vavoo: 2,
@@ -59,8 +60,8 @@ const SOURCE_PRIORITY = {
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -92,7 +93,8 @@ const NICE_NAMES = {
   admin: 'Streamed.pk',
   echo: 'Streamed.pk',
   golf: 'Streamed.pk',
-  delta: 'Streamed.pk'
+  delta: 'Streamed.pk',
+  scorezone: 'ScoreZone'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -118,7 +120,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   vavoo: 'Vavoo',
   ppvst: 'PPV.st',
   ak47live: 'AK47Live',
-  leaf: 'Leaf'
+  leaf: 'Leaf',
+  scorezone: 'ScoreZone'
 };
 
 function isReplaySource(sourceName) {
@@ -262,6 +265,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'leaf') {
     const provider = container.resolve('leafProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'scorezone') {
+    const provider = container.resolve('scorezoneProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -974,7 +980,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,scorezone';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
