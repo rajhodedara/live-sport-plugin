@@ -156,7 +156,7 @@ router.get('/api/scorezone/manifest/:sourceId/:channelId.m3u8', async (req, res)
   const { sourceId, channelId } = req.params;
   const variantQuery = req.query.v;
 
-  const secret = process.env.APP_SECRET || process.env.SESSION_SECRET || '';
+  const secret = process.env.APP_SECRET || process.env.SESSION_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'scorezone-dev-default-secret');
   if (!secret) {
     return res.status(500).send('Server configuration error: missing secret');
   }

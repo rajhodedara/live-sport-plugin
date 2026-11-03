@@ -152,7 +152,7 @@ class ScoreZoneProvider extends BaseProvider {
   }
 
   _getSecret() {
-    return process.env.APP_SECRET || process.env.SESSION_SECRET || '';
+    return this.secret || process.env.APP_SECRET || process.env.SESSION_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'scorezone-dev-default-secret');
   }
 
   async getMatches() {
