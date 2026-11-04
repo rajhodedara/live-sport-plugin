@@ -1,10 +1,15 @@
-name: Auto Deploy to VPS
+name: Deploy to VPS
 
+# Manual only. This workflow used to fire on every push to main/stable, which
+# meant whatever happened to be on that branch was live on the box a minute
+# later. Deploy is now an explicit action:
+#
+#   GitHub -> Actions -> "Deploy to VPS" -> Run workflow -> pick the branch
+#
+# The branch selector is what the job pulls: BRANCH comes from github.ref_name,
+# so dispatching with stable deploys stable and nothing else. Pushing stays a
+# branch-only operation and never touches production.
 on:
-  push:
-    branches:
-      - main
-      - stable
   workflow_dispatch:
 
 jobs:
