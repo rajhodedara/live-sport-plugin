@@ -452,8 +452,8 @@ const sourceIdentityKey = (s) => [
 ].join('\u0000');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, providerHealthService, broadcasterMatchService } = {}) {
-    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : [])];
+  constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, scorezoneProvider, providerHealthService, broadcasterMatchService } = {}) {
+    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : []), ...((scorezoneProvider && typeof scorezoneProvider.isEnabled === 'function' && !scorezoneProvider.isEnabled()) ? [] : (scorezoneProvider ? [scorezoneProvider] : []))];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
@@ -904,6 +904,147 @@ class MatchAggregator {
       }
       throw error;
     }
+  }
+
+  /**
+   * Re-fetch a single provider and backfill its sources onto the matches that
+   * are already cached, without running a full multi-provider sync.
+   *
+   * Leaf publishes short-lived fixtures. A full sync runs every four hours
+   * (plus the traffic-driven stale-while-revalidate path), so a whole Leaf
+   * match window can start and end between two syncs and never reach the
+   * catalog. This is the Leaf-only freshness path: it is strictly additive -
+   * existing matches gain the provider's sources and alias ids, nothing is
+   * removed, and no new match cards are created (a fixture with no counterpart
+   * yet is left to the next full sync, which owns ordering and dedupe).
+   *
+   * @param {string} sourceName provider source label, e.g. 'leaf'
+   * @returns {Promise<{provider: string, fetched: number, matched: number, added: number, changedMatchIds: string[]}>}
+   */
+  async refreshProviderSources(sourceName) {
+    const wanted = String(sourceName || '').toLowerCase();
+    const empty = { provider: wanted, fetched: 0, matched: 0, added: 0, changedMatchIds: [] };
+    if (!wanted) return empty;
+
+    const provider = this.providers.find(
+      (p) => p && String(p.sourceName || p.name || '').toLowerCase() === wanted
+    );
+    if (!provider) return empty;
+    // Providers expose a kill switch (Leaf parks itself on a dead local port);
+    // never spend a refresh tick on a provider that is deliberately disabled.
+    if (provider.configured === false) return empty;
+
+    let incoming;
+    try {
+      incoming = await this._fetchProviderMatches(provider);
+    } catch (err) {
+      console.warn(`[MatchAggregator] ${provider.name || wanted} refresh failed: ${err.message}`);
+      return empty;
+    }
+    if (!Array.isArray(incoming) || incoming.length === 0) return empty;
+
+    const cacheService = this.cacheService;
+    if (!cacheService || typeof cacheService.getMatchesReadOnly !== 'function' || typeof cacheService.setMatches !== 'function') {
+      return empty;
+    }
+
+    // Read-only snapshot: the cache contract forbids mutating it in place, so
+    // changed matches are replaced in a shallow copy below.
+    const current = cacheService.getMatchesReadOnly() || [];
+    if (!Array.isArray(current) || current.length === 0) return empty;
+
+    // Merged matches carry the provider's ids in aliasIds (that is how the full
+    // merge links them), so alias intersection is both exact and O(1).
+    const byAlias = new Map();
+    for (const m of current) {
+      if (!m) continue;
+      if (m.id) byAlias.set(String(m.id), m);
+      if (Array.isArray(m.aliasIds)) {
+        for (const aid of m.aliasIds) if (aid) byAlias.set(String(aid), m);
+      }
+    }
+
+    const updates = new Map(); // target match id -> { match, sources, aliasIds }
+    let matched = 0;
+
+    for (const providerMatch of incoming) {
+      if (!providerMatch || !Array.isArray(providerMatch.sources) || providerMatch.sources.length === 0) continue;
+
+      let target = null;
+      if (providerMatch.id && byAlias.has(String(providerMatch.id))) {
+        target = byAlias.get(String(providerMatch.id));
+      }
+      if (!target && Array.isArray(providerMatch.aliasIds)) {
+        for (const aid of providerMatch.aliasIds) {
+          if (aid && byAlias.has(String(aid))) {
+            target = byAlias.get(String(aid));
+            break;
+          }
+        }
+      }
+      if (!target) continue;
+      matched++;
+
+      const key = String(target.id || (Array.isArray(target.aliasIds) && target.aliasIds[0]) || '');
+      if (!key) continue;
+      let upd = updates.get(key);
+      if (!upd) {
+        upd = { match: target, sources: [], aliasIds: [] };
+        updates.set(key, upd);
+      }
+
+      const alreadyHas = (src) => {
+        const id = String(src.id == null ? '' : src.id);
+        return (Array.isArray(target.sources) ? target.sources : []).some(
+          (s) => s && s.source === src.source && String(s.id == null ? '' : s.id) === id
+        ) || upd.sources.some((s) => s.source === src.source && String(s.id == null ? '' : s.id) === id);
+      };
+      for (const src of providerMatch.sources) {
+        if (!src || !src.source) continue;
+        if (alreadyHas(src)) continue;
+        upd.sources.push({ ...src });
+      }
+
+      for (const aid of [providerMatch.id, ...(Array.isArray(providerMatch.aliasIds) ? providerMatch.aliasIds : [])]) {
+        if (!aid) continue;
+        const id = String(aid);
+        if (String(target.id) === id) continue;
+        if (Array.isArray(target.aliasIds) && target.aliasIds.includes(id)) continue;
+        if (upd.aliasIds.includes(id)) continue;
+        upd.aliasIds.push(id);
+      }
+    }
+
+    const changed = [...updates.values()].filter((u) => u.sources.length > 0 || u.aliasIds.length > 0);
+    if (changed.length === 0) {
+      // Heartbeat: without it a healthy no-op tick is indistinguishable from a
+      // scheduler that never ran. One short line every LEAF_REFRESH_MS is cheap
+      // and it is the only positive proof the timer is alive.
+      console.log(
+        `[MatchAggregator] ${provider.name || wanted} refresh: fetched ${incoming.length}, matched ${matched}, ` +
+        'nothing new to backfill'
+      );
+      return { provider: wanted, fetched: incoming.length, matched, added: 0, changedMatchIds: [] };
+    }
+
+    const changedIds = new Set(changed.map((u) => String(u.match.id)));
+    const next = current.map((m) => {
+      if (!m || !changedIds.has(String(m.id))) return m;
+      const upd = updates.get(String(m.id));
+      return {
+        ...m,
+        sources: upd.sources.length ? [...(Array.isArray(m.sources) ? m.sources : []), ...upd.sources] : m.sources,
+        aliasIds: upd.aliasIds.length ? [...(Array.isArray(m.aliasIds) ? m.aliasIds : []), ...upd.aliasIds] : m.aliasIds,
+      };
+    });
+    cacheService.setMatches(next);
+
+    const added = changed.reduce((n, u) => n + u.sources.length, 0);
+    console.log(
+      `[MatchAggregator] ${provider.name || wanted} refresh: fetched ${incoming.length}, matched ${matched}, ` +
+      `backfilled ${added} source(s) onto ${changed.length} match(es)`
+    );
+    return { provider: wanted, fetched: incoming.length, matched, added, changedMatchIds: [...changedIds] };
   }
 
   async syncMatches() {
@@ -1465,7 +1606,7 @@ class MatchAggregator {
     //   3 past-in-retention kickoff already passed but still inside 24h window
     // Entries within each priority tier retain their original relative order (stable sort).
     try {
-      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf'];
+      const CARRY_FORWARD_PROVIDERS = ['daddylive'];
       const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 600);
       const nowForCarry = Date.now();
       const retentionMs = 24 * 3600 * 1000;
@@ -1547,32 +1688,7 @@ class MatchAggregator {
         } else {
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync and no valid entries were available to carry forward.`);
         }
-
-        // Backfill missing provider sources onto existing active matches that lost this source
-        const activeMatchMap = new Map();
-        for (const m of activeMatches) {
-          if (m && m.id) activeMatchMap.set(m.id, m);
-          if (m && Array.isArray(m.aliasIds)) {
-            for (const aid of m.aliasIds) if (aid) activeMatchMap.set(aid, m);
-          }
-        }
-        let sourcesCarried = 0;
-        for (const prev of previous) {
-          if (!prev || !Array.isArray(prev.sources)) continue;
-          const prevSources = prev.sources.filter(s => s && s.source === provider);
-          if (prevSources.length === 0) continue;
-          const curr = (prev.id && activeMatchMap.get(prev.id)) ||
-            (Array.isArray(prev.aliasIds) && prev.aliasIds.map(aid => activeMatchMap.get(aid)).find(Boolean));
-          if (curr && Array.isArray(curr.sources) && !curr.sources.some(s => s && s.source === provider)) {
-            curr.sources.push(...prevSources.map(s => ({ ...s })));
-            sourcesCarried++;
-          }
-        }
-        if (sourcesCarried > 0) {
-          console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
-        }
-
-        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length + sourcesCarried);
+        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length);
       }
     } catch (carryErr) {
       console.error('[MatchAggregator] Provider carry-forward failed:', carryErr.message);

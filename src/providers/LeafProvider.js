@@ -2,6 +2,8 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../impitClient');
+const leafState = require('../services/LeafState');
+const { normalizeConfigBlob } = require('../services/LeafMint');
 const { BASE_URL } = require('../config');
 
 // Upstream replaced the old shared-token API with a per-install config path:
@@ -62,8 +64,8 @@ class LeafProvider extends BaseProvider {
     if (override) return override.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
 
     const origin = (process.env.LEAF_API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, '');
-    const config = process.env.LEAF_INSTALL_CONFIG ||
-      (process.env.LEAF_FREE_USER_ID ? toBase64Url({ freeUserId: process.env.LEAF_FREE_USER_ID }) : '');
+    const rawConfig = process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID || '';
+    const config = normalizeConfigBlob(rawConfig);
 
     return config ? `${origin}/${config}` : origin;
   }
@@ -171,6 +173,12 @@ class LeafProvider extends BaseProvider {
         }
       }
 
+      // Upstream publishes live fixtures without a parseable date (releaseInfo 'LIVE',
+      // id without a timestamp), which left date='0'. Dateless events sort behind every
+      // timed one, so a live Leaf match never survived the 100-meta catalogue cap and no
+      // tile was published even when the provider resolved fine. A live fixture is
+      // happening now, so 'now' is both honest and sortable.
+      if (matchDate === '0') matchDate = String(Date.now());
       matches.push(new MatchEntity({
         id: `leaf_${cleanId}`,
         aliasIds: [item.id, cleanId],
@@ -257,7 +265,13 @@ class LeafProvider extends BaseProvider {
       const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
-      const manifestProxyUrl = `${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent(directUrl)}`;
+      // Hand out OUR token, never papacito's. The `ft` JWT carries the install uid and
+      // the IP that minted it, so putting it in a player-facing URL is what let a 4 h
+      // resolve cache outlive an 8 h credential (and leaked the credential to client
+      // logs besides). The route re-mints on every playlist request instead.
+      const slug = (String(directUrl).match(/\/m3u\/([a-z0-9-]+)\/live\.m3u8/i) || [])[1] || '';
+      const stateToken = leafState.sign({ m: targetId, s: slug });
+      const manifestProxyUrl = `${BASE_URL}/api/leaf/m3u8/${stateToken}/index.m3u8`;
 
       const rawName = st.name || '';
       const rawTitle = st.title || '';

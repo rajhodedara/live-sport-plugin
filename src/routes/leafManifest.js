@@ -5,14 +5,15 @@
  *
  * GET /api/leaf/manifest.m3u8?url=<signed_papacito_url>
  * GET /api/leaf/manifest.m3u8?d=<base64_encoded_state>
+ * GET /api/leaf/m3u8/:state/index.m3u8
  *
  * Architecture & Zero Bandwidth Bleed Policy:
  *  - Papacito requires authenticated segment hashes (?a=<hash> or ?t=<hash>) on Cloudflare CDN edge.
  *    Without this auth hash, Cloudflare returns an invalid link / expired video slate.
  *  - This endpoint fetches the upstream ~800-byte text playlist on demand, preserving all authenticated
  *    segment URLs (?a=...).
- *  - High-traffic request coalescing (single-flight) and 2.5-second in-memory caching ensures that even
- *    with 10,000 concurrent viewers, only ONE lightweight 800-byte manifest fetch hits upstream every 2.5s.
+ *  - High-traffic request coalescing (single-flight) and in-memory caching ensures that even
+ *    with 10,000 concurrent viewers, only ONE lightweight 800-byte manifest fetch hits upstream every few seconds.
  *  - All media segments (.ts) resolve directly to Cloudflare edge CDN (e.g. https://w1.papacito.cfd),
  *    guaranteeing ZERO video bytes ever pass through the Nuvio server (100% Zero Bandwidth Bleed compliance).
  */
@@ -20,8 +21,14 @@
 const express = require('express');
 const router = express.Router();
 const impitClient = require('../impitClient');
+const leafState = require('../services/LeafState');
+const leafMint = require('../services/LeafMint');
 
-const MANIFEST_CACHE_TTL_MS = 2500; // 2.5 seconds (HLS segments are 6s; guarantees fresh live edge)
+// Live edge vs request budget: papacito's playlists run #EXT-X-TARGETDURATION:11
+// (~10s segments, ~8 deep window), so a 6s shared cache never serves a segment that
+// has already fallen out of the window, while collapsing N viewers into one upstream
+// fetch. 2.5s was needlessly expensive upstream.
+const MANIFEST_CACHE_TTL_MS = Math.max(2500, Number(process.env.LEAF_PLAYLIST_TTL_MS) || 6000);
 const FALLBACK_TTL_MS = 60 * 1000; // 60s stale fallback in case upstream has transient timeout
 
 const manifestCache = new Map(); // targetUrl -> { body, expiresAt, staleUntil }
@@ -292,6 +299,78 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
     console.error(`[LeafManifest] Failed to resolve Leaf playlist: ${err.message}`);
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(502).send(`Upstream Leaf Error: ${err.message}`);
+  }
+});
+
+/**
+ * Mint-at-fetch path: `/api/leaf/m3u8/<signed-state>/index.m3u8`.
+ *
+ * The state carries only `{m: matchId, s: slug}`. Nothing upstream-facing is stored, so
+ * there is no credential to go stale: we mint immediately before fetching, on this
+ * request's connection pool, and drop the result. A honey-pot answer (`stream_notice`)
+ * means either a retired install or a minted-for-another-address token, and both are
+ * recoverable by re-minting once with a cache-buster before giving up.
+ */
+async function resolveViaState(stateToken) {
+  const payload = leafState.verify(stateToken);
+  if (!payload) {
+    const err = new Error('Invalid or expired leaf state');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  let minted;
+  try {
+    minted = await leafMint.mintUrl(payload.m, payload.s);
+  } catch (err) {
+    const e = new Error(err.message);
+    e.statusCode = 502;
+    e.retryAfterMs = err.retryAfterMs;
+    throw e;
+  }
+
+  try {
+    return { playlist: await getOrFetchLiveManifest(minted), payload };
+  } catch (err) {
+    if (!/anti-piracy|antipiracy|stream_notice/i.test(err.message)) throw err;
+    // Honey-pot: the minted token does not match this egress (or the install is
+    // retired). Re-mint at most once - mintUrl honours the backoff window even when
+    // forcing, so a flapping egress cannot turn this into a retry storm - and if the
+    // fresh token still gets the notice reel, record it and back off.
+    leafMint.invalidate(payload.m, payload.s);
+    let fresh;
+    try {
+      fresh = await leafMint.mintUrl(payload.m, payload.s, { force: true });
+    } catch (mintErr) {
+      mintErr.statusCode = 502;
+      throw mintErr;
+    }
+    try {
+      return { playlist: await getOrFetchLiveManifest(fresh), payload, reminted: true };
+    } catch (err2) {
+      if (/anti-piracy|antipiracy|stream_notice/i.test(err2.message)) {
+        leafMint.noteFailure(payload.m, payload.s, { reason: 'honeypot after re-mint' });
+      }
+      throw err2;
+    }
+  }
+}
+
+router.get(['/api/leaf/m3u8/:state/index.m3u8', '/api/leaf/m3u8/:state'], async (req, res) => {
+  try {
+    const { playlist, payload, reminted } = await resolveViaState(req.params.state);
+    if (!playlist) throw new Error('empty playlist');
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    if (reminted) res.setHeader('X-Leaf-Reminted', '1');
+    return res.status(200).send(playlist);
+  } catch (err) {
+    const status = err.statusCode || 502;
+    if (status >= 500) console.warn(`[LeafManifest] state route failed: ${err.message}`);
+    if (err.retryAfterMs) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))));
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(status).send(status === 400 ? 'Invalid leaf state' : `Upstream Leaf Error: ${err.message}`);
   }
 });
 

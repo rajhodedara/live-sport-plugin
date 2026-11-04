@@ -495,12 +495,13 @@ async function fetchWithinDeadline(url, opts, deadlineAt) {
   // (see the redirect loop below), so they cannot be destructured as const.
   let { method = 'GET', headers = {}, body } = opts;
 
-  // Selective proxying: route DamiTV requests through local WARP SOCKS5 proxy if configured
+  // Selective proxying: route DamiTV/Leaf requests through local WARP SOCKS5 proxy if configured
   const warpProxyUrl = process.env.WARP_PROXY_URL || process.env.DAMITV_PROXY_URL;
+  const leafProxyUrl = process.env.LEAF_PROXY_URL || warpProxyUrl;
   const isDamitv = isDamitvTarget(url);
   const isDembed = isDembedTarget(url);
   const isLeaf = isLeafTarget(url);
-  const proxyUrl = opts.proxyUrl || ((isDamitv || isLeaf) && warpProxyUrl ? warpProxyUrl : null);
+  const proxyUrl = opts.proxyUrl || (isDamitv ? warpProxyUrl : (isLeaf ? leafProxyUrl : null));
   // Direct (non-proxied) requests to hosts whose certificate chain impit
   // deterministically rejects skip the doomed TLS handshake entirely and go
   // straight to the undici path below.
