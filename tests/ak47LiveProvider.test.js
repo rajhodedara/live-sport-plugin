@@ -455,7 +455,7 @@ http://193.47.62.1:8080/live/game.m3u8
         return rev.toString('base64');
       }
 
-      test('resolves real-format pro entries (api:"kid:key", piped UA) into /api/dash HLS StreamEntities', async () => {
+      test('drops real-format pro entries (api:"kid:key", piped UA) by bandwidth policy', async () => {
         jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
           status: 200,
           text: async () => encryptAk47([
@@ -476,26 +476,12 @@ http://193.47.62.1:8080/live/game.m3u8
           channelName: 'TNT2UK SPORTS FHD'
         });
 
-        expect(resolved.length).toBe(1);
-        const stream = resolved[0];
-        expect(stream).toBeInstanceOf(StreamEntity);
-        expect(stream.name).toBe('Ak47Live');
-        // Channel name in parens so the pipeline label extractor surfaces it
-        expect(stream.title).toContain('(TNT2UK SPORTS FHD)');
-        expect(stream.title).toContain('Japan vs Venezuela');
-        expect(stream.url).toMatch(/\/api\/dash\/index\.m3u8\?d=.+$/);
-        expect(stream.behaviorHints.notWebReady).toBe(false);
-
-        const verified = verifyPayload(stream.url.split('d=')[1]);
-        expect(verified.ok).toBe(true);
-        const payload = verified.payload;
-        expect(payload.mpdUrl).toBe(MPD_URL);
-        expect(payload.key).toBe(KEY_HEX);
-        expect(payload.kid).toBe(KID_HEX);
-        expect(payload.headers['User-Agent']).toBe(PIPED_UA);
+        // Bandwidth policy: ClearKey DASH would relay every segment through
+        // /api/dash, so the source is dropped instead of served.
+        expect(resolved).toEqual([]);
       });
 
-      test('also honours legacy key/kid fields and strips piped link suffixes', async () => {
+      test('also drops legacy key/kid DASH entries by bandwidth policy', async () => {
         jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
           status: 200,
           text: async () => encryptAk47([
@@ -509,13 +495,8 @@ http://193.47.62.1:8080/live/game.m3u8
           streamIndex: 0
         });
 
-        expect(resolved.length).toBe(1);
-        const verifiedToken = verifyPayload(resolved[0].url.split('d=')[1]);
-        expect(verifiedToken.ok).toBe(true);
-        const payload = verifiedToken.payload;
-        expect(payload.mpdUrl).toBe(MPD_URL); // no |Referer=... suffix
-        expect(payload.key).toBe(KEY_HEX);
-        expect(payload.kid).toBe(KID_HEX);
+        // Legacy key/kid fields are still recognised — and still dropped.
+        expect(resolved).toEqual([]);
       });
 
       test('still drops DRM .mpd entries whose key is not a valid 16-byte hex string', async () => {
