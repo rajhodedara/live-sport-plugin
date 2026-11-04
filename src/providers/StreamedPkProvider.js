@@ -105,14 +105,6 @@ class StreamedPkProvider extends BaseProvider {
 
           matches.push(new MatchEntity({
             id: `spk_${item.id}`,
-            // Shared, un-namespaced join key - deliberately, and load-bearing.
-            // LeafProvider publishes this same bare id in its own aliasIds
-            // (cleanId, after stripping the "streamed:" prefix), and the merge
-            // only links rows through id/aliasIds, never through sources[].id.
-            // Drop it and every Leaf row for a streamed fixture becomes a second
-            // card with a single source. Do not add a provider prefix here
-            // unless LeafProvider changes in the same commit, and treat this id
-            // space as shared: a new provider that emits bare ids can collide.
             aliasIds: [item.id],
             title: item.title,
             category: finalCategory,

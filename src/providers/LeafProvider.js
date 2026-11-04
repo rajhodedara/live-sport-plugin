@@ -173,10 +173,6 @@ class LeafProvider extends BaseProvider {
 
       matches.push(new MatchEntity({
         id: `leaf_${cleanId}`,
-        // cleanId is the bare streamed.pk id for fixtures Leaf carries on behalf
-        // of StreamedPk. StreamedPkProvider publishes the same value as its alias,
-        // which is what joins the two rows into one card - see the note there
-        // before changing either side.
         aliasIds: [item.id, cleanId],
         title: item.name,
         category,

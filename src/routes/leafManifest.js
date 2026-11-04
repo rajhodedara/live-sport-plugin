@@ -20,27 +20,6 @@
 const express = require('express');
 const router = express.Router();
 const impitClient = require('../impitClient');
-const container = require('../container');
-
-// A 401/403/404 on a signed URL means the signature is gone, not that the edge
-// blipped. The resolve-cache entry that produced this URL must be dropped right
-// away: a leaf entry can live for 4 hours, and without this the player would be
-// handed the same revoked URL for the rest of that window.
-const DEAD_UPSTREAM_STATUSES = new Set([401, 403, 404, 410, 451]);
-
-function notifyResolveCacheOfDeadUpstream(targetUrl, status) {
-  if (!targetUrl || !DEAD_UPSTREAM_STATUSES.has(Number(status))) return;
-  try {
-    const resolveCache = container.resolve('streamResolveCache');
-    if (!resolveCache || typeof resolveCache.invalidateUpstreamUrl !== 'function') return;
-    const evicted = resolveCache.invalidateUpstreamUrl(targetUrl);
-    if (evicted > 0) {
-      console.warn(`[LeafManifest] upstream ${status} for a signed playlist; evicted ${evicted} resolve-cache entr${evicted === 1 ? 'y' : 'ies'}`);
-    }
-  } catch (_) {
-    // Recovery hint only - never let cache bookkeeping affect the response.
-  }
-}
 
 const MANIFEST_CACHE_TTL_MS = 2500; // 2.5 seconds (HLS segments are 6s; guarantees fresh live edge)
 const FALLBACK_TTL_MS = 60 * 1000; // 60s stale fallback in case upstream has transient timeout
@@ -157,11 +136,7 @@ async function getOrFetchLiveManifest(targetUrl) {
         });
 
         if (!res || !res.ok) {
-          const httpErr = new Error(`HTTP ${res ? res.status : 'No response'}`);
-          // Carry the status so the catch below can tell "signature revoked"
-          // (drop the cache entry) from "edge blipped" (retry, keep the entry).
-          httpErr.status = res ? res.status : 0;
-          throw httpErr;
+          throw new Error(`HTTP ${res ? res.status : 'No response'}`);
         }
 
         const rawBody = await res.text();
@@ -181,7 +156,6 @@ async function getOrFetchLiveManifest(targetUrl) {
 
         return sanitizedBody;
       } catch (err) {
-        notifyResolveCacheOfDeadUpstream(targetUrl, err && err.status);
         // Fall back to stale cached manifest if available within fallback window
         if (cached && Date.now() < cached.staleUntil) {
           // Extend cache expiration by 2s backoff to avoid immediate retry stampede
