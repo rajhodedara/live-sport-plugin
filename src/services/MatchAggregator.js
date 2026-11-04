@@ -460,6 +460,9 @@ class MatchAggregator {
     this.providerHealthService = providerHealthService;
     this.vavooProvider = vavooProvider;
     this.broadcasterMatchService = broadcasterMatchService;
+    // providerName -> epoch ms of the first sync that came back without data.
+    // Reset the moment the provider answers, so a recovered provider starts over.
+    this._providerSilentSince = new Map();
     if (this.providerHealthService) this.providerHealthService.registerProviders(this.providers);
   }
 
@@ -1492,10 +1495,28 @@ class MatchAggregator {
         const scheduleBrokeFor = (srcName) => this.providers.some((p) =>
           p && p.sourceName === srcName && p.lastScheduleOk === false);
 
-        if (usedProvider(provider) && !scheduleBrokeFor(provider)) continue; // provider answered fully; nothing to carry
+        if (usedProvider(provider) && !scheduleBrokeFor(provider)) { // provider answered fully; nothing to carry
+          this._providerSilentSince.delete(provider);
+          continue;
+        }
 
         if (scheduleBrokeFor(provider)) {
           console.warn(`[MatchAggregator] ${provider} schedule fetch failed this sync; carrying forward its previous entries.`);
+        }
+
+        // How long may a silent provider keep its rows and sources alive?
+        // Carry-forward exists to survive a blip (rate limit, circuit breaker,
+        // one bad upstream page). It must not become a way for a source that is
+        // genuinely gone to stay on the card for the full 24h retention window.
+        // Measured in wall-clock time, not in syncs, because the sync cadence is
+        // operator-tunable (3-minute cron vs 4-hourly scale out the same code).
+        // 0 disables the bound and restores the previous unlimited behaviour.
+        const maxSilenceMs = Math.max(0, Number(process.env.CARRY_FORWARD_MAX_SILENCE_MIN ?? 90)) * 60 * 1000;
+        if (!this._providerSilentSince.has(provider)) this._providerSilentSince.set(provider, Date.now());
+        const silentMs = Date.now() - this._providerSilentSince.get(provider);
+        const carryAllowed = maxSilenceMs === 0 || silentMs < maxSilenceMs;
+        if (!carryAllowed) {
+          console.warn(`[MatchAggregator] ${provider} silent for ${Math.round(silentMs / 60000)}min (limit ${Math.round(maxSilenceMs / 60000)}min); dropping its carry-forward and letting retention retire its sources.`);
         }
 
         // Priority is pure per-entry data: decorate once (Schwartzian transform)
@@ -1539,40 +1560,50 @@ class MatchAggregator {
           return 0;
         }).map((d) => d.m).slice(0, CARRY_FORWARD_MAX);
 
-        if (carried.length > 0) {
+        if (carried.length > 0 && carryAllowed) {
           // Clone-on-admit: carried rows are live cache objects, and the
           // backfill/enrichment passes below mutate rows in activeMatches.
           activeMatches.push(...carried.map(cloneRowForSync));
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync; carried forward ${carried.length} entry(ies) from the previous cache.`);
+        } else if (carried.length > 0) {
+          console.warn(`[MatchAggregator] ${provider} returned nothing this sync; withholding ${carried.length} carried entry(ies) past the silence limit.`);
         } else {
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync and no valid entries were available to carry forward.`);
         }
 
-        // Backfill missing provider sources onto existing active matches that lost this source
-        const activeMatchMap = new Map();
-        for (const m of activeMatches) {
-          if (m && m.id) activeMatchMap.set(m.id, m);
-          if (m && Array.isArray(m.aliasIds)) {
-            for (const aid of m.aliasIds) if (aid) activeMatchMap.set(aid, m);
-          }
-        }
+        // Backfill missing provider sources onto existing active matches that
+        // lost this source. Only while the provider is inside its silence window:
+        // past it, the source is treated as gone and left to age out instead of
+        // being re-attached on every sync forever.
         let sourcesCarried = 0;
-        for (const prev of previous) {
-          if (!prev || !Array.isArray(prev.sources)) continue;
-          const prevSources = prev.sources.filter(s => s && s.source === provider);
-          if (prevSources.length === 0) continue;
-          const curr = (prev.id && activeMatchMap.get(prev.id)) ||
-            (Array.isArray(prev.aliasIds) && prev.aliasIds.map(aid => activeMatchMap.get(aid)).find(Boolean));
-          if (curr && Array.isArray(curr.sources) && !curr.sources.some(s => s && s.source === provider)) {
-            curr.sources.push(...prevSources.map(s => ({ ...s })));
-            sourcesCarried++;
+        if (carryAllowed) {
+          const activeMatchMap = new Map();
+          for (const m of activeMatches) {
+            if (m && m.id) activeMatchMap.set(m.id, m);
+            if (m && Array.isArray(m.aliasIds)) {
+              for (const aid of m.aliasIds) if (aid) activeMatchMap.set(aid, m);
+            }
           }
-        }
-        if (sourcesCarried > 0) {
-          console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
+          for (const prev of previous) {
+            if (!prev || !Array.isArray(prev.sources)) continue;
+            const prevSources = prev.sources.filter(s => s && s.source === provider);
+            if (prevSources.length === 0) continue;
+            const curr = (prev.id && activeMatchMap.get(prev.id)) ||
+              (Array.isArray(prev.aliasIds) && prev.aliasIds.map(aid => activeMatchMap.get(aid)).find(Boolean));
+            if (curr && Array.isArray(curr.sources) && !curr.sources.some(s => s && s.source === provider)) {
+              curr.sources.push(...prevSources.map(s => ({ ...s })));
+              sourcesCarried++;
+            }
+          }
+          if (sourcesCarried > 0) {
+            console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
+          }
         }
 
-        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length + sourcesCarried);
+        // Withheld rows are not carried: reporting them would make a provider
+        // that is past its silence limit look healthy in the ops snapshot.
+        const actuallyCarried = (carryAllowed ? carried.length : 0) + sourcesCarried;
+        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, actuallyCarried);
       }
     } catch (carryErr) {
       console.error('[MatchAggregator] Provider carry-forward failed:', carryErr.message);

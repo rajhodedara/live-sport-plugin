@@ -17,6 +17,23 @@ const MIN_TTL_MS = 60 * 1000;
 const MAX_TTL_MS = 10 * 60 * 1000;
 const NEGATIVE_TTL_MS = 30 * 1000;
 const MAX_ENTRIES = 200;
+
+// Leaf (papacito.cfd / highfly) mints a signed URL whose own `exp` claim is ~8 h
+// and is reused for every viewer of that fixture, so its entry lifetime is driven
+// by the signature, not by the 10-minute generic cap. This is the ONLY place the
+// 4-hour ceiling is written: _ttlFor() and noteSuccess() must agree, or the
+// adaptive TTL oscillates (double, then re-clamp) on every success.
+const LEAF_MAX_TTL_MS = 4 * 3600 * 1000;
+
+// Sources whose lifetime is dictated by an upstream signature. When it cannot be
+// read, these fall back to the conservative generic TTL instead of their own
+// ceiling: an upstream URL-shape change must not silently turn into hours of
+// cached dead links.
+const SIGNED_URL_SOURCES = new Set(['leaf']);
+
+// An already-expired signature must not keep an entry alive for the full source
+// ceiling; serve it just long enough for the next request to re-mint.
+const EXPIRED_URL_TTL_MS = 30 * 1000;
 const CHANNEL_MATCH_ID = '__channel__'; // evergreen 24/7 keys survive pruneEnded
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
@@ -117,8 +134,17 @@ class StreamResolveCache {
     this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, evictions: 0 };
   }
 
+  /**
+   * Remaining lifetime of the upstream signature embedded in `url`, in ms.
+   *
+   * Returns a NUMBER when one was found - it may be negative, meaning the
+   * signature has already expired - and null when nothing signature-like was
+   * found. Callers must keep the two apart: "expired" means serve briefly and
+   * re-mint, while "unknown" means the URL shape changed and the source ceiling
+   * no longer applies to this URL at all.
+   */
   _extractTokenRemainingMs(url) {
-    if (!url || typeof url !== 'string') return 0;
+    if (!url || typeof url !== 'string') return null;
     try {
       let target = url;
       if (target.includes('/api/manifest?') || target.includes('/api/manifest.m3u8?')) {
@@ -159,7 +185,7 @@ class StreamResolveCache {
         }
       }
     } catch (_) {}
-    return 0;
+    return null;
   }
 
   _ttlFor(sourceName) {
@@ -169,7 +195,7 @@ class StreamResolveCache {
     }
     if (sourceName === 'leaf') {
       const val = this.ttl.get(sourceName);
-      return Math.min(val || (4 * 3600 * 1000), 4 * 3600 * 1000);
+      return Math.min(val || LEAF_MAX_TTL_MS, LEAF_MAX_TTL_MS);
     }
     return this.ttl.get(sourceName) || this.defaultTtlMs;
   }
@@ -387,13 +413,19 @@ class StreamResolveCache {
         if (Array.isArray(streams) && streams.length > 0) {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
+          // A readable signature is authoritative: never outlive it. An
+          // unreadable one used to leave the source ceiling untouched, so any
+          // upstream naming change became hours of dead links served from cache.
+          let sawSignature = false;
           for (const s of streams) {
-            if (s && s.url) {
-              const rem = this._extractTokenRemainingMs(s.url);
-              if (rem > 0) {
-                ttl = Math.min(ttl, Math.max(30000, rem - 45000));
-              }
-            }
+            if (!s || !s.url) continue;
+            const rem = this._extractTokenRemainingMs(s.url);
+            if (typeof rem !== 'number') continue;
+            sawSignature = true;
+            ttl = Math.min(ttl, rem > 0 ? Math.max(EXPIRED_URL_TTL_MS, rem - 45000) : EXPIRED_URL_TTL_MS);
+          }
+          if (!sawSignature && SIGNED_URL_SOURCES.has(sourceName)) {
+            ttl = Math.min(ttl, this.defaultTtlMs);
           }
           this._set(key, sourceName, matchId, streams, 'ok', ttl);
         } else {
@@ -457,7 +489,7 @@ class StreamResolveCache {
   noteSuccess(key) {
     if (!key) return;
     const sourceName = key.split(':')[0];
-    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : (sourceName === 'leaf' ? 4 * 3600 * 1000 : this.maxTtlMs);
+    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : (sourceName === 'leaf' ? LEAF_MAX_TTL_MS : this.maxTtlMs);
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);
@@ -476,6 +508,46 @@ class StreamResolveCache {
     if (_sharedAvailable()) {
       _sharedJson(_sharedKey(key), { method: 'DELETE' }, 1000).catch(() => {});
     }
+  }
+
+  /**
+   * Evict every entry whose resolved stream URL embeds `upstreamUrl`.
+   *
+   * The playback proxy is the only component that learns an upstream signature
+   * is dead (401/403/404 on the signed URL), and it has no cache key to pass. So
+   * it hands us the upstream URL and we downgrade the matching entries instead:
+   * noteFailure() halves the learned TTL for the source, drops the local entry
+   * and clears the shared L2, so the next click re-mints instead of replaying a
+   * revoked URL for the rest of its - possibly 4-hour - TTL.
+   *
+   * Bounded by maxEntries and only ever called after an upstream failure, so the
+   * linear scan never touches the healthy request path.
+   *
+   * @returns {number} entries evicted
+   */
+  invalidateUpstreamUrl(upstreamUrl) {
+    if (!upstreamUrl || typeof upstreamUrl !== 'string') return 0;
+    let enc = '';
+    try { enc = encodeURIComponent(upstreamUrl); } catch (_) { enc = ''; }
+    const matches = (candidate) => {
+      if (typeof candidate !== 'string' || !candidate) return false;
+      if (candidate.includes(upstreamUrl)) return true;
+      if (enc && candidate.includes(enc)) return true;
+      try {
+        const inner = new URL(candidate, 'http://localhost').searchParams.get('url');
+        return !!inner && inner === upstreamUrl;
+      } catch (_) {
+        return false;
+      }
+    };
+    let evicted = 0;
+    for (const [key, entry] of [...this.entries]) {
+      const streams = Array.isArray(entry.streams) ? entry.streams : [];
+      if (!streams.some((s) => s && matches(s.url))) continue;
+      this.noteFailure(key);
+      evicted++;
+    }
+    return evicted;
   }
 
   /** Drop entries whose match is no longer in the active match set. */
