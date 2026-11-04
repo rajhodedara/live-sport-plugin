@@ -13,6 +13,7 @@ test('build copy manifest includes both supervisor and child alongside guarded d
   expect(copies).toContainEqual([path.join('src', 'services', 'isolated-native-child.cjs'), path.join('output', 'services', 'isolated-native-child.cjs')]);
   expect(copies).toContainEqual([path.join('src', 'services', 'NativeGuardedFetch.js'), path.join('output', 'services', 'NativeGuardedFetch.js')]);
   expect(copies).toContainEqual([path.join('src', 'services', 'GuardedEgressPolicy.js'), path.join('output', 'services', 'GuardedEgressPolicy.js')]);
+  expect(copies).toContainEqual([path.join('src', 'services', 'GuardedCurlClient.js'), path.join('output', 'services', 'GuardedCurlClient.js')]);
   expect(copies).toContainEqual([path.join('src', 'services', 'NativeTiming.js'), path.join('output', 'services', 'NativeTiming.js')]);
   expect(copies).toContainEqual([path.join('src', 'services', 'TimingContext.js'), path.join('output', 'services', 'TimingContext.js')]);
   expect(copies).toContainEqual([path.join('src', 'services', 'TimingOutput.js'), path.join('output', 'services', 'TimingOutput.js')]);

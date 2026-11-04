@@ -76,6 +76,38 @@ function isTikTokCloakedStream(url) {
 }
 
 /**
+ * Embed hosts that can no longer serve a manifest.
+ *
+ * `ksohls.ru` hosted the "premiumtv/daddyhd" player skin - the HD variant of the
+ * same player that now runs on dembed.st. It answered 410 for the `/player`
+ * folder's iframes and the domain has since been dropped from DNS (NXDOMAIN),
+ * so every probe is a guaranteed miss: one ~650 KB folder page (the iframe sits
+ * at byte ~649 000 of 682 000, so the whole padding is downloaded) plus a doomed
+ * DNS/TLS cycle per uncached channel.
+ *
+ * Only the HOST is skipped, never the folder: `player` must stay first because
+ * it is the only route to the plain-TS supplier (wideiptv.top -> cdn.hdm1.net),
+ * which costs the addon no bandwidth at all.
+ *
+ * Extend with DADDYLIVE_DEAD_EMBED_HOSTS="host1,host2".
+ */
+const DEAD_EMBED_HOSTS = new Set(
+  String(process.env.DADDYLIVE_DEAD_EMBED_HOSTS || 'ksohls.ru,www.ksohls.ru')
+    .split(',')
+    .map((h) => h.trim().toLowerCase())
+    .filter(Boolean)
+);
+
+function isDeadEmbedHost(urlOrHost) {
+  if (!urlOrHost || typeof urlOrHost !== 'string') return false;
+  let host = urlOrHost;
+  if (/^https?:\/\//i.test(urlOrHost)) {
+    try { host = new URL(urlOrHost).hostname; } catch (_) { return false; }
+  }
+  return DEAD_EMBED_HOSTS.has(String(host).toLowerCase());
+}
+
+/**
  * Timeout (ms) for a DaddyLive SCHEDULE / CHANNEL fetch - the SYNC path only.
  *
  * These fetches used a hard 6000ms across both mirror domains. On a loaded host
@@ -150,6 +182,10 @@ class DaddyLiveProvider extends BaseProvider {
     // usable health signal - fixtures and channels fail independently.
     this.lastScheduleOk = null;
     this.baseDomains = ['https://thedaddy.pk', 'https://dlive.sx', 'https://dlstreams.st'];
+    // `player` stays FIRST: it is the only folder that can reach the plain-TS
+    // supplier (wideiptv.top -> cdn.hdm1.net), whose segments are served as
+    // video/MP2T straight to the player, so it costs the addon no bandwidth.
+    // Its other target (ksohls.ru) is dead and is skipped per host below.
     this.folders = ['player', 'stream', 'watch', 'plus', 'casting', 'cast', 'hub'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
@@ -416,7 +452,7 @@ class DaddyLiveProvider extends BaseProvider {
         if (raw.startsWith('//')) return 'https:' + raw;
         if (raw.startsWith('/')) { try { return new URL(raw, pageUrl).toString(); } catch (_) { return raw; } }
         return raw;
-      });
+      }).filter((u) => !isDeadEmbedHost(u));
 
       let ordered = abs;
       if (this.domainRegistry) {
@@ -931,7 +967,11 @@ class DaddyLiveProvider extends BaseProvider {
             if (raw.startsWith('//')) return 'https:' + raw;
             if (raw.startsWith('/')) { try { return new URL(raw, playerUrl).toString(); } catch (_) { return raw; } }
             return raw;
-          }).filter((u) => !/daddyliveplayer\.st/i.test(u));
+          })
+            .filter((u) => !/daddyliveplayer\.st/i.test(u))
+            // Known-dead embed hosts are dropped before any request is made, so
+            // a retired player costs neither a download nor a DNS/TLS attempt.
+            .filter((u) => !isDeadEmbedHost(u));
 
           // If domainRegistry is available, rank candidate iframes so registered hosts (e.g. wideiptv.top) are probed first
           if (this.domainRegistry && candidateUrls.length > 1) {

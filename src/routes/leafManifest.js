@@ -5,14 +5,15 @@
  *
  * GET /api/leaf/manifest.m3u8?url=<signed_papacito_url>
  * GET /api/leaf/manifest.m3u8?d=<base64_encoded_state>
+ * GET /api/leaf/m3u8/:state/index.m3u8
  *
  * Architecture & Zero Bandwidth Bleed Policy:
  *  - Papacito requires authenticated segment hashes (?a=<hash> or ?t=<hash>) on Cloudflare CDN edge.
  *    Without this auth hash, Cloudflare returns an invalid link / expired video slate.
  *  - This endpoint fetches the upstream ~800-byte text playlist on demand, preserving all authenticated
  *    segment URLs (?a=...).
- *  - High-traffic request coalescing (single-flight) and 2.5-second in-memory caching ensures that even
- *    with 10,000 concurrent viewers, only ONE lightweight 800-byte manifest fetch hits upstream every 2.5s.
+ *  - High-traffic request coalescing (single-flight) and in-memory caching ensures that even
+ *    with 10,000 concurrent viewers, only ONE lightweight 800-byte manifest fetch hits upstream every few seconds.
  *  - All media segments (.ts) resolve directly to Cloudflare edge CDN (e.g. https://w1.papacito.cfd),
  *    guaranteeing ZERO video bytes ever pass through the Nuvio server (100% Zero Bandwidth Bleed compliance).
  */
@@ -21,8 +22,14 @@ const express = require('express');
 const router = express.Router();
 const providerOutbound = require('../services/ProviderOutbound');
 const { validateLeafManifestUrl: validateTargetUrl } = require('../services/GuardedEgressPolicy');
+const leafState = require('../services/LeafState');
+const leafMint = require('../services/LeafMint');
 
-const MANIFEST_CACHE_TTL_MS = 2500; // 2.5 seconds (HLS segments are 6s; guarantees fresh live edge)
+// Live edge vs request budget: papacito's playlists run #EXT-X-TARGETDURATION:11
+// (~10s segments, ~8 deep window), so a 6s shared cache never serves a segment that
+// has already fallen out of the window, while collapsing N viewers into one upstream
+// fetch. 2.5s was needlessly expensive upstream.
+const MANIFEST_CACHE_TTL_MS = Math.max(2500, Number(process.env.LEAF_PLAYLIST_TTL_MS) || 6000);
 const FALLBACK_TTL_MS = 60 * 1000; // 60s stale fallback in case upstream has transient timeout
 const MAX_MANIFEST_BYTES = 256 * 1024;
 const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
@@ -38,8 +45,8 @@ const inFlightFetches = new Map(); // targetUrl -> Promise<string>
 const sessionCache = new Map();
 
 function isTransientFetchFailure(error) {
-  return error.leafTransient === true || error.name === 'TimeoutError' ||
-    TRANSIENT_NETWORK_CODES.has(error.code);
+  return error?.leafTransient === true || error?.name === 'TimeoutError' ||
+    TRANSIENT_NETWORK_CODES.has(error?.code);
 }
 
 /**
@@ -51,7 +58,7 @@ function sanitizeManifestBody(body, targetUrl) {
   }
 
   if (/_antipiracy|antipiracy|stream_notice/i.test(body)) {
-    throw new Error('Upstream returned anti-piracy trap');
+    throw Object.assign(new Error('Upstream returned denied media'), { code: 'ERR_LEAF_UPSTREAM_DENIED' });
   }
 
   let defaultCdnBase = 'https://w1.papacito.cfd';
@@ -155,6 +162,7 @@ async function getOrFetchLiveManifest(targetUrl) {
         if (!res || !res.ok) {
           throw Object.assign(new Error(`HTTP ${res ? res.status : 'No response'}`), {
             code: 'ERR_LEAF_UPSTREAM_STATUS',
+            upstreamStatus: res ? res.status : 0,
             leafTransient: Boolean(res && TRANSIENT_HTTP_STATUSES.has(res.status))
           });
         }
@@ -329,6 +337,55 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
     console.error('[LeafManifest] Failed to resolve Leaf playlist:', err.code || 'ERR_LEAF_UPSTREAM');
     res.setHeader('Access-Control-Allow-Origin', '*');
     return res.status(err.code === 'ERR_LEAF_MANIFEST_URL' ? 400 : 502).send('Failed to resolve Leaf playlist');
+  }
+});
+
+/**
+ * Mint-at-fetch path: `/api/leaf/m3u8/<signed-state>/index.m3u8`.
+ *
+ * The state carries only `{m: matchId, s: slug}`. Nothing upstream-facing is stored, so
+ * upstream credentials are held only in a bounded server-side cache. A denied answer (`stream_notice`)
+ * is rejected and backed off. The route never generates a replacement identity or
+ * retries an upstream denial with a cache buster.
+ */
+async function resolveViaState(stateToken) {
+  const payload = leafState.verify(stateToken);
+  if (!payload) {
+    throw Object.assign(new Error('Invalid or expired leaf state'), {
+      code: 'ERR_LEAF_STATE', statusCode: 400
+    });
+  }
+
+  const minted = await leafMint.mintUrl(payload.m, payload.s);
+  try {
+    return { playlist: await getOrFetchLiveManifest(minted), payload };
+  } catch (err) {
+    // An upstream denial or invalid body is not permission to bypass it by
+    // re-minting with a cache buster. Discard that credential and back off.
+    if (!isTransientFetchFailure(err)) {
+      leafMint.invalidate(payload.m, payload.s);
+      leafMint.noteFailure(payload.m, payload.s, {
+        reason: err?.code || 'ERR_LEAF_PLAYLIST'
+      });
+    }
+    throw err;
+  }
+}
+
+router.get(['/api/leaf/m3u8/:state/index.m3u8', '/api/leaf/m3u8/:state'], async (req, res) => {
+  try {
+    const { playlist } = await resolveViaState(req.params.state);
+    if (!playlist) throw new Error('empty playlist');
+    res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    return res.status(200).send(playlist);
+  } catch (err) {
+    const status = err.statusCode || 502;
+    if (status >= 500) console.warn('[LeafManifest] state route failed:', err.code || 'ERR_LEAF_UPSTREAM');
+    if (err.retryAfterMs) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))));
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    return res.status(status).send(status === 400 ? 'Invalid leaf state' : 'Failed to resolve Leaf playlist');
   }
 });
 

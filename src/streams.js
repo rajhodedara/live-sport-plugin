@@ -9,6 +9,7 @@ const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { relations: timingRelations } = require('./services/TimingRuntime');
+const { isBlockedDashStream } = require('./services/StreamPolicy');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -932,7 +933,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
@@ -1275,7 +1276,8 @@ async function handleStream(type, id, config) {
 
   const inFlight = [];        // per-source promise + settled result for the fallback wait
   const races = activeSources.map((src) => {
-    const key = resolveKey(src, matchId);
+    // findMatch accepts aliases; prewarm and remint identify the stored row.
+    const key = resolveKey(src, match.id);
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
     const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
     const promise = resolveCache
@@ -1388,36 +1390,18 @@ async function handleStream(type, id, config) {
   // Standardize Stream Labels
   const icon = STREAM_SPORT_ICONS[match.category] || '📡';
 
-  // ─── Eliminate DASH (.mpd) & ClearKey DRM streams completely ──────────
-  // ExoPlayer on stock Android apps lacks MediaDrm callbacks, causing black
-  // screen + timer. The addon's own /api/manifest proxy wraps BOTH HLS (.m3u8)
-  // and DASH (.mpd) upstreams, so the proxy URL string is NOT evidence of DASH
-  // — only the wrapped target is. Keying on "/api/manifest" eliminated every
-  // proxied live HLS stream (DaddyLive et al. always proxy), which surfaced as
-  // "no sources except sktech". sktech's DASH feeds are never wanted, so they
-  // are additionally matched on a DASH path/DRM signal.
-  const nonDash = streams.filter(s => {
-    const rawUrl = String(s.url || s.streamUrl || s._rawMpdUrl || '');
-    const lower = rawUrl.toLowerCase();
-    let target = lower;
-    if (lower.includes('/api/manifest')) {
-      try {
-        const info = parseManifestProxyUrl(rawUrl);
-        if (info && info.targetUrl) target = String(info.targetUrl).toLowerCase();
-      } catch (_) {}
-    }
-    const typeIsDash = !!(s.type && String(s.type).toLowerCase().includes('dash'));
-    const genericDash = target.includes('.mpd') || !!s.clearkey || s.format === 'dash' || typeIsDash;
-    // sktech: never serve DASH, even if it is not tagged ClearKey.
-    const isSktechDash = String(s._source || '') === 'sktech' &&
-      (/\.mpd(\?|#|$)/.test(target) || /\/dash\//.test(target) || !!s.clearkey || s.format === 'dash' || typeIsDash);
-    return !(genericDash || isSktechDash);
-  });
-  if (nonDash.length < streams.length) {
-    const droppedCount = streams.length - nonDash.length;
+  // ─── Bandwidth policy: no relayed DASH, no DASH at all ────────────────
+  // ClearKey DASH can only play through /api/dash, which pulls every segment
+  // through this addon (≈3.74 GB per viewer-hour at 1080p, measured). Policy:
+  // those streams are never offered. A /api/manifest wrapper is not evidence
+  // of DASH — only its target is — so StreamPolicy resolves the wrapped URL
+  // before deciding, and leaves proxied live HLS alone.
+  const beforeDashPolicy = streams.length;
+  const policyAllowed = streams.filter((s) => !isBlockedDashStream(s));
+  if (policyAllowed.length !== beforeDashPolicy) {
     streams.length = 0;
-    streams.push(...nonDash);
-    console.log(`[streams.js] Eliminated ${droppedCount} DASH stream(s) for ${matchId}`);
+    streams.push(...policyAllowed);
+    console.log(`[streams.js] Dropped ${beforeDashPolicy - policyAllowed.length} DASH stream(s) by bandwidth policy for ${matchId}`);
   }
 
   streams.forEach(s => {
