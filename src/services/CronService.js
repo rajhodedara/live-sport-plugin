@@ -5,13 +5,6 @@ const StreamResolveCache = require('../services/StreamResolveCache');
 // the next catalog/meta request triggers a background re-sync (see ensureFresh).
 const REVALIDATE_AFTER_MS = parseInt(process.env.CATALOG_REVALIDATE_MS, 10) || 10 * 60 * 1000;
 
-// Leaf-only source refresh. Leaf fixtures are short-lived, and the full sync
-// runs every four hours, so a fixture can start and finish between two syncs.
-// This loop re-fetches ONLY Leaf and backfills its sources onto matches that
-// are already cached - no other provider is touched and no global sync runs.
-const LEAF_REFRESH_MS = parseInt(process.env.LEAF_REFRESH_MS, 10) || 10 * 60 * 1000;
-const LEAF_REFRESH_ENABLED = String(process.env.LEAF_REFRESH_ENABLED ?? 'true') !== 'false';
-
 class CronService {
   constructor({ matchAggregator, streamResolveCache, cacheService, providerHealthService }) {
     this.matchAggregator = matchAggregator;
@@ -23,37 +16,6 @@ class CronService {
 
   get isSyncing() { return this.syncing; }
   set isSyncing(v) { this.syncing = v; }
-
-  /**
-   * Leaf-only freshness pass.
-   *
-   * Fetches just the Leaf provider and backfills its sources onto the matches
-   * that are already cached (see MatchAggregator.refreshProviderSources).
-   * Runs on the primary worker only, so the two cluster workers never duplicate
-   * the upstream calls; the other worker picks the new sources up from the
-   * shared cache file. Every match that gained a source also has its resolved
-   * stream list evicted, otherwise a prewarmed click would keep serving the
-   * stale list (Leaf entries live up to 4 hours).
-   */
-  async refreshLeafSources() {
-    if (this._leafRefreshBusy) return;
-    const isPrimary = process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0';
-    if (!isPrimary) return;
-    if (!this.matchAggregator || typeof this.matchAggregator.refreshProviderSources !== 'function') return;
-
-    this._leafRefreshBusy = true;
-    try {
-      const result = await this.matchAggregator.refreshProviderSources('leaf');
-      const changedIds = (result && result.changedMatchIds) || [];
-      if (changedIds.length > 0 && this.streamResolveCache && typeof this.streamResolveCache.invalidateMatch === 'function') {
-        for (const matchId of changedIds) this.streamResolveCache.invalidateMatch(matchId);
-      }
-    } catch (err) {
-      console.error('[CronService] Leaf refresh failed:', err.message);
-    } finally {
-      this._leafRefreshBusy = false;
-    }
-  }
 
   async runSync() {
     if (this.syncing) return;
@@ -147,17 +109,6 @@ class CronService {
         console.error('[CronService] Prewarm job failed:', err.message);
       }
     });
-
-    // Leaf-only freshness. Leaf fixtures last a couple of hours and the full
-    // sync runs every four, so a Leaf match can come and go between two syncs.
-    // Re-fetching just Leaf and backfilling its sources onto the existing
-    // matches keeps the catalog fresh without a second global sync.
-    if (LEAF_REFRESH_ENABLED) {
-      const timer = setInterval(() => { this.refreshLeafSources(); }, LEAF_REFRESH_MS);
-      if (typeof timer.unref === 'function') timer.unref();
-      this._leafRefreshTimer = timer;
-      console.log(`[CronService] Leaf-only source refresh every ${Math.round(LEAF_REFRESH_MS / 1000)}s (primary worker only)`);
-    }
 
     // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately
     setImmediate(async () => {
