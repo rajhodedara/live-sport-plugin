@@ -11,6 +11,7 @@ const STOP_WORDS = new Set([
 ]);
 
 const { parseTimezone } = require('../timezone');
+const { OVERLAY_SOURCE: LEAF_OVERLAY_SOURCE } = require('./LiveOverlayService');
 const ChannelIdentityService = require('./ChannelIdentityService');
 const MatchEntity = require('../domain/MatchEntity');
 const { eventSquadIdentity, canonicalizeAge } = require('./EventSquadIdentity');
@@ -966,12 +967,18 @@ class MatchAggregator {
   }
 
   /**
-   * Read-only scan: which catalog cards should carry this provider's sources
-   * right now?
+   * Leaf only. Which catalog cards should carry Leaf sources right now?
    *
-   * This is the read half of the live-overlay feature. It never writes the
-   * catalog: it returns `matchId -> sources[]` for the handful of fixtures an
-   * ephemeral provider is publishing, and the caller decides what to persist.
+   * Deliberately takes NO provider argument. This is not a generic overlay
+   * mechanism: every other provider's catalog participation stays in the full
+   * sync, and giving this path a second tenant would put an unreviewed write
+   * surface next to theirs for no benefit. The source key is fixed by
+   * LiveOverlayService.OVERLAY_SOURCE and the merge side refuses to emit
+   * anything else, so widening this is a code change, not a config change.
+   *
+   * This is the read half of the feature. It never writes the catalog: it
+   * returns `matchId -> leaf sources[]` for the handful of fixtures Leaf is
+   * publishing, and the caller decides what to persist.
    *
    * Cost matters (this runs on a short cadence): the catalog is filtered to a
    * narrow kickoff window BEFORE any _precompute call, because _precompute is
@@ -979,20 +986,19 @@ class MatchAggregator {
    * for 16k catalog rows.
    *
    * `ok` is not "did we get rows": it is "did the provider prove it answered".
-   * A provider that returns [] after a thrown request is indistinguishable from
-   * a quiet live schedule by its return value alone, and a wholesale snapshot
-   * replace must not treat those the same (see LeafProvider.lastCatalogOk).
+   * LeafProvider answers [] both after a thrown request and for a quiet live
+   * schedule, and a wholesale snapshot replace must not treat those the same
+   * (see LeafProvider.lastCatalogOk).
    *
-   * @param {string} providerName stable source key (`sourceName || name`)
    * @returns {Promise<{ok: boolean, reason: string, fetched: number, matched: number, map: Map<string, Array>}>}
    */
-  async buildLiveOverlay(providerName = 'leaf') {
+  async buildLiveOverlay() {
     const result = (ok, reason, extra = {}) => ({
       ok, reason, fetched: 0, matched: 0, map: new Map(), ...extra
     });
-    const wanted = String(providerName || '').toLowerCase();
-    // Key on sourceName first: display names are capitalised ('Leaf') and would
-    // never match a lowercase selector.
+    const wanted = LEAF_OVERLAY_SOURCE;
+    // Key on sourceName first: the display name is capitalised ('Leaf') and
+    // would never match a lowercase selector.
     const provider = (this.providers || []).find((p) => {
       if (!p) return false;
       const key = p.sourceName || p.name;

@@ -120,6 +120,17 @@ describe('LiveOverlayService', () => {
     expect(recovered.mergeSources('m1', [{ source: 'ppvst', id: 'p1' }]))
       .toEqual([{ source: 'ppvst', id: 'p1' }]);
   });
+
+  test('refuses to carry any source that is not leaf', () => {
+    const applied = overlay.setOverlay(new Map([
+      ['m1', [{ source: 'ppvst', id: 'p1' }, { source: 'daddylive', id: 'dd1' }]]
+    ]));
+
+    expect(applied.changed).toBe(false);
+    expect(overlay.size).toBe(0);
+    expect(overlay.mergeSources('m1', [{ source: 'ppvst', id: 'p1' }]))
+      .toEqual([{ source: 'ppvst', id: 'p1' }]);
+  });
 });
 
 describe('MatchAggregator.buildLiveOverlay', () => {
@@ -165,7 +176,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
       sources: [{ source: 'leaf', id: 'streamed:football-real-madrid-aek-20750', name: 'Real Madrid vs AEK Athens' }]
     }]);
 
-    const result = await aggregatorWith(catalog, provider).buildLiveOverlay('leaf');
+    const result = await aggregatorWith(catalog, provider).buildLiveOverlay();
 
     expect(result.ok).toBe(true);
     expect(result.fetched).toBe(1);
@@ -189,7 +200,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
       sources: [{ source: 'leaf', id: 'ars-che' }]
     }]);
 
-    const result = await aggregatorWith(catalog, provider).buildLiveOverlay('leaf');
+    const result = await aggregatorWith(catalog, provider).buildLiveOverlay();
 
     expect(result.matched).toBe(1);
     expect([...result.map.keys()]).toEqual(['m2']);
@@ -207,7 +218,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
       sources: [{ source: 'leaf', id: 'ars-che' }]
     }]);
 
-    const result = await aggregatorWith(catalog, provider).buildLiveOverlay('leaf');
+    const result = await aggregatorWith(catalog, provider).buildLiveOverlay();
 
     expect(result.ok).toBe(true);
     expect(result.reason).toBe('no-candidates');
@@ -216,7 +227,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
 
   test('a provider that never proved it answered reports ok:false', async () => {
     const provider = providerReturning([], { lastCatalogOk: false });
-    const result = await aggregatorWith([], provider).buildLiveOverlay('leaf');
+    const result = await aggregatorWith([], provider).buildLiveOverlay();
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('empty-unverified');
@@ -228,7 +239,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
       { id: 'leaf_x', title: 'A vs B', date: String(now), sources: [{ source: 'leaf', id: 'x' }] }
     ], { configured: false });
 
-    const result = await aggregatorWith([], provider).buildLiveOverlay('leaf');
+    const result = await aggregatorWith([], provider).buildLiveOverlay();
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('provider-unconfigured');
@@ -237,7 +248,7 @@ describe('MatchAggregator.buildLiveOverlay', () => {
 
   test('a missing provider reports provider-missing instead of throwing', async () => {
     const aggregator = new MatchAggregator({ cacheService: { getMatchesReadOnly: () => [] } });
-    const result = await aggregator.buildLiveOverlay('leaf');
+    const result = await aggregator.buildLiveOverlay();
 
     expect(result.ok).toBe(false);
     expect(result.reason).toBe('provider-missing');
@@ -251,6 +262,50 @@ describe('MatchAggregator.buildLiveOverlay', () => {
     const aggregator = new MatchAggregator({ leafProvider: provider, cacheService: { getMatchesReadOnly: () => [] } });
     expect(aggregator.providers.some((p) => p && p.sourceName === 'leaf')).toBe(true);
   });
+
+  test('consults Leaf and nothing else, even with other providers registered', async () => {
+    const catalog = [
+      { id: 'm1', title: 'Real Madrid vs AEK Athens', date: String(now), category: 'football', status: 'live', sources: [{ source: 'ppvst', id: 'p1' }] }
+    ];
+    const leaf = providerReturning([{
+      id: 'leaf_x', title: 'Real Madrid vs AEK Athens', date: String(now), status: 'live',
+      sources: [{ source: 'leaf', id: 'live-1' }]
+    }]);
+    const other = {
+      name: 'DaddyLive', sourceName: 'daddylive', configured: true, lastCatalogOk: true,
+      getMatches: jest.fn(async () => [{ id: 'dd', title: 'Some other match', date: String(now), sources: [{ source: 'daddylive', id: 'dd1' }] }])
+    };
+
+    const aggregator = new MatchAggregator({
+      cacheService: { getMatchesReadOnly: () => catalog },
+      leafProvider: leaf,
+      daddyLiveProvider: other
+    });
+    const result = await aggregator.buildLiveOverlay();
+
+    expect(leaf.getMatches).toHaveBeenCalledTimes(1);
+    expect(other.getMatches).not.toHaveBeenCalled();
+    expect([...result.map.keys()]).toEqual(['m1']);
+  });
+
+  test('a Leaf fixture carrying non-leaf sources cannot smuggle them in', async () => {
+    const catalog = [
+      { id: 'm1', title: 'Real Madrid vs AEK Athens', date: String(now), category: 'football', status: 'live', sources: [{ source: 'ppvst', id: 'p1' }] }
+    ];
+    const provider = providerReturning([{
+      id: 'leaf_x', title: 'Real Madrid vs AEK Athens', date: String(now), status: 'live',
+      sources: [
+        { source: 'leaf', id: 'live-1' },
+        { source: 'daddylive', id: 'dd1' },
+        { source: 'vavoo', id: 'vv1' }
+      ]
+    }]);
+
+    const result = await aggregatorWith(catalog, provider).buildLiveOverlay();
+
+    expect(result.map.get('m1').map((s) => s.source)).toEqual(['leaf']);
+  });
+
 });
 
 describe('CronService.refreshLiveOverlay', () => {

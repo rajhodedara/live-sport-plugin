@@ -219,7 +219,7 @@ class CronService {
     }
     this._overlayBusy = true;
     try {
-      const result = await aggregator.buildLiveOverlay('leaf');
+      const result = await aggregator.buildLiveOverlay();
       const fetched = result && Number.isFinite(result.fetched) ? result.fetched : 0;
       const matched = result && Number.isFinite(result.matched) ? result.matched : 0;
       let nextMap = result && result.map instanceof Map ? result.map : null;
