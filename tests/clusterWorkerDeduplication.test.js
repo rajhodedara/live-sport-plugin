@@ -56,11 +56,16 @@ describe('Cluster Worker Deduplication & Batch Prewarming', () => {
       expect(cronService.runSync).not.toHaveBeenCalled();
     });
 
-    test('Secondary worker via pm_id=1 returns immediately and does NOT re-sync', () => {
+    // pm_id is NOT a worker index. PM2 hands a fresh, ever-increasing value to
+    // every worker a zero-downtime reload spawns, which is why requiring
+    // pm_id === '0' silently disabled the SWR re-sync after the first reload.
+    // In fork mode NODE_APP_INSTANCE is absent and pm_id still describes a
+    // single process, so it must keep refreshing.
+    test('a non-zero pm_id without NODE_APP_INSTANCE still counts as primary', () => {
       delete process.env.NODE_APP_INSTANCE;
-      process.env.pm_id = '1';
+      process.env.pm_id = '7';
       cronService.ensureFresh();
-      expect(cronService.runSync).not.toHaveBeenCalled();
+      expect(cronService.runSync).toHaveBeenCalledTimes(1);
     });
 
     test('Primary worker via pm_id=0 triggers background re-sync', () => {

@@ -14,6 +14,21 @@ class CronService {
     this.syncing = false;
   }
 
+  /**
+   * The invariant cluster leader.
+   *
+   * NODE_APP_INSTANCE is the per-worker index PM2 keeps stable across
+   * zero-downtime reloads; when the process does not run under PM2 it is
+   * undefined and the instance is trivially primary. The previous check also
+   * required pm_id === '0', but PM2 assigns a fresh, ever-increasing pm_id to
+   * every worker a reload spawns, so after the first reload NO worker passed
+   * that test and the SWR re-sync below silently never ran again.
+   */
+  _isPrimaryWorker() {
+    const instance = process.env.NODE_APP_INSTANCE;
+    return instance === undefined || instance === '0';
+  }
+
   get isSyncing() { return this.syncing; }
   set isSyncing(v) { this.syncing = v; }
 
@@ -68,8 +83,8 @@ class CronService {
   // Traffic-driven, so idle instances stay quiet; the 4-hour cron is the floor.
   ensureFresh() {
     try {
-      const isPrimary = (process.env.NODE_APP_INSTANCE === undefined || process.env.NODE_APP_INSTANCE === '0') &&
-                        (process.env.pm_id === undefined || process.env.pm_id === '0');
+      const isPrimary = this._isPrimaryWorker();
+      // (pm_id === '0' used to be required here; it is reassigned on every reload.)
       if (!isPrimary) return;
       if (this.syncing) return;
       if (!this.cacheService || !this.cacheService.isStale(REVALIDATE_AFTER_MS)) return;
