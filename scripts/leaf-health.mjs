@@ -29,6 +29,7 @@ function readEnv() {
 }
 
 const env = { ...readEnv(), ...process.env };
+Object.assign(process.env, env);
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 const idArg = (() => { const i = args.indexOf('--id'); return i >= 0 ? args[i + 1] : null; })();
