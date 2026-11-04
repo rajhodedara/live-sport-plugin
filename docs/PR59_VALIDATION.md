@@ -1,5 +1,7 @@
 # PR59 integration and validation
 
+Current integration: [STABLE_925_INTEGRATION.md](STABLE_925_INTEGRATION.md). The target and counts below are historical.
+
 This candidate integrates stable `a71e49f377a64a76f83104a2fdc03823df43cc84`
 with the reviewed published PR59 `e91e9b9f1f031ffde5447fab401942a121de3e5c`.
 It is a draft for review, not a production deployment. It does not require

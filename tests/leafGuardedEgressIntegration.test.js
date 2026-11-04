@@ -2,21 +2,48 @@
 
 const { createSharedOutboundFetch } = require('../src/services/SharedOutboundFetch');
 const { createNativeGuardedFetch } = require('../src/services/NativeGuardedFetch');
-const { isLeafTarget } = require('../src/services/GuardedEgressPolicy');
+const { isLeafTarget, selectGuardedEgress } = require('../src/services/GuardedEgressPolicy');
 const originalWarp = process.env.WARP_PROXY_URL;
 const originalDami = process.env.DAMITV_PROXY_URL;
+const originalLeaf = process.env.LEAF_PROXY_URL;
 const proxy = 'socks5://127.0.0.1:40000';
 const result = status => ({ ok: status >= 200 && status < 300, status, bodyTruncated: false, text: async () => 'fixture' });
 
 beforeEach(() => {
   process.env.WARP_PROXY_URL = proxy;
   delete process.env.DAMITV_PROXY_URL;
+  delete process.env.LEAF_PROXY_URL;
 });
 afterEach(() => {
   if (originalWarp === undefined) delete process.env.WARP_PROXY_URL;
   else process.env.WARP_PROXY_URL = originalWarp;
   if (originalDami === undefined) delete process.env.DAMITV_PROXY_URL;
   else process.env.DAMITV_PROXY_URL = originalDami;
+  if (originalLeaf === undefined) delete process.env.LEAF_PROXY_URL;
+  else process.env.LEAF_PROXY_URL = originalLeaf;
+});
+
+test.each([
+  ['Leaf-specific', { LEAF_PROXY_URL: 'socks5://leaf.invalid:1', WARP_PROXY_URL: 'socks5://warp.invalid:2', DAMITV_PROXY_URL: 'socks5://dami.invalid:3' }, 'socks5://leaf.invalid:1'],
+  ['WARP alias', { WARP_PROXY_URL: 'socks5://warp.invalid:2', DAMITV_PROXY_URL: 'socks5://dami.invalid:3' }, 'socks5://warp.invalid:2'],
+  ['Dami compatibility alias', { DAMITV_PROXY_URL: 'socks5://dami.invalid:3' }, 'socks5://dami.invalid:3'],
+  ['no configured proxy', {}, null],
+])('%s precedence applies equally to Leaf mint and manifest hosts', (_label, environment, expected) => {
+  for (const url of ['https://sports.highfly.to/install/stream/sport/fixture.json',
+    'https://papacito.cfd/m3u/fixture/live.m3u8?ft=fixture']) {
+    expect(selectGuardedEgress(url, {}, environment)).toEqual({ proxyUrl: expected, profile: 'chrome' });
+    expect(selectGuardedEgress(url, { proxyUrl: null }, environment)).toEqual({ proxyUrl: null, profile: 'chrome' });
+    expect(selectGuardedEgress(url, { proxyUrl: 'socks5://explicit.invalid:4' }, environment))
+      .toEqual({ proxyUrl: 'socks5://explicit.invalid:4', profile: 'chrome' });
+  }
+});
+
+test('Leaf-specific proxy configuration does not affect DamiTV or direct media', () => {
+  const environment = { LEAF_PROXY_URL: 'socks5://leaf.invalid:1', WARP_PROXY_URL: proxy };
+  expect(selectGuardedEgress('https://messi.damitv.st/metadata', {}, environment))
+    .toEqual({ proxyUrl: proxy, profile: 'vanilla' });
+  expect(selectGuardedEgress('https://w1.papacito.cfd/leaf/fixture/seg.ts?a=fixture', {}, environment))
+    .toEqual({ proxyUrl: null, profile: 'chrome' });
 });
 
 test.each([

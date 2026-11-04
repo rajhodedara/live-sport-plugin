@@ -568,7 +568,7 @@ const sourceIdentityKey = (s) => [
 
 class MatchAggregator {
   constructor({ timStreamsProvider, watchFootyProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, providerHealthService, broadcasterMatchService } = {}) {
-    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...(damiTvProvider ? [damiTvProvider] : []), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : [])];
+    this.providers = [timStreamsProvider, streamedPkProvider, watchFootyProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
     this.teamLogoService = teamLogoService;
@@ -1657,19 +1657,38 @@ class MatchAggregator {
     //   3 past-in-retention kickoff already passed but still inside 24h window
     // Entries within each priority tier retain their original relative order (stable sort).
     try {
-      const CARRY_FORWARD_PROVIDERS = ['daddylive'];
-      const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 600);
+      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf'];
+      const configuredCarryMax = Number(process.env.CARRY_FORWARD_MAX || 600);
+      const CARRY_FORWARD_MAX = Number.isFinite(configuredCarryMax) ? Math.max(0, Math.trunc(configuredCarryMax)) : 0;
       const nowForCarry = Date.now();
       const retentionMs = 24 * 3600 * 1000;
 
       const usedProvider = (provider) => finalMatches.some((m) =>
         Array.isArray(m.sources) && m.sources.some((s) => s && s.source === provider));
 
-        let previous = [];
-        try {
-          previous = (this.cacheService.getMatchesReadOnly ? this.cacheService.getMatchesReadOnly() : this.cacheService.getMatches()) || [];
-        } catch (_) { previous = []; }
-        const presentIds = new Set(activeMatches.map((m) => m && m.id).filter(Boolean));
+      let previous = [];
+      try {
+        previous = (this.cacheService.getMatchesReadOnly ? this.cacheService.getMatchesReadOnly() : this.cacheService.getMatches()) || [];
+      } catch (_) { previous = []; }
+      // Keep canonical identities separate from aliases. A shared legacy alias
+      // must never overwrite a current canonical ID or select an arbitrary row.
+      const identityKeys = (m) => [...new Set([m && m.id, ...(Array.isArray(m && m.aliasIds) ? m.aliasIds : [])]
+        .filter((id) => id !== null && id !== undefined && String(id).trim() !== '').map(String))];
+      const indexIdentities = (rows) => {
+        const canonical = new Map();
+        const all = new Map();
+        const add = (map, key, row) => {
+          if (!map.has(key)) map.set(key, new Set());
+          map.get(key).add(row);
+        };
+        for (const row of rows) {
+          if (!row || !row.id) continue;
+          add(canonical, String(row.id), row);
+          for (const key of identityKeys(row)) add(all, key, row);
+        }
+        return { canonical, all };
+      };
+      const previousIdentities = indexIdentities(previous);
 
       for (const provider of CARRY_FORWARD_PROVIDERS) {
         // 'Provider answered' is not enough to decide health: a provider can
@@ -1706,8 +1725,8 @@ class MatchAggregator {
           return { bucket: 3, kickoff };
         };
 
-        const carried = previous.filter((m) => {
-          if (!m || !m.id || presentIds.has(m.id)) return false;
+        const eligiblePrevious = previous.filter((m) => {
+          if (!m || !m.id) return false;
           if (!Array.isArray(m.sources) || !m.sources.some((s) => s && s.source === provider)) return false;
           // Date-less rows are 24/7 channels: evergreen, always keep.
           //
@@ -1729,17 +1748,69 @@ class MatchAggregator {
           // fixtures survive the cap; other buckets keep insertion order (0).
           if (a.p.bucket === 1) return a.p.kickoff - b.p.kickoff;
           return 0;
-        }).map((d) => d.m).slice(0, CARRY_FORWARD_MAX);
+        }).map((d) => d.m);
+
+        // Resolve against the fresh rows before admitting standalone carry-over
+        // rows. Otherwise an old legacy ID becomes its own canonical match and
+        // hides the fresh (possibly ambiguous) fixtures sharing that ID.
+        const activeIdentities = indexIdentities(activeMatches);
+        const findCarryTarget = (prev) => {
+          const exact = activeIdentities.canonical.get(String(prev.id));
+          let target;
+          if (exact) {
+            if (exact.size !== 1 || previousIdentities.canonical.get(String(prev.id)).size !== 1) return { overlaps: true };
+            [target] = exact;
+          } else {
+            const candidates = new Set();
+            let overlaps = false;
+            for (const key of identityKeys(prev)) {
+              const matches = activeIdentities.all.get(key);
+              if (!matches) continue;
+              overlaps = true;
+              if (matches.size !== 1 || previousIdentities.all.get(key).size !== 1) return { overlaps: true };
+              for (const match of matches) candidates.add(match);
+            }
+            if (candidates.size !== 1) return { overlaps };
+            [target] = candidates;
+          }
+          // The old exact-ID shortcut predates stronger fixture IDs. Carrying a
+          // source must still satisfy event/date/session/channel identity even
+          // when a stale ID has been reused for a different meeting.
+          const before = this._precompute({ ...prev });
+          const current = this._precompute({ ...target });
+          if (!this._sameEventPre({ ...before, id: '' }, { ...current, id: '' })) return { overlaps: true };
+          return { overlaps: true, target };
+        };
+
+        const carried = [];
+        let sourcesCarried = 0;
+        for (const prev of eligiblePrevious) {
+          if (carried.length + sourcesCarried >= CARRY_FORWARD_MAX) break;
+          const { overlaps, target } = findCarryTarget(prev);
+          if (target) {
+            if (Array.isArray(target.sources) && !target.sources.some((s) => s && s.source === provider)) {
+              target.sources.push(...prev.sources.filter((s) => s && s.source === provider).map((s) => ({ ...s })));
+              sourcesCarried++;
+            }
+          } else if (!overlaps && previousIdentities.canonical.get(String(prev.id)).size === 1) {
+            carried.push(prev);
+          }
+        }
 
         if (carried.length > 0) {
           // Clone-on-admit: carried rows are live cache objects, and the
           // backfill/enrichment passes below mutate rows in activeMatches.
           activeMatches.push(...carried.map(cloneRowForSync));
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync; carried forward ${carried.length} entry(ies) from the previous cache.`);
-        } else {
+        } else if (sourcesCarried === 0) {
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync and no valid entries were available to carry forward.`);
         }
-        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length);
+
+        if (sourcesCarried > 0) {
+          console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
+        }
+
+        if (this.providerHealthService) this.providerHealthService.recordCarryForward(provider, carried.length + sourcesCarried);
       }
     } catch (carryErr) {
       console.error('[MatchAggregator] Provider carry-forward failed:', carryErr.message);

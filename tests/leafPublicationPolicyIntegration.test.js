@@ -2,9 +2,11 @@
 jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn() }));
 const { safeFetch } = require('../src/services/ProviderOutbound');
 const LeafProvider = require('../src/providers/LeafProvider');
+const leafState = require('../src/services/LeafState');
 const originalEnv = { ...process.env };
 beforeEach(() => {
   process.env.LEAF_INSTALL_CONFIG = 'fixture-install';
+  process.env.APP_SECRET = 'fixture-private-leaf-state-key';
   delete process.env.LEAF_API_URL;
   safeFetch.mockReset();
 });
@@ -27,14 +29,20 @@ test.each([
   const streams = await new LeafProvider().resolveStream('fixture-id');
   expect(streams).toHaveLength(1);
   const published = new URL(streams[0].url);
-  expect(published.pathname).toBe('/api/leaf/manifest.m3u8');
-  expect(published.searchParams.get('url')).toBe(valid);
+  expect(published.pathname).toMatch(/^\/api\/leaf\/m3u8\/[^/]+\/index\.m3u8$/);
+  const token = published.pathname.split('/')[4];
+  expect(leafState.verify(token)).toMatchObject({ m: 'fixture-id', s: 'valid' });
+  expect(streams[0].url).not.toContain('ft=');
+  expect(streams[0].url).not.toContain(encodeURIComponent(valid));
 });
 
-test('a permitted subdomain URL retains its original query bytes through publication', async () => {
+test('a permitted subdomain publishes application state without forwarding its upstream credential', async () => {
   const valid = 'https://gateway.papacito.cfd/m3u/fixture/live.m3u8?ft=one%2Ftwo&x=three%2Bfour';
   safeFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ streams: [{ name: 'Valid', url: valid }] }) });
   const streams = await new LeafProvider().resolveStream('fixture-id');
   expect(streams).toHaveLength(1);
-  expect(new URL(streams[0].url).searchParams.get('url')).toBe(valid);
+  const token = new URL(streams[0].url).pathname.split('/')[4];
+  expect(leafState.verify(token)).toMatchObject({ m: 'fixture-id', s: 'fixture' });
+  expect(streams[0].url).not.toContain('one%2Ftwo');
+  expect(streams[0].url).not.toContain(encodeURIComponent(valid));
 });

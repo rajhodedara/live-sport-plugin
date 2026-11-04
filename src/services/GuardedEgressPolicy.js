@@ -21,13 +21,21 @@ function isDamitvTarget(value) {
   return host === 'damitv.st' || host.endsWith('.damitv.st');
 }
 
+function isDamitvMediaTarget(value) {
+  if (!isDamitvTarget(value)) return false;
+  try { return new URL(String(value)).pathname.startsWith('/c/'); }
+  catch (_) { return false; }
+}
+
 function selectGuardedEgress(url, options = {}, environment = process.env) {
   const leaf = isLeafTarget(url);
   const dami = isDamitvTarget(url);
   // An explicit null is the caller's direct-egress choice, not a missing value.
   // Resolve this once per request and retain it throughout its redirect chain.
-  const proxyUrl = Object.hasOwn(options, 'proxyUrl') ? options.proxyUrl || null :
-    (leaf || dami ? environment.WARP_PROXY_URL || environment.DAMITV_PROXY_URL || null : null);
+  const configuredProxy = leaf
+    ? environment.LEAF_PROXY_URL || environment.WARP_PROXY_URL || environment.DAMITV_PROXY_URL
+    : dami ? environment.WARP_PROXY_URL || environment.DAMITV_PROXY_URL : null;
+  const proxyUrl = Object.hasOwn(options, 'proxyUrl') ? options.proxyUrl || null : configuredProxy || null;
   // Leaf's new stable proxy uses Chrome142; the guarded 'chrome' slot already
   // provides that profile. DamiTV and other explicit proxies retain vanilla.
   const profile = options.profile || (leaf ? 'chrome' : proxyUrl || dami ? 'vanilla' : 'chrome');
@@ -48,4 +56,4 @@ function validateLeafManifestUrl(value) {
   return value;
 }
 
-module.exports = { isLeafTarget, isDamitvTarget, selectGuardedEgress, validateLeafManifestUrl };
+module.exports = { isLeafTarget, isDamitvTarget, isDamitvMediaTarget, selectGuardedEgress, validateLeafManifestUrl };

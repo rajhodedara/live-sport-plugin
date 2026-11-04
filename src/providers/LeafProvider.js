@@ -2,6 +2,8 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../services/ProviderOutbound');
+const leafState = require('../services/LeafState');
+const { normalizeConfigBlob } = require('../services/LeafMint');
 const { BASE_URL } = require('../config');
 const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 
@@ -18,14 +20,6 @@ const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 // "please reinstall" stub, so a locally minted signed URL could only ever
 // produce a broken stream.
 const DEFAULT_ORIGIN = 'https://sports.highfly.to';
-
-function toBase64Url(json) {
-  return Buffer.from(JSON.stringify(json))
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
-}
 
 class LeafProvider extends BaseProvider {
   constructor(opts = {}) {
@@ -63,8 +57,8 @@ class LeafProvider extends BaseProvider {
     if (override) return override.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
 
     const origin = (process.env.LEAF_API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, '');
-    const config = process.env.LEAF_INSTALL_CONFIG ||
-      (process.env.LEAF_FREE_USER_ID ? toBase64Url({ freeUserId: process.env.LEAF_FREE_USER_ID }) : '');
+    const rawConfig = process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID || '';
+    const config = normalizeConfigBlob(rawConfig);
 
     return config ? `${origin}/${config}` : origin;
   }
@@ -124,7 +118,7 @@ class LeafProvider extends BaseProvider {
       }
       return await this._fetchLiveMatchesInternal();
     } catch (err) {
-      console.warn(`[${this.name}] Failed to fetch live matches: ${err.message}`);
+      console.warn(`[${this.name}] Failed to fetch live matches: ${err.code || 'ERR_LEAF_CATALOG'}`);
       return [];
     }
   }
@@ -172,6 +166,12 @@ class LeafProvider extends BaseProvider {
         }
       }
 
+      // Upstream publishes live fixtures without a parseable date (releaseInfo 'LIVE',
+      // id without a timestamp), which left date='0'. Dateless events sort behind every
+      // timed one, so a live Leaf match never survived the 100-meta catalogue cap and no
+      // tile was published even when the provider resolved fine. A live fixture is
+      // happening now, so 'now' is both honest and sortable.
+      if (matchDate === '0') matchDate = String(Date.now());
       matches.push(new MatchEntity({
         id: `leaf_${cleanId}`,
         aliasIds: [item.id, cleanId],
@@ -192,9 +192,9 @@ class LeafProvider extends BaseProvider {
 
   /**
    * Resolve live streams for a match.
-   * Strictly isolates Leaf (papacito.cfd) streams and forwards the upstream
-   * signed playback URL untouched, because the signature is the only
-   * authorisation the CDN accepts and it cannot be minted locally.
+   * Strictly isolates Leaf (papacito.cfd) streams and publishes signed application
+   * state. Upstream credentials are requested through the official mint endpoint
+   * when the playlist is fetched; they cannot be minted locally.
    *
    * @param {string} sourceId
    * @param {string} matchCategory
@@ -216,7 +216,7 @@ class LeafProvider extends BaseProvider {
       }
       return await this._resolveStreamsInternal(targetId);
     } catch (err) {
-      console.warn(`[${this.name}] Failed to resolve streams for ${targetId}: ${err.message}`);
+      console.warn(`[${this.name}] Failed to resolve streams: ${err.code || 'ERR_LEAF_STREAMS'}`);
       return [];
     }
   }
@@ -228,11 +228,15 @@ class LeafProvider extends BaseProvider {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
         'Accept': 'application/json'
       },
-      timeoutMs: 8000
+      timeoutMs: 8000,
+      maxBodyBytes: 256 * 1024
     });
 
     if (!res || !res.ok) {
       throw new Error(`HTTP ${res ? res.status : 'No response'}`);
+    }
+    if (res.bodyTruncated) {
+      throw Object.assign(new Error('Leaf stream metadata exceeds its body limit'), { code: 'ERR_LEAF_BODY_LIMIT' });
     }
 
     const data = await res.json();
@@ -258,7 +262,13 @@ class LeafProvider extends BaseProvider {
       const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
-      const manifestProxyUrl = `${BASE_URL}/api/leaf/manifest.m3u8?url=${encodeURIComponent(directUrl)}`;
+      // Hand out OUR token, never papacito's. The `ft` JWT carries the install uid and
+      // the IP that minted it, so putting it in a player-facing URL is what let a 4 h
+      // resolve cache outlive an 8 h credential (and leaked the credential to client
+      // logs besides). The route uses only a bounded server-side mint cache.
+      const slug = (new URL(directUrl).pathname.match(/\/m3u\/([a-z0-9-]+)\/live\.m3u8/i) || [])[1] || '';
+      const stateToken = leafState.sign({ m: targetId, s: slug });
+      const manifestProxyUrl = `${BASE_URL}/api/leaf/m3u8/${stateToken}/index.m3u8`;
 
       const rawName = typeof st.name === 'string' ? st.name : '';
       const rawTitle = typeof st.title === 'string' ? st.title : '';

@@ -140,12 +140,27 @@ class StreamResolveCache {
         const u = new URL(target, 'http://localhost');
         target = u.searchParams.get('url') || target;
       }
+      if (target.includes('/api/leaf/manifest.m3u8?') || target.includes('/api/leaf/live.m3u8?')) {
+        const u = new URL(target, 'http://localhost');
+        target = u.searchParams.get('url') || target;
+      }
       const u = new URL(target, 'http://localhost');
       const e = u.searchParams.get('e') || u.searchParams.get('exp') || u.searchParams.get('expires');
       if (e && /^\d+$/.test(e)) {
         const exp = parseInt(e, 10);
         const expMs = exp < 1e11 ? exp * 1000 : exp;
         return expMs - Date.now();
+      }
+      const ft = u.searchParams.get('ft');
+      if (ft && ft.includes('.')) {
+        const parts = ft.split('.');
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+          if (payload && typeof payload.exp === 'number') {
+            const expMs = payload.exp < 1e11 ? payload.exp * 1000 : payload.exp;
+            return expMs - Date.now();
+          }
+        }
       }
       const token = u.searchParams.get('token');
       if (token) {
@@ -163,11 +178,15 @@ class StreamResolveCache {
   }
 
   _ttlFor(sourceName) {
-    const val = this.ttl.get(sourceName) || this.defaultTtlMs;
     if (sourceName === 'daddylive') {
+      const val = this.ttl.get(sourceName) || this.defaultTtlMs;
       return Math.min(val, 150 * 1000);
     }
-    return val;
+    if (sourceName === 'leaf') {
+      const val = this.ttl.get(sourceName);
+      return Math.min(val || (4 * 3600 * 1000), 4 * 3600 * 1000);
+    }
+    return this.ttl.get(sourceName) || this.defaultTtlMs;
   }
 
   /**
@@ -525,7 +544,7 @@ class StreamResolveCache {
   noteSuccess(key) {
     if (!key) return;
     const sourceName = key.split(':')[0];
-    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : this.maxTtlMs;
+    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : (sourceName === 'leaf' ? 4 * 3600 * 1000 : this.maxTtlMs);
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);

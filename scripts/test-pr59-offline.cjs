@@ -26,7 +26,11 @@ const suites = [
   'skTechDashDrmProxy', 'manifestRecoveryIdentity',
   'stableStreamSplitIntegration', 'leafGuardedEgressIntegration',
   'leafManifestGuardIntegration', 'legacyProxyInitialization', 'leafSelectiveProxy',
-  'dashPayload', 'dashCencEngine', 'leafPublicationPolicyIntegration'
+  'dashPayload', 'dashCencEngine', 'leafPublicationPolicyIntegration',
+  'recoveryCanonicalIdentity', 'manifestGuardRecovery', 'streamPolicy',
+  'leafHardening', 'leafStateMintIntegration', 'leafResolveCacheIntegration',
+  'carryForwardIdentityIntegration', 'damiTvProvider', 'damiTvExtractionDiagnostics',
+  'guardedCurlClient', 'damiGuardedCurlIntegration', 'leafDiagnostics'
 ].map(name => `tests/${name}.test.js`);
 let jestEntry;
 try { jestEntry = require.resolve('jest/bin/jest'); }

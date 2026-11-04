@@ -21,10 +21,9 @@
 
 process.env.NODE_ENV = 'test';
 
-jest.mock('../src/impitClient', () => ({
+jest.mock('../src/services/ProviderOutbound', () => ({
   safeFetch: jest.fn()
 }));
-const { safeFetch } = require('../src/impitClient');
 
 const DamiTvProvider = require('../src/providers/DamiTvProvider');
 const CircuitBreakerService = require('../src/services/CircuitBreakerService');
@@ -110,6 +109,30 @@ function makeProvider(opts = {}) {
   provider.fetchAllMatches = { fire: async () => opts.allPayload };
   return provider;
 }
+
+describe('DamiTV deployment opt-out', () => {
+  const original = process.env.DAMITV_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.DAMITV_ENABLED;
+    else process.env.DAMITV_ENABLED = original;
+  });
+  test('remains enabled when unset and when explicitly enabled', () => {
+    delete process.env.DAMITV_ENABLED;
+    expect(makeProvider().isEnabled()).toBe(true);
+    process.env.DAMITV_ENABLED = 'true';
+    expect(makeProvider().isEnabled()).toBe(true);
+  });
+  test('explicit false skips both catalog and playback without outbound calls', async () => {
+    process.env.DAMITV_ENABLED = 'false';
+    const provider = makeProvider();
+    provider.proxyFetch = jest.fn();
+    provider.fetchData = { fire: jest.fn() }; provider.fetchAllMatches = { fire: jest.fn() };
+    expect(await provider.getMatches()).toEqual([]);
+    expect(await provider.resolveStream('https://damitv.st/embed/?id=fixture', '', '')).toEqual([]);
+    expect(provider.fetchData.fire).not.toHaveBeenCalled(); expect(provider.fetchAllMatches.fire).not.toHaveBeenCalled();
+    expect(provider.proxyFetch).not.toHaveBeenCalled();
+  });
+});
 
 describe('DamiTvProvider.getMatches — fixtures', () => {
   test('keeps the league as property and the real kickoff for a scheduled fixture', async () => {
@@ -529,6 +552,159 @@ describe('DamiTvProvider.resolveStream — fallbacks', () => {
     provider.proxyFetch = jest.fn();
 
     const streams = await provider.resolveStream('s', 'football', 'X', { source: 'damitv', url: 'https://damitv.st/embed/' });
+    expect(streams).toHaveLength(0);
+    expect(provider.proxyFetch).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Channel feeds. Every live fixture publishes its streams as
+// /player/jw/?url=/c/<n>.m3u8 and nothing else. Those carry no ?id= to call
+// /papi/extract-url with, so they used to be dropped — which removed the whole
+// fixture from the catalog rather than just that stream.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CHANNEL_EMBED = 'https://damitv.st/player/jw/?url=%2Fc%2F379.m3u8&name=ESPN%201%20NL';
+
+function channelSource(over = {}) {
+  return Object.assign({
+    source: 'hls', id: 'c1', name: 'ESPN 1 NL', sd: 0, hd: 1, embed: CHANNEL_EMBED
+  }, over);
+}
+
+function tokenOnlyProvider() {
+  const provider = makeProvider({ feedPayload: feedPayload([]), allPayload: [] });
+  provider.proxyFetch = jest.fn(async (url) => {
+    if (String(url).includes('/papi/hls-token')) {
+      return { ok: true, status: 200, json: async () => ({ tk: 'TOK123', e: 4102444800 }) };
+    }
+    throw new Error('unexpected fetch ' + url);
+  });
+  return provider;
+}
+
+describe('DamiTvProvider — channel feeds', () => {
+  test('ingests a live fixture whose sources are channel feeds', async () => {
+    const provider = makeProvider({
+      feedPayload: feedPayload([
+        fixtureItem({
+          id: 'mm-own-aa5ff037d8',
+          name: 'Pakhtakor vs Al Nassr',
+          status: 'live',
+          starts_at: FEED_TS - 1800,
+          sources: [
+            channelSource(),
+            channelSource({
+              id: 'c2',
+              name: 'Astro Football',
+              embed: 'https://damitv.st/player/jw/?url=%2Fc%2F124.m3u8&name=Astro%20Football'
+            })
+          ]
+        })
+      ]),
+      allPayload: []
+    });
+
+    const matches = await provider.getMatches();
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].id).toBe('dami_mm-own-aa5ff037d8');
+    expect(matches[0].status).toBe('live');
+    expect(matches[0].sources).toHaveLength(2);
+    expect(matches[0].sources[0].channelPath).toBe('/c/379.m3u8');
+  });
+
+  test('drops the wrapper page when real channel feeds exist on the same item', async () => {
+    const provider = makeProvider({
+      feedPayload: feedPayload([
+        fixtureItem({
+          id: 'mm-own-e9ead51e9d',
+          status: 'live',
+          sources: [
+            { source: 'hls', id: 's1', name: 'Main', embed: '/embed/?id=mm-own-e9ead51e9d' },
+            channelSource()
+          ]
+        })
+      ]),
+      allPayload: []
+    });
+
+    const sources = (await provider.getMatches())[0].sources;
+
+    expect(sources).toHaveLength(1);
+    expect(sources[0].channelPath).toBe('/c/379.m3u8');
+  });
+
+  test('avoids a duplicate when the same channel appears twice', async () => {
+    const provider = makeProvider({
+      feedPayload: feedPayload([
+        fixtureItem({ id: 'mm-own-x', status: 'live', sources: [channelSource(), channelSource({ id: 'c9' })] })
+      ]),
+      allPayload: []
+    });
+
+    expect((await provider.getMatches())[0].sources).toHaveLength(1);
+  });
+
+  test('mints a token and builds the signed channel playlist', async () => {
+    const provider = tokenOnlyProvider();
+
+    const streams = await provider.resolveStream('s', 'football', 'Pakhtakor vs Al Nassr', {
+      source: 'damitv', url: CHANNEL_EMBED
+    });
+
+    expect(streams).toHaveLength(1);
+    const q = new URL(streams[0].url).searchParams;
+    expect(q.get('url')).toBe('https://damitv.st/c/379.m3u8?tk=TOK123&e=4102444800');
+    expect(q.get('referer')).toBe('https://damitv.st/');
+    expect(q.get('origin')).toBe('https://damitv.st');
+    expect(streams[0].resolution).toBe('HD');
+    expect(streams[0].isTikTok).toBe(true);
+    expect(streams[0].behaviorHints.proxyHeaders.request['Referer']).toBe('https://damitv.st/');
+  });
+
+  test('reuses one token across resolves instead of minting per stream', async () => {
+    const provider = tokenOnlyProvider();
+
+    await provider.resolveStream('a', 'football', 'A', { url: CHANNEL_EMBED });
+    await provider.resolveStream('b', 'football', 'B', { url: CHANNEL_EMBED });
+
+    const tokenCalls = provider.proxyFetch.mock.calls.filter(([u]) => String(u).includes('/papi/hls-token'));
+    expect(tokenCalls).toHaveLength(1);
+  });
+
+  test('re-mints a token that is inside the expiry safety window', async () => {
+    const provider = makeProvider({ feedPayload: feedPayload([]), allPayload: [] });
+    let n = 0;
+    provider.proxyFetch = jest.fn(async () => {
+      n += 1;
+      return { ok: true, status: 200, json: async () => ({ tk: 'TOK' + n, e: 4102444800 }) };
+    });
+    provider._hlsToken = { tk: 'STALE', e: Math.floor(Date.now() / 1000) + 60 };
+
+    const streams = await provider.resolveStream('s', 'football', 'X', { url: CHANNEL_EMBED });
+
+    expect(new URL(streams[0].url).searchParams.get('url')).toContain('tk=TOK1');
+  });
+
+  test('decodes an enc: channel path and keeps its origin', async () => {
+    const abs = 'https://admin2.example.test/c/7.m3u8';
+    const enc = 'enc:' + Buffer.from(abs.split('').reverse().join(''), 'utf8').toString('base64');
+    const provider = tokenOnlyProvider();
+
+    const streams = await provider.resolveStream('s', 'football', 'X', {
+      url: 'https://damitv.st/player/jw/?url=' + encodeURIComponent(enc)
+    });
+
+    expect(new URL(streams[0].url).searchParams.get('url')).toBe(abs + '?tk=TOK123&e=4102444800');
+  });
+
+  test('returns nothing when the embed has neither a channel nor an id', async () => {
+    const provider = makeProvider({ feedPayload: feedPayload([]), allPayload: [] });
+    provider.proxyFetch = jest.fn();
+
+    const streams = await provider.resolveStream('s', 'football', 'X', { url: 'https://damitv.st/embed/' });
+
     expect(streams).toHaveLength(0);
     expect(provider.proxyFetch).not.toHaveBeenCalled();
   });

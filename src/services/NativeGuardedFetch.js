@@ -8,7 +8,9 @@ const { createNativeGuardedSlot } = require('./NativeGuardedSlot');
 const { readLimitedBody } = require('../impitClient');
 const { OutboundBlockedError, assertOutboundUrl } = require('./GuardedOutbound');
 const { filterRedirectHeaders, shouldDropRedirectBody } = require('./RedirectHeaderPolicy');
-const { selectGuardedEgress } = require('./GuardedEgressPolicy');
+const { selectGuardedEgress, isDamitvMediaTarget } = require('./GuardedEgressPolicy');
+const { createGuardedCurlModule } = require('./GuardedCurlClient');
+const guardedCurlModule = createGuardedCurlModule();
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
 const HARD_BODY_LIMIT = 8 * 1024 * 1024;
@@ -176,6 +178,12 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
       // Preserve the selected egress/profile across CDN redirects, as one
       // existing native client does. A redirect must not silently leave WARP.
       const { proxyUrl, profile } = selectGuardedEgress(url, options);
+      // This transport choice is internal and fixed for the whole redirect
+      // chain. The slot, not curl, still dials through the required proxy.
+      const curl = Boolean(proxyUrl && isDamitvMediaTarget(url) && ['GET', 'HEAD'].includes(method) && body == null);
+      const configuration = { profile, proxyUrl: proxyUrl || null,
+        ...(curl ? { nativeModule: guardedCurlModule } : {}) };
+      const key = JSON.stringify([profile, proxyUrl || null, ...(curl ? ['curl'] : [])]);
       const deadline = performance.now() + timeoutMs;
       const timeout = new AbortController();
       const timer = setTimeout(() => timeout.abort(new DOMException('Native fetch deadline', 'TimeoutError')), timeoutMs);
@@ -189,7 +197,7 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
           // connector still validate independently at lease and dial time.
           await withSignal(assertOutboundUrl(url.href, { resolve: slotOptions.resolve }), signal);
           const owner = ['catalog', 'manifest', 'wasm'].includes(options.diagnosticOwner) ? options.diagnosticOwner : 'other';
-          const record = await acquire(JSON.stringify([profile, proxyUrl || null]), { profile, proxyUrl: proxyUrl || null }, signal, owner, performance.now() + admissionWaitMs);
+          const record = await acquire(key, configuration, signal, owner, performance.now() + admissionWaitMs);
           let received;
           try {
             signal.throwIfAborted();
@@ -200,7 +208,8 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
               // owns cancellation and waits for the underlying body operation.
               mark('fetch_start', hop);
               const response = await client.fetch(url.href, { method, headers,
-                body, redirect: 'manual', timeout: remaining });
+                body, redirect: 'manual', timeout: remaining,
+                ...(curl ? { signal: operationSignal, maxBodyBytes } : {}) });
               mark('response_received', hop);
               const abortResponse = () => {
                 if (typeof response.abort === 'function') {

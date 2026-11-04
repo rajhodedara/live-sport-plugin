@@ -1,5 +1,7 @@
 # Integration with stable d1b2b626
 
+Current integration: [STABLE_925_INTEGRATION.md](STABLE_925_INTEGRATION.md). The target and counts below are historical.
+
 This review supersedes the earlier a71 integration target. Stable advanced eighteen
 commits to `d1b2b626b13d21cafdd7d66ecbf553d90f9c4d9e`. PR59 was integrated
 first; PR61 was then integrated on that guarded base. Both remain draft pending

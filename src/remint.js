@@ -157,6 +157,10 @@ function readRck(req) {
 
 // Upstream refused because the embedded token is gone (not because we are broken).
 function isExpiryStatus(err) {
+  // A local refusal may also carry HTTP 403. Remint must never turn a guard
+  // rejection or exhausted transport capacity into another provider request.
+  if (err && (err.isFatal || err.code === 'ERR_OUTBOUND_BLOCKED' ||
+      err.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(err.code || ''))) return false;
   const s = err && err.statusCode;
   return s === 401 || s === 403 || s === 404 || s === 410;
 }

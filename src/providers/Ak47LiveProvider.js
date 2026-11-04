@@ -5,7 +5,6 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
-const { signPayload: signDashPayload } = require('../services/DashPayload');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 
 const DEFAULT_REFERER = 'http://www.fawanews.sc/';
@@ -482,31 +481,12 @@ class Ak47LiveProvider extends BaseProvider {
                 clearKey = String(selected.key || '').trim();
                 clearKid = String(selected.kid || '').trim();
               }
+              // ClearKey DASH is deliberately not relayed: playing it would push
+              // every segment through /api/dash (≈3.7 GB per viewer-hour at 1080p).
+              // Policy: drop the source instead of spending the bandwidth.
               if (/^[0-9a-fA-F]{32}$/.test(clearKey) && /\.mpd(\?|$)/i.test(dashLink)) {
-                const dashHeaders = { 'User-Agent': DEFAULT_UA };
-                for (const pair of linkParts.slice(1).join('|').split('&')) {
-                  const eqIdx = pair.indexOf('=');
-                  if (eqIdx !== -1 && pair.substring(0, eqIdx).trim().toLowerCase() === 'user-agent') {
-                    dashHeaders['User-Agent'] = pair.substring(eqIdx + 1).trim();
-                  }
-                }
-
-                const payload = signDashPayload({
-                  mpdUrl: dashLink,
-                  key: clearKey.toLowerCase(),
-                  kid: clearKid.toLowerCase(),
-                  headers: dashHeaders
-                });
-
-                return [new StreamEntity({
-                  name: 'Ak47Live',
-                  // Channel name inside () — the stream pipeline extracts the
-                  // first parenthesised group as the displayed channel label.
-                  title: `${matchTitle || 'Live Event'} (${channelLabel})`,
-                  url: `${BASE_URL}/api/dash/index.m3u8?d=${payload}`,
-                  behaviorHints: { notWebReady: false },
-                  resolution: 'FHD'
-                })];
+                console.warn(`[${this.name}] Dropped ClearKey DASH (bandwidth policy): ${channelLabel}`);
+                return [];
               }
 
               // Zero-DASH / DRM Enforcement: Drop any remaining DRM or DASH stream
