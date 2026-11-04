@@ -13,9 +13,10 @@ test('a successfully completed extractor produces a manifest stream', async () =
     done(null, 'JWPLAYER SETUP CALLED WITH: {"file": "https://cdn.example.test/live.m3u8?token=fixture"}', '');
   });
   const streams = await new PpvStProvider({}).resolveStream('id', 'football', 'Fixture', source);
-  expect(streams).toHaveLength(1);
+  expect(streams).toHaveLength(2);
   expect(streams[0].url).toContain('/api/manifest?');
   expect(decodeURIComponent(streams[0].url)).toContain('https://cdn.example.test/live.m3u8?token=fixture');
+  expect(streams[1].externalUrl).toContain('/watch?');
 });
 
 test('a failed extractor still yields the web-player fallback', async () => {

@@ -10,8 +10,37 @@ const { BASE_URL } = require('../config');
 const cheerio = require('cheerio');
 const os = require('os');
 const { BREAKER_TIMEOUT_MS } = require('../services/CircuitBreakerService');
+const { createHash } = require('node:crypto');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+
+// A channel broadcasts many events, and one event can have many channels. Its
+// first feed therefore cannot identify the fixture. Retain that old ID as a
+// lookup alias, but key new cards on the explicit event/squad/kickoff metadata.
+function fixtureId({ title, category, date, league, team1, team2 }) {
+  const text = value => String(value || '').normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+  const identity = [title, category, String(date), league, team1?.name, team2?.name].map(text);
+  return `dlv_event_${createHash('sha256').update(JSON.stringify(identity)).digest('hex').slice(0, 24)}`;
+}
+
+function explicitTitleDate(title, time, currentYear) {
+  const dayFirst = title.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:,?\s+(\d{4}))?\b/i);
+  const monthFirst = dayFirst ? null : title.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(\d{4}))?\b/i);
+  const found = dayFirst || monthFirst;
+  if (!found) return null;
+  const day = Number(dayFirst ? found[1] : found[2]);
+  const monthText = dayFirst ? found[2] : found[1];
+  const month = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'].indexOf(monthText.slice(0, 3).toLowerCase());
+  const year = found[3] ? Number(found[3]) : currentYear;
+  const clock = String(time || '00:00').match(/^([01]\d|2[0-3]):([0-5]\d)$/);
+  if (!clock) return { valid: false };
+  const timestamp = Date.UTC(year, month, day, Number(clock[1]), Number(clock[2]));
+  const date = new Date(timestamp);
+  // Date.UTC normalizes February 30 into March; an explicit bad date must not
+  // become either that other day or the enclosing schedule's date.
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) return { valid: false };
+  return { valid: true, timestamp };
+}
 
 function decodeHtmlEntities(str) {
   if (!str || typeof str !== 'string') return '';
@@ -745,16 +774,10 @@ class DaddyLiveProvider extends BaseProvider {
             // Parse kickoff timestamp (UK GMT / UTC)
             let matchTime = null;
             // If category is "Upcoming Events" or raw title specifies an explicit future date, extract it
-            if (cleanCat.toLowerCase().includes('upcoming') || rawEvent.includes(' 202')) {
-              const titleDateMatch = rawEvent.match(/(\d{1,2})\s+(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)(?:\s+(\d{4}))?/i);
-              if (titleDateMatch) {
-                const year = titleDateMatch[3] ? parseInt(titleDateMatch[3], 10) : currentYear;
-                const timePart = ev.time ? `${ev.time}:00 UTC` : '00:00:00 UTC';
-                const parsed = Date.parse(`${titleDateMatch[1]} ${titleDateMatch[2]} ${year} ${timePart}`);
-                if (!Number.isNaN(parsed) && parsed > 0) {
-                  matchTime = parsed;
-                }
-              }
+            if (cleanCat.toLowerCase().includes('upcoming') || /\b20\d{2}\b/.test(rawEvent)) {
+              const explicit = explicitTitleDate(rawEvent, ev.time, currentYear);
+              if (explicit && !explicit.valid) continue;
+              if (explicit) matchTime = explicit.timestamp;
             }
 
             if (!matchTime && dayStr && ev.time) {
@@ -828,7 +851,8 @@ class DaddyLiveProvider extends BaseProvider {
             }
 
             matches.push(new MatchEntity({
-              id: `dlv_${firstId}_${slug}`,
+              id: fixtureId({ title, category: eventCategory, date: matchTime, league, team1, team2 }),
+              aliasIds: [`dlv_${firstId}_${slug}`],
               title,
               category: eventCategory,
               status,
@@ -868,10 +892,12 @@ class DaddyLiveProvider extends BaseProvider {
           const identityKey = ident.identityKey;
           const channelNumber = ident.channelNumber;
           const slug = canonicalTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+          const legacySlug = ident.legacyCanonicalTitle?.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
           const logoUrl = getChannelLogo(canonicalTitle) || getChannelLogo(rawName);
 
           const entity = new MatchEntity({
             id: `dlv_ch_${chId}_${slug}`,
+            ...(legacySlug && legacySlug !== slug ? { aliasIds: [`dlv_ch_${chId}_${legacySlug}`] } : {}),
             title: canonicalTitle,
             baseTitle: canonicalTitle,
             category: 'networks',
@@ -988,61 +1014,66 @@ class DaddyLiveProvider extends BaseProvider {
           }
 
           for (const iframeUrl of candidateUrls.slice(0, 3)) {
-            let embedOrigin = '';
             try {
-              embedOrigin = new URL(iframeUrl).origin;
-            } catch (_) {
-              embedOrigin = base;
-            }
-            let embedReferer = `${embedOrigin}/`;
-
-            // Fetch the embed page
-            const embedRes = await this.proxyFetch(iframeUrl, {
-              headers: {
-                'User-Agent': UA,
-                'Referer': playerUrl,
-                'Origin': base,
-                'Sec-Fetch-Dest': 'iframe',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'cross-site',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-              },
-              signal: AbortSignal.timeout(6000)
-            });
-
-            if (!embedRes || !embedRes.ok) continue;
-
-            const embedHtml = typeof embedRes.text === 'function' ? await embedRes.text() : embedRes.text;
-            let m3u8Url = null;
-
-            // Resolve via the shared helper: _econfig -> chain -> direct m3u8
-            // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
-            const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
-            if (resolved && resolved.url && !isTikTokCloakedStream(resolved.url)) {
-              m3u8Url = resolved.url;
+              let embedOrigin = '';
               try {
-                embedOrigin = new URL(resolved.referer || iframeUrl).origin;
+                embedOrigin = new URL(iframeUrl).origin;
               } catch (_) {
                 embedOrigin = base;
               }
-              embedReferer = `${embedOrigin}/`;
-            }
+              let embedReferer = `${embedOrigin}/`;
 
-            if (m3u8Url) {
-              const registryReferer = this._terminalRefererFor(m3u8Url);
-              const candidate = this._buildManifestStream(
-                m3u8Url,
-                registryReferer || embedReferer,
-                sourceId,
-                channelName
-              );
+              // Fetch the embed page
+              const embedRes = await this.proxyFetch(iframeUrl, {
+                headers: {
+                  'User-Agent': UA,
+                  'Referer': playerUrl,
+                  'Origin': base,
+                  'Sec-Fetch-Dest': 'iframe',
+                  'Sec-Fetch-Mode': 'navigate',
+                  'Sec-Fetch-Site': 'cross-site',
+                  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+                },
+                signal: AbortSignal.timeout(6000)
+              });
 
-              if (registryReferer) {
-                streams.push(candidate);
-                foundDirect = true;
-                break;
+              if (!embedRes || !embedRes.ok) continue;
+
+              const embedHtml = typeof embedRes.text === 'function' ? await embedRes.text() : embedRes.text;
+              let m3u8Url = null;
+
+              // Resolve via the shared helper: _econfig -> chain -> direct m3u8
+              // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
+              const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
+              if (resolved && resolved.url && !isTikTokCloakedStream(resolved.url)) {
+                m3u8Url = resolved.url;
+                try {
+                  embedOrigin = new URL(resolved.referer || iframeUrl).origin;
+                } catch (_) {
+                  embedOrigin = base;
+                }
+                embedReferer = `${embedOrigin}/`;
               }
-              if (!fallbackStream) fallbackStream = candidate;
+
+              if (m3u8Url) {
+                const registryReferer = this._terminalRefererFor(m3u8Url);
+                const candidate = this._buildManifestStream(
+                  m3u8Url,
+                  registryReferer || embedReferer,
+                  sourceId,
+                  channelName
+                );
+
+                if (registryReferer) {
+                  streams.push(candidate);
+                  foundDirect = true;
+                  break;
+                }
+                if (!fallbackStream) fallbackStream = candidate;
+              }
+            } catch (_) {
+              // A single iframe failure must not skip the other candidates.
+              continue;
             }
           }
         } catch (_) {

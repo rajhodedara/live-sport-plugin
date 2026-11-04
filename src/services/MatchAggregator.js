@@ -13,6 +13,7 @@ const STOP_WORDS = new Set([
 const { parseTimezone } = require('../timezone');
 const ChannelIdentityService = require('./ChannelIdentityService');
 const MatchEntity = require('../domain/MatchEntity');
+const { eventSquadIdentity, canonicalizeAge } = require('./EventSquadIdentity');
 
 /**
  * Parses a provider-supplied match date into epoch milliseconds.
@@ -44,6 +45,99 @@ function _parseEventDate(raw) {
   // Last resort for non-ISO shapes (e.g. "September 14, 2026").
   const fallback = Date.parse(str);
   return Number.isNaN(fallback) ? 0 : fallback;
+}
+
+const DAY_MS = 86400000;
+const MAX_REPLAY_CLAIMS = 32;
+const REPLAY_DAY_PROVIDERS = new Set(['basketballvideo', 'hockeyreplays', 'nflvideo', 'mlblive', 'soccerfull']);
+const REPLAY_MONTHS = 'january february march april may june july august september october november december'.split(' ');
+const REPLAY_MONTH_PATTERN = [...new Set(REPLAY_MONTHS.flatMap(month =>
+  [month, month.slice(0, 3), ...(month === 'september' ? ['sept'] : [])]))].join('|');
+const REPLAY_TITLE_DATES = [
+  new RegExp(`\\b(${REPLAY_MONTH_PATTERN})\\.?\\s+(\\d{1,2}),?\\s+(20\\d{2})\\b`, 'i'),
+  new RegExp(`\\b(\\d{1,2}),?\\s+(${REPLAY_MONTH_PATTERN})\\.?,?\\s+(20\\d{2})\\b`, 'i')
+];
+
+function _replayTitleDay(title) {
+  for (let i = 0; i < REPLAY_TITLE_DATES.length; i++) {
+    const match = REPLAY_TITLE_DATES[i].exec(title);
+    if (!match) continue;
+    const monthText = match[i === 0 ? 1 : 2].toLowerCase();
+    const month = REPLAY_MONTHS.findIndex(name => name.startsWith(monthText));
+    const day = Number(match[i === 0 ? 2 : 1]);
+    const year = Number(match[3]);
+    const time = Date.UTC(year, month, day);
+    const parsed = new Date(time);
+    if (parsed.getUTCMonth() === month && parsed.getUTCDate() === day) return time;
+  }
+  return 0;
+}
+
+function _replayClaim(event, date, title) {
+  const provider = event.sources?.[0]?.source || '';
+  const titleDay = _replayTitleDay(title);
+  // These providers derive midnight (SoccerFull: noon) from a calendar day,
+  // whereas LiveTV's clock, including 00:00, is an actual UTC kickoff.
+  const dayOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(event.date || '')) ||
+    REPLAY_DAY_PROVIDERS.has(provider) || (!date && Boolean(titleDay));
+  const time = dayOnly ? (titleDay || (date ? Math.floor(date / DAY_MS) * DAY_MS : 0)) : date;
+  const game = title.match(/\bgame\s*[-#]?\s*(\d{1,2})\b/i)?.[1] || '';
+  const id = String(event.id || '');
+  return { provider, time, dayOnly, game, id,
+    key: [provider, time, dayOnly, game, time ? '' : id].join('\u0000') };
+}
+
+function _replayClaims(event, date, title) {
+  // A flat string survives CacheService's custom-field cloning without shared
+  // mutable arrays. Bound and validate it before reusing cached constraints.
+  const stored = event._replayIdentityClaims;
+  if (typeof stored === 'string' && stored.length <= 131072) {
+    try {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0 && parsed.length <= MAX_REPLAY_CLAIMS && parsed.every(c =>
+        Array.isArray(c) && c.length === 5 && typeof c[0] === 'string' && c[0].length <= 64 &&
+        Number.isSafeInteger(c[1]) && c[1] >= 0 && typeof c[2] === 'boolean' &&
+        typeof c[3] === 'string' && /^\d{0,2}$/.test(c[3]) && typeof c[4] === 'string' && c[4].length <= 2048)) {
+        return parsed.map(([provider, time, dayOnly, game, id]) => ({ provider, time, dayOnly, game, id,
+          key: [provider, time, dayOnly, game, time ? '' : id].join('\u0000') }));
+      }
+    } catch (_) {}
+  }
+  return [_replayClaim(event, date, title)];
+}
+
+function _serializeReplayClaims(claims) {
+  return JSON.stringify(claims.map(c => [c.provider, c.time, c.dayOnly, c.game, c.id]));
+}
+
+function _replayClaimCompatible(a, b) {
+  // A shared team pair or reused ID cannot turn Game 4 into Game 5.
+  if (a.game && b.game && Number(a.game) !== Number(b.game)) return false;
+  if (!a.time || !b.time) return Boolean(a.id) && a.id === b.id;
+  if (a.dayOnly && b.dayOnly) return a.time === b.time;
+  if (!a.dayOnly && !b.dayOnly) {
+    // Allow a small kickoff correction, rather than the former four-day span
+    // which collapsed successive games in a playoff series.
+    return Math.abs(a.time - b.time) <= 3600000;
+  }
+  const day = a.dayOnly ? a : b;
+  const precise = a.dayOnly ? b : a;
+  const delta = precise.time - day.time;
+  if (day.provider && day.provider === precise.provider) return delta >= 0 && delta < DAY_MS;
+  // A local calendar day can cross the UTC date boundary (UTC+14..UTC-12).
+  // This preserves e.g. October 15 replay day / October 16 02:00 UTC kickoff.
+  return delta >= -14 * 3600000 && delta < 36 * 3600000;
+}
+
+function _mergeReplayClaims(a, b) {
+  return [...new Map([...a, ...b].map(claim => [claim.key, claim])).values()];
+}
+
+function _replayClaimsCompatible(a, b) {
+  if (a.length + b.length > MAX_REPLAY_CLAIMS && _mergeReplayClaims(a, b).length > MAX_REPLAY_CLAIMS) return false;
+  // Retain every original date/game constraint, so a coarse date or a preferred
+  // title cannot become a bridge between two different precise fixtures.
+  return a.every(left => b.every(right => _replayClaimCompatible(left, right)));
 }
 
 /**
@@ -250,6 +344,26 @@ function _teamsSimilar(a, b) {
   return minLen > 0 && (common / minLen) >= 0.7;
 }
 
+function _teamPairsSimilar(a, b) {
+  return (_teamsSimilar(a[0], b[0]) && _teamsSimilar(a[1], b[1])) ||
+    (_teamsSimilar(a[0], b[1]) && _teamsSimilar(a[1], b[0]));
+}
+
+function _squadsCompatible(p1, p2) {
+  const a = p1.squad, b = p2.squad;
+  if (!a || !b) return true;
+  if (a.conflicting || b.conflicting || a.key !== b.key) return false;
+  if (!a.teamKeys || !b.teamKeys) return true;
+  if (a.teamKeys.every(key => key === a.key) && b.teamKeys.every(key => key === b.key)) return true;
+  if (!p1.teams || !p2.teams) return false;
+  return (_teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]) &&
+      a.teamKeys[0] === b.teamKeys[0] && a.teamKeys[1] === b.teamKeys[1]) ||
+    (_teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]) &&
+      a.teamKeys[0] === b.teamKeys[1] && a.teamKeys[1] === b.teamKeys[0]);
+}
+
+const _resolvedTeam = name => Boolean(name) && !/^(?:tba|tbd|unknown|to be (?:announced|decided|determined)|team(?: [ab12])?|winner.*|loser.*)$/i.test(name);
+
 const COUNTRY_CANONICAL = {
   'uk': 'united kingdom',
   'gb': 'united kingdom',
@@ -443,12 +557,13 @@ function _tryExtractTeams(title, precomputedSeries) {
 
 const { extractTeamsFromTitle } = require('./TeamNameExtractor');
 
-// Identity key mirroring the merge loop's 7-field source equality (source, id,
-// streamSource, streamId, group, channelName, name — deliberately NOT url),
+// Identity key shared by the merge loop's source equality (deliberately NOT
+// url). Country context can select a different broadcaster even for the same
+// provider display name/ID, so it must survive source deduplication.
 // joined with a byte that cannot occur in provider display fields.
 const sourceIdentityKey = (s) => [
   s.source || '', s.id || '', s.streamSource || '', s.streamId || '',
-  s.group || '', s.channelName || '', s.name || ''
+  s.group || '', s.country || '', s.countryCode || '', s.channelName || '', s.name || ''
 ].join('\u0000');
 
 class MatchAggregator {
@@ -491,19 +606,21 @@ class MatchAggregator {
       if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
 
-      // Extract candidate broadcaster names from all sources
-      const candidateNames = [];
+      // Retain the source's country context alongside its broadcaster name.
+      const candidates = [];
       for (const src of match.sources) {
         if (!src) continue;
         const candidateName = src.channelName || src.channel_name || src.channel;
         if (candidateName && typeof candidateName === 'string' && candidateName.trim()) {
-          candidateNames.push(candidateName.trim());
+          candidates.push({ name: candidateName.trim(), context: {
+            group: src.group, country: src.country, countryCode: src.countryCode
+          } });
         }
       }
 
       // Check if this fixture has specific event/overflow channels (e.g., Canal+ Live 3, Canal+ Extra 2)
-      const hasCanalOverflow = candidateNames.some(c => /canal\+?\s*(live|extra)\s*\d+/i.test(c));
-      const hasMovistarOverflow = candidateNames.some(c => /movistar\s*(liga|deportes|campeones)\s*\d+/i.test(c));
+      const hasCanalOverflow = candidates.some(c => /canal\+?\s*(live|extra)\s*\d+/i.test(c.name));
+      const hasMovistarOverflow = candidates.some(c => /movistar\s*(liga|deportes|campeones)\s*\d+/i.test(c.name));
 
       // If specific overflow channels exist, prune any linear channels that were mistakenly added
       if (hasCanalOverflow) {
@@ -525,7 +642,8 @@ class MatchAggregator {
       );
 
       // Prioritize numbered event feeds and filter out conflicting generic network channels
-      const prioritizedCandidates = candidateNames.filter(c => {
+      const prioritizedCandidates = candidates.filter(candidate => {
+        const c = candidate.name;
         if (hasCanalOverflow && /canal\+?\s*(sport|premiere?)/i.test(c) && !/(live|extra)/i.test(c)) {
           return false;
         }
@@ -537,8 +655,8 @@ class MatchAggregator {
 
       let injectedForThisMatch = 0;
 
-      for (const candidateName of prioritizedCandidates) {
-        const vavooSource = this.broadcasterMatchService.createVavooSource(candidateName);
+      for (const candidate of prioritizedCandidates) {
+        const vavooSource = this.broadcasterMatchService.createVavooSource(candidate.name, candidate.context);
         if (vavooSource && vavooSource.id && !existingVavooUrls.has(vavooSource.id)) {
           existingVavooUrls.add(vavooSource.id);
           match.sources.push(vavooSource);
@@ -568,7 +686,7 @@ class MatchAggregator {
       (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) ||
       id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_')
     );
-    const title = e && e.title ? _foldText(e.title) : '';
+    const title = e && e.title ? canonicalizeAge(_foldText(e.title)) : '';
     // Fold the title ONCE and thread the folded + lowercased forms through
     // the whole pipeline. The old chain re-ran the NFKD/diacritic cascade
     // 6-11x per row (stripNoise, compoundify, tokenize, motorsport checks and
@@ -591,13 +709,26 @@ class MatchAggregator {
     const extractedTeams = (isMotorsport || isChannel) ? null : _tryExtractTeams(title, motorsportSeries);
     const fallbackTeams = (!extractedTeams && !isMotorsport && !isChannel && e && e.team1 && e.team2 && e.team1.name && e.team2.name)
       ? [
-          _tokenizeF(_compoundifyF(_stripNoiseF(_foldText(e.team1.name)))).join(' '),
-          _tokenizeF(_compoundifyF(_stripNoiseF(_foldText(e.team2.name)))).join(' ')
+          _tokenizeF(_compoundifyF(_stripNoiseF(canonicalizeAge(_foldText(e.team1.name))))).join(' '),
+          _tokenizeF(_compoundifyF(_stripNoiseF(canonicalizeAge(_foldText(e.team2.name))))).join(' ')
         ]
       : null;
 
     let rawCategory = e && e.category ? String(e.category) : '';
-    if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
+    // Handball is not a manifest category. Keep its explicit league evidence
+    // separately so displaying it as "other" cannot merge it into football or
+    // an unknown-sport fixture between the same clubs. The league survives cache
+    // cloning; no inferred sport field needs to be persisted on the row.
+    const isHandball = !isChannel && /\bhandball\b/.test(leagueLower);
+    if (isHandball) {
+      rawCategory = 'other';
+      if (e) e.category = 'other';
+    } else if (!isChannel && rawCategory === 'other' && /\b(?:canada\s*\.\s*cfl|canadian football league)\b/.test(leagueLower)) {
+      // The real LiveTV feed labels the Canadian Football League explicitly,
+      // despite supplying the generic category "other".
+      rawCategory = 'american_football';
+      if (e) e.category = rawCategory;
+    } else if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
       rawCategory = 'basketball';
       if (e) e.category = 'basketball';
     }
@@ -613,12 +744,23 @@ class MatchAggregator {
       if (!canonicalTitle) canonicalTitle = parsed.canonicalTitle;
     }
 
+    const date = _parseEventDate(e && e.date);
+    const isReplay = !isChannel && ((e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'));
+    const teams = extractedTeams || fallbackTeams;
+    const tokens = new Set(_tokenizeF(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); }));
+
     return {
       id,
       category: rawCategory,
-      date: _parseEventDate(e && e.date),
-      teams: extractedTeams || fallbackTeams,
-      tokens: new Set(_tokenizeF(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); })),
+      isHandball,
+      squad: (isChannel || isMotorsport) ? null : eventSquadIdentity(e || {}),
+      date,
+      replayClaims: isReplay && !isMotorsport ? _replayClaims(e, date, title) : [],
+      teams,
+      tokens,
+      // Metadata-only competitors must enter the same candidate search as
+      // title-derived teams, including ambiguity checks for coarse replays.
+      indexTokens: isReplay && teams ? new Set([...tokens, ...teams.join(' ').split(/\s+/)]) : tokens,
       norm: normalized.replace(/\s+/g, ' ').trim(),
       motorsportSeries,
       // Session is only ever read when BOTH sides of a comparison are
@@ -636,7 +778,7 @@ class MatchAggregator {
         .sort()
         .join(','),
       status: e && e.status ? String(e.status) : '',
-      isReplay: !isChannel && ((e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_')),
+      isReplay,
       isChannel,
       channelIdentityKey,
       channelNumber,
@@ -699,6 +841,8 @@ class MatchAggregator {
       return false;
     }
 
+    if (Boolean(p1.isHandball) !== Boolean(p2.isHandball)) return false;
+
     // 1. Category mismatch guard
     // Some providers use league-specific slugs (nbl, nba, nfl, mls, nrl, afl)
     // while others use the parent sport name (basketball, american_football,
@@ -720,8 +864,9 @@ class MatchAggregator {
       return false;
     }
 
-    // 2. Exact ID match
-    if (p1.id && p2.id && p1.id === p2.id) return true;
+    // Explicit squad distinctions also constrain ID/alias shortcuts. Missing
+    // labels cannot safely inherit a women's, youth or reserve team's sources.
+    if (!isMoto1 && !isMoto2 && !_squadsCompatible(p1, p2)) return false;
 
     // 3. Date window & motorsport identity guards
     if (isMoto1 && isMoto2) {
@@ -740,18 +885,25 @@ class MatchAggregator {
         // Events > 48 hours apart never merge for motorsport
         return false;
       }
+    } else if (p1.isReplay && p2.isReplay) {
+      if (!_replayClaimsCompatible(p1.replayClaims, p2.replayClaims)) return false;
     } else {
-      // Standard date window guard — events more than 24h apart (or 4 days for replays) are definitely different
-      const maxDateDiff = (p1.isReplay && p2.isReplay) ? 345600000 : 86400000;
-      if (p1.date && p2.date && Math.abs(p1.date - p2.date) > maxDateDiff) return false;
+      if (p1.date && p2.date && Math.abs(p1.date - p2.date) > DAY_MS) return false;
+    }
+
+    // IDs and aliases cannot bypass date/session or squad contradictions.
+    if (p1.id && p2.id && p1.id === p2.id) {
+      if (!isMoto1 && !isMoto2 && p1.teams?.every(_resolvedTeam) && p2.teams?.every(_resolvedTeam)) {
+        return _teamPairsSimilar(p1.teams, p2.teams);
+      }
+      // A placeholder such as TBA may acquire its real teams under this ID.
+      return true;
     }
 
     // 5. Dual-team extraction — if both titles parse as "team1 vs team2", require
     //    BOTH teams to independently fuzzy-match. (Skip for motorsport which has no teams).
     if (p1.teams && p2.teams && !isMoto1 && !isMoto2) {
-      const fwd = _teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]);
-      const rev = _teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]);
-      return fwd || rev;
+      return _teamPairsSimilar(p1.teams, p2.teams);
     }
 
     // 6. Channel-identity path — at least one title is not a team-vs-team fixture
@@ -852,6 +1004,8 @@ class MatchAggregator {
       s.streamId || '',
       s.url || '',
       s.group || '',
+      s.country || '',
+      s.countryCode || '',
       s.channelName || '',
       s.name || ''
     ].join('|');
@@ -969,7 +1123,11 @@ class MatchAggregator {
           if (!match.sources || !Array.isArray(match.sources) || match.sources.length === 0) continue;
 
           // Reconcile missing kickoff dates from previous sync cache or embedded ID timestamps
-          if (!match.date || match.date === '0' || match.date === 0) {
+          // Replay display dates (e.g. today's date for an undated archive)
+          // are not evidence of its fixture date on a fresh provider refresh.
+          // Keep ordinary live-source kickoff recovery, but leave replay
+          // identity to its original claims or explicit title/calendar data.
+          if ((!match.date || match.date === '0' || match.date === 0) && this._precompute(match).replayClaims.length === 0) {
             if (prevDateMap.has(match.id)) {
               match.date = prevDateMap.get(match.id);
             } else if (Array.isArray(match.aliasIds)) {
@@ -990,7 +1148,30 @@ class MatchAggregator {
           }
 
         const pre = this._precompute(match);
+        // Fresh calendar replays already trust an explicit validated title day
+        // for identity. Use that same day for sorting, filtering and retention,
+        // rather than retaining a contradictory upstream day or today's display
+        // fallback. Cached claims retain their existing date/precision anchors.
+        if (!Object.prototype.hasOwnProperty.call(match, '_replayIdentityClaims') && pre.replayClaims.length === 1) {
+          const claim = pre.replayClaims[0];
+          const titleDay = _replayTitleDay(String(match.title));
+          if (claim.dayOnly && titleDay && claim.time === titleDay) {
+            match.date = new Date(titleDay).toISOString().slice(0, 10);
+            pre.date = titleDay;
+          }
+        }
         let idx = -1;
+        const uniqueReplay = pre.replayClaims.length > 0;
+        let ambiguousReplay = false;
+        const acceptCandidate = candidate => {
+          if (uniqueReplay && idx !== -1 && idx !== candidate) {
+            idx = -1;
+            ambiguousReplay = true;
+            return true;
+          }
+          idx = candidate;
+          return !uniqueReplay;
+        };
 
         // 1. Fast O(1) Exact ID & Alias check with identity verification
         let candIdx = -1;
@@ -1030,7 +1211,7 @@ class MatchAggregator {
         // Intersect inverted index entries to evaluate ONLY high-probability candidate twins.
         if (idx === -1 && !pre.isChannel) {
           const candidateCounts = new Map();
-          for (const tok of pre.tokens) {
+          for (const tok of pre.indexTokens) {
             if (STOP_WORDS.has(tok) || tok.length < 3) continue;
             const set = tokenIndex.get(tok);
             if (!set) continue;
@@ -1048,12 +1229,10 @@ class MatchAggregator {
               // If fixture has multiple tokens, require at least 2 shared tokens to test
               if (sharedCount < 2 && pre.tokens.size > 2) continue;
               const pCand = finalPres[cIdx];
-              // Date-window early exit: events > 24 hours apart (or 4 days for replays) never merge
-              const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
-              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
+              // Replay precision/game constraints are checked together below.
+              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
               if (this._sameEventPre(pCand, pre)) {
-                idx = cIdx;
-                break;
+                if (acceptCandidate(cIdx)) break;
               }
             }
           }
@@ -1062,7 +1241,7 @@ class MatchAggregator {
         // 4. Narrow Category Bucket Fallback
         // Handles unindexed edge-cases (single generic word titles or motorsport races without teams).
         // 24/7 continuous TV channels are indexed strictly in O(1) channelNormIndex and NEVER fall through to linear scans.
-        if (idx === -1 && !pre.isChannel) {
+        if (idx === -1 && !pre.isChannel && !ambiguousReplay) {
           const c2 = this._normalizeCategory(pre.category);
           const rawCat2 = (pre.category || '').toLowerCase();
           const isCollegeFootball2 = rawCat2 === 'college' || c2 === 'american_football' || c2 === 'football';
@@ -1072,9 +1251,8 @@ class MatchAggregator {
             for (let i = finalMatches.length - 1; i >= 0; i--) {
               const pCand = finalPres[i];
               if (pCand.isChannel) continue;
-              const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
-              if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
-              if (this._sameEventPre(pCand, pre)) { idx = i; break; }
+              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
+              if (this._sameEventPre(pCand, pre) && acceptCandidate(i)) break;
             }
           } else {
             const checkedIndices = new Set();
@@ -1092,19 +1270,18 @@ class MatchAggregator {
                 checkedIndices.add(i);
                 const pCand = finalPres[i];
                 if (pCand.isChannel) continue;
-                const maxDateDiff = (pre.isReplay && pCand.isReplay) ? 345600000 : 86400000;
-                if (pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDiff) continue;
+                if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
                 if (this._sameEventPre(pCand, pre)) {
-                  idx = i;
-                  break;
+                  if (acceptCandidate(i)) break;
                 }
               }
-              if (idx !== -1) break;
+              if (ambiguousReplay || (!uniqueReplay && idx !== -1)) break;
             }
           }
         }
 
         if (idx === -1) {
+          if (pre.replayClaims.length) match._replayIdentityClaims = _serializeReplayClaims(pre.replayClaims);
           // If a standalone replay match has no date, give it today's date (YYYY-MM-DD)
           // so it sorts at the top of replays and is accessible via date filters/hubs
           if (!match.date && pre.isReplay) {
@@ -1134,7 +1311,7 @@ class MatchAggregator {
 
           // Register in Multi-Token Inverted Index
           if (!pre.isChannel) {
-            for (const tok of pre.tokens) {
+            for (const tok of pre.indexTokens) {
               if (STOP_WORDS.has(tok) || tok.length < 3) continue;
               if (!tokenIndex.has(tok)) tokenIndex.set(tok, new Set());
               tokenIndex.get(tok).add(newIdx);
@@ -1154,6 +1331,8 @@ class MatchAggregator {
         }
 
         const existing = finalMatches[idx];
+        const replayClaims = uniqueReplay
+          ? _mergeReplayClaims(finalPres[idx].replayClaims, pre.replayClaims) : null;
         if (!existing.aliasIds) existing.aliasIds = [];
         const aliasSet = finalAliasSets[idx] || (finalAliasSets[idx] = new Set(existing.aliasIds));
         if (match.id && !aliasSet.has(match.id)) {
@@ -1245,6 +1424,13 @@ class MatchAggregator {
           if (pre.norm && !channelNormIndex.has(pre.norm)) {
             channelNormIndex.set(pre.norm, idx);
           }
+        }
+        if (replayClaims) {
+          // Title preference must preserve the canonical date and all accepted
+          // replay constraints, including across the 12-hour cache reuse path.
+          finalPres[idx] = { ...finalPres[idx], id: existing.id,
+            date: _parseEventDate(existing.date), replayClaims };
+          existing._replayIdentityClaims = _serializeReplayClaims(replayClaims);
         }
         }
         if (end < providerMatches.length) await yieldToLoop();

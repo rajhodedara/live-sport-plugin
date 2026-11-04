@@ -25,6 +25,7 @@ class Ak47LiveProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
     this.name = 'Ak47Live';
+    this.lastScheduleOk = null;
     this._cache = null;
     this._lastFetchTime = 0;
     let ttl = 180000;
@@ -80,21 +81,23 @@ class Ak47LiveProvider extends BaseProvider {
     const lines = content.split(/\r?\n/);
     const entries = [];
     let currentVlcOpts = {};
+    const readVlcOpt = line => {
+      const optLine = line.substring(11).trim();
+      const eqIdx = optLine.indexOf('=');
+      if (eqIdx === -1) return;
+      const key = optLine.substring(0, eqIdx).trim().toLowerCase();
+      const val = optLine.substring(eqIdx + 1).trim();
+      if (key === 'http-referrer' || key === 'http-referer') currentVlcOpts.referer = val;
+      else if (key === 'http-origin') currentVlcOpts.origin = val;
+      else if (key === 'http-user-agent') currentVlcOpts.userAgent = val;
+    };
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
 
       if (line.startsWith('#EXTVLCOPT:')) {
-        const optLine = line.substring(11).trim();
-        const eqIdx = optLine.indexOf('=');
-        if (eqIdx !== -1) {
-          const key = optLine.substring(0, eqIdx).trim().toLowerCase();
-          const val = optLine.substring(eqIdx + 1).trim();
-          if (key === 'http-referrer') currentVlcOpts.referer = val;
-          else if (key === 'http-origin') currentVlcOpts.origin = val;
-          else if (key === 'http-user-agent') currentVlcOpts.userAgent = val;
-        }
+        readVlcOpt(line);
         continue;
       }
 
@@ -120,6 +123,8 @@ class Ak47LiveProvider extends BaseProvider {
         let streamUrl = '';
         while (i + 1 < lines.length) {
           const nextLine = lines[i + 1].trim();
+          if (nextLine.startsWith('#EXTINF:')) break;
+          if (nextLine.startsWith('#EXTVLCOPT:')) readVlcOpt(nextLine);
           if (nextLine && !nextLine.startsWith('#')) {
             streamUrl = nextLine;
             i++;
@@ -128,7 +133,7 @@ class Ak47LiveProvider extends BaseProvider {
           i++;
         }
 
-        if (!streamUrl) continue;
+        if (!streamUrl) { currentVlcOpts = {}; continue; }
 
         // Strict Zero-DASH filter: discard MPEG-DASH manifests and CENC DRM URLs
         if (/\.mpd(\?|$)/i.test(streamUrl) || /\/dash\//i.test(streamUrl) || /cenc/i.test(streamUrl)) {
@@ -218,6 +223,9 @@ class Ak47LiveProvider extends BaseProvider {
       return this._cache;
     }
 
+    // Playlist rows can survive a failed events feed; retain that distinction
+    // for provider health, including when this result is later cached.
+    this.lastScheduleOk = false;
     const matchesMap = new Map();
     const finishedSlugs = new Set();
     const finishedTeamPairs = new Set();
@@ -345,6 +353,7 @@ class Ak47LiveProvider extends BaseProvider {
               matchesMap.set(matchId, match);
             }
           }
+          this.lastScheduleOk = true;
         }
       }
     } catch (err) {
@@ -586,7 +595,22 @@ class Ak47LiveProvider extends BaseProvider {
       return [];
     }
 
-    const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+    const { manifestUserAgent } = require('../services/ManifestUserAgent');
+    userAgent = manifestUserAgent(userAgent) || DEFAULT_UA;
+    const contextUrl = (value, fallback, originOnly = false) => {
+      if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) return fallback;
+      try {
+        const parsed = new URL(value);
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return fallback;
+        return originOnly ? parsed.origin : parsed.href;
+      } catch (_) { return fallback; }
+    };
+    referer = contextUrl(referer, DEFAULT_REFERER);
+    origin = contextUrl(origin, DEFAULT_ORIGIN, true);
+    // The provider injects DEFAULT_UA even when no source specified one. Keep
+    // the proxy's historical default in that case.
+    const manifestUa = userAgent === DEFAULT_UA ? '' : manifestUserAgent(userAgent);
+    const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}${manifestUa ? `&hlsua=${encodeURIComponent(manifestUa)}` : ''}`;
 
     const stream = new StreamEntity({
       name: 'Ak47Live',

@@ -38,26 +38,28 @@ class PpvStProvider extends BaseProvider {
       }
       if (!res.ok) return matches;
       const data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
-      if (!data.success || !data.streams) return matches;
+      if (!data?.success || !Array.isArray(data.streams)) return matches;
 
       for (const cat of data.streams) {
+        if (!cat || typeof cat.category !== 'string' || !Array.isArray(cat.streams)) continue;
         let category = cat.category.toLowerCase();
         if (category === 'combat sports') category = 'fighting';
         if (category === 'australian football') category = 'american_football';
         if (category === '24/7 streams') category = 'networks';
         for (const stream of cat.streams) {
-          if (!stream.iframe) continue;
+          if (!stream || typeof stream.name !== 'string' || !stream.name.trim()) continue;
           const slug = stream.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '');
-          const sources = [{
+          const sources = [];
+          if (stream.iframe) sources.push({
             source: 'ppvst',
             id: stream.id,
             channelName: stream.source_tag || stream.name,
             embedUrl: stream.iframe
-          }];
+          });
 
           if (Array.isArray(stream.substreams)) {
             stream.substreams.forEach(sub => {
-              if (sub.iframe) {
+              if (sub && sub.iframe) {
                 sources.push({
                   source: 'ppvst',
                   id: sub.id,
@@ -68,6 +70,8 @@ class PpvStProvider extends BaseProvider {
               }
             });
           }
+
+          if (!sources.length) continue;
 
           const is247 = Boolean(
             stream.tag === '24/7 channel' ||
@@ -115,8 +119,14 @@ class PpvStProvider extends BaseProvider {
 
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
-    const embedUrl = src.embedUrl;
-    if (!embedUrl || !embedUrl.startsWith('http')) return streams;
+    src = src && typeof src === 'object' ? src : {};
+    let embedUrl;
+    try {
+      if (typeof src.embedUrl !== 'string') return streams;
+      const parsed = new URL(src.embedUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) return streams;
+      embedUrl = parsed.href;
+    } catch (_) { return streams; }
 
     let referer = 'https://embedindia.st/';
     try { referer = new URL(embedUrl).origin + '/'; } catch(e) {}
@@ -147,11 +157,12 @@ class PpvStProvider extends BaseProvider {
           : origin;
         const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(streamReferer)}&origin=${encodeURIComponent(streamOrigin)}`;
         
-          const langStr = src.language ? ` [${src.language.toUpperCase()}]` : '';
+          const langStr = typeof src.language === 'string' && src.language ? ` [${src.language.toUpperCase()}]` : '';
+          const channelName = typeof src.channelName === 'string' ? src.channelName : '';
           const isTikTokStream = Boolean(/admin|strmd\.st|\.image|tiktokcdn|byteoversea/i.test(m3u8Url) || /admin|strmd\.st|\.image|tiktokcdn/i.test(embedUrl));
           const s = new StreamEntity({
             name: 'PpvSt',
-            title: `PpvSt${langStr}${src.channelName ? ' - ' + src.channelName : ''} (${matchTitle || channelId})`,
+            title: `PpvSt${langStr}${channelName ? ' - ' + channelName : ''} (${matchTitle || channelId})`,
             url: proxyUrl,
             behaviorHints: { 
               notWebReady: true,
@@ -175,7 +186,10 @@ class PpvStProvider extends BaseProvider {
       console.warn(`[${this.name}] WASM extraction failed: ${e.message}`);
     }
     
-    if (streams.length === 0) {
+    // Keep the explicitly labeled web option even after extraction succeeds:
+    // the later HLS verification can still reject the minted manifest. The
+    // response layer hides web fallbacks when a direct stream is available.
+    {
         streams.push(new StreamEntity({
             name: 'PpvSt',
             title: `${matchTitle || sourceId} (Web Player)`,

@@ -93,10 +93,16 @@ class SoccerFullProvider extends BaseProvider {
       if (!linkMatch) continue;
 
       const rawUrl = linkMatch[1];
-      if (!rawUrl.endsWith('.html')) continue;
+      let parsedUrl;
+      try {
+        parsedUrl = new URL(rawUrl, `${this.baseUrl}/`);
+      } catch (_) {
+        continue;
+      }
+      if (parsedUrl.origin !== this.baseUrl || parsedUrl.username || parsedUrl.password || !parsedUrl.pathname.endsWith('.html')) continue;
 
-      const matchUrl = rawUrl.startsWith('/') ? rawUrl : `/${rawUrl}`;
-      const slug = matchUrl.replace(/^\//, '').replace(/\.html$/, '');
+      const matchUrl = parsedUrl.pathname + parsedUrl.search;
+      const slug = parsedUrl.pathname.replace(/^\//, '').replace(/\.html$/, '');
 
       // Title
       let title = linkMatch[2] ? linkMatch[2].trim() : '';
@@ -136,7 +142,8 @@ class SoccerFullProvider extends BaseProvider {
         }
       }
 
-      // If no explicit date in slug, leave empty for unanchored upstream fixture merge
+      // Missing date stays unknown; it must not identify a dated meeting just
+      // because another archive lists the same two teams.
       const matchDate = dateMs ? String(dateMs) : '';
 
       // Extract numeric ID if present

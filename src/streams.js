@@ -8,6 +8,7 @@ const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
+const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream } = require('./services/StreamPolicy');
 
@@ -378,7 +379,7 @@ function parseManifestProxyUrl(rawUrl) {
       referer: urlObj.searchParams.get('referer') || '',
       origin: urlObj.searchParams.get('origin') || '',
       cookie: urlObj.searchParams.get('cookie') || '',
-      ua: urlObj.searchParams.get('ua') || '',
+      ua: manifestUserAgent(urlObj.searchParams.get('hlsua')) || urlObj.searchParams.get('ua') || '',
     };
   } catch (_) {
     return null;
@@ -662,7 +663,18 @@ function verificationHeaders(stream) {
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
-    if (!s || !s.url) return null;
+    if (!s) return null;
+    // Web-player results are represented by externalUrl, not a media URL.
+    // They do not need an HLS probe and must survive the verification step.
+    if (!s.url) {
+      if (typeof s.externalUrl !== 'string' || /[\u0000-\u0020\u007f]/.test(s.externalUrl)) return null;
+      try {
+        const external = new URL(s.externalUrl, 'https://external.invalid');
+        const isLocal = s.externalUrl.startsWith('/') && !/^\/[\\/]/.test(s.externalUrl);
+        if (!isLocal && !/^https?:\/\//i.test(s.externalUrl)) return null;
+        return ['http:', 'https:'].includes(external.protocol) && !external.username && !external.password ? s : null;
+      } catch (_) { return null; }
+    }
 
     // Filter out broken/dead SprintCDN links (edge*-*-sprintcdn.*) which fail on user devices
     if (s.url.includes('sprintcdn')) {
@@ -1595,9 +1607,27 @@ async function handleStream(type, id, config) {
     if (s.url && s.url.includes('.m3u8')) {
       s.behaviorHints.notWebReady = false;
       if (s.url.includes('/api/manifest')) {
-        if (s.behaviorHints.proxyHeaders) {
-          delete s.behaviorHints.proxyHeaders;
+        // AK47 playlists leave media/key URLs direct. Keep only the provider's
+        // bounded playback context for those player requests; arbitrary cookies,
+        // authorization and custom token headers must not reach the addon URL.
+        const request = {};
+        if (s._source === 'ak47live') {
+          const headers = verificationHeaders(s);
+          const userAgent = manifestUserAgent(headers['User-Agent']);
+          if (userAgent) request['User-Agent'] = userAgent;
+          for (const name of ['Referer', 'Origin']) {
+            const value = headers[name];
+            if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) continue;
+            try {
+              const parsed = new URL(value);
+              if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue;
+              if (name === 'Origin' && parsed.origin !== value) continue;
+              request[name] = value;
+            } catch (_) {}
+          }
         }
+        if (Object.keys(request).length) s.behaviorHints.proxyHeaders = { request };
+        else delete s.behaviorHints.proxyHeaders;
       } else {
         // Direct unproxied m3u8 stream needing player-level header injection
         let referer = '';

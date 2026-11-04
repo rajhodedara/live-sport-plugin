@@ -5,6 +5,7 @@ const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
+const { findBridgeIframe, matchesHost, isByseHost, playerHostname } = require('./bridgeIframe');
 const { safeFetch } = require('../services/ProviderOutbound');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 
@@ -102,6 +103,7 @@ class MlbLiveProvider extends BaseProvider {
     super(opts);
     this.name = 'MLBLive';
     this.sourceName = 'mlblive';
+    this.lastScheduleOk = null;
     this.baseUrl = 'https://mlblive.net';
     this.defaultHeaders = {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
@@ -252,6 +254,7 @@ class MlbLiveProvider extends BaseProvider {
   }
 
   async getMatches() {
+    this.lastScheduleOk = true;
     const endpoints = [
       `${this.baseUrl}/2026-mlb-full-game-replays`,
       `${this.baseUrl}/world-series-replays`
@@ -263,6 +266,8 @@ class MlbLiveProvider extends BaseProvider {
     for (const url of endpoints) {
       try {
         const html = await this.fetchPage.fire(url);
+        // A breaker fallback must remain visible when the other page succeeds.
+        if (html == null) this.lastScheduleOk = false;
         if (!html) continue;
         const parsed = this._parseMatchCards(html);
         for (const m of parsed) {
@@ -272,6 +277,7 @@ class MlbLiveProvider extends BaseProvider {
           }
         }
       } catch (err) {
+        this.lastScheduleOk = false;
         console.warn(`[MLBLive] Warning fetching ${url}:`, err.message);
       }
     }
@@ -319,81 +325,92 @@ class MlbLiveProvider extends BaseProvider {
         const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
         const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
 
-        const isDirectProvider = /ok\.ru|byse|vidara|dailymotion|dai\.ly|d\.tube|\.(?:m3u8|mp4)/i.test(dest);
-        if (!isDirectProvider && /^https?:\/\//i.test(dest)) {
-          try {
-            const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://mlblive.net/' });
-            const iframeMatch = bridgeHtml && bridgeHtml.match(/<iframe[^>]+src="([^"]+)"/i);
-            if (iframeMatch) {
-              dest = iframeMatch[1];
-            }
-          } catch (_) {}
-        }
-
-        if (dest.startsWith('//')) {
-          dest = `https:${dest}`;
-        }
-
-        // 1. Vidara API resolution
-        if (this._isVidaraUrl(dest)) {
-          const extracted = await this._extractVidara(dest, partName);
-          for (const s of extracted) {
-            if (!seenUrls.has(s.url)) {
-              seenUrls.add(s.url);
-              vidaraStreams.push(s);
-            }
-          }
+        try {
+          const parsed = new URL(dest, targetUrl);
+          if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+          dest = parsed.href;
+        } catch (_) {
           continue;
         }
 
-        // 2. Byse AES-256-GCM Payload Extraction (SprintCDN Edge)
-        if (this._isByseUrl(dest)) {
-          const extracted = await this._extractByse(dest, partName);
-          for (const s of extracted) {
-            if (!seenUrls.has(s.url)) {
-              seenUrls.add(s.url);
-              byseStreams.push(s);
+        try {
+          const isDirectProvider = this._isVidaraUrl(dest) || this._isByseUrl(dest) ||
+            this._isDailymotionUrl(dest) || ['ok.ru', 'd.tube'].some(host => matchesHost(playerHostname(dest), host)) ||
+            /\.(m3u8|mp4)$/i.test(new URL(dest).pathname);
+          if (!isDirectProvider && /^https?:\/\//i.test(dest)) {
+            try {
+              const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://mlblive.net/' });
+              const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
+                /\.(m3u8|mp4)$/i.test(url.pathname) || isByseHost(url.hostname) ||
+                ['vidara.so', 'dailymotion.com', 'dai.ly', 'ok.ru'].some(domain => matchesHost(url.hostname, domain)));
+              if (iframeUrl) dest = iframeUrl;
+            } catch (_) {}
+          }
+
+          // 1. Vidara API resolution
+          if (this._isVidaraUrl(dest)) {
+            const extracted = await this._extractVidara(dest, partName);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                vidaraStreams.push(s);
+              }
+            }
+            continue;
+          }
+
+          // 2. Byse AES-256-GCM Payload Extraction (SprintCDN Edge)
+          if (this._isByseUrl(dest)) {
+            const extracted = await this._extractByse(dest, partName);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                byseStreams.push(s);
+              }
+            }
+            continue;
+          }
+
+          // 3. Dailymotion Direct HLS / Player metadata
+          if (this._isDailymotionUrl(dest)) {
+            const extracted = await this._extractDailymotion(dest, partName);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                dmStreams.push(s);
+              }
+            }
+            continue;
+          }
+
+          // 4. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
+          if (matchesHost(playerHostname(dest), 'ok.ru')) {
+            const extracted = await this._extractOkRu(dest, partName);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                okStreams.push(s);
+              }
+            }
+            continue;
+          }
+
+          // 5. Direct Media File
+          if (/\.(m3u8|mp4)$/i.test(new URL(dest).pathname)) {
+            if (!seenUrls.has(dest)) {
+              seenUrls.add(dest);
+              directStreams.push(new StreamEntity({
+                name: this.name,
+                title: `${partName} (Direct)`,
+                resolution: '1080p',
+                url: dest,
+                behaviorHints: { notWebReady: false }
+              }));
             }
           }
+        } catch (_) {
+          // A broken candidate should not hide later replay sources.
           continue;
-        }
-
-        // 3. Dailymotion Direct HLS / Player metadata
-        if (this._isDailymotionUrl(dest)) {
-          const extracted = await this._extractDailymotion(dest, partName);
-          for (const s of extracted) {
-            if (!seenUrls.has(s.url)) {
-              seenUrls.add(s.url);
-              dmStreams.push(s);
-            }
-          }
-          continue;
-        }
-
-        // 4. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
-        if (dest.includes('ok.ru')) {
-          const extracted = await this._extractOkRu(dest, partName);
-          for (const s of extracted) {
-            if (!seenUrls.has(s.url)) {
-              seenUrls.add(s.url);
-              okStreams.push(s);
-            }
-          }
-          continue;
-        }
-
-        // 5. Direct Media File
-        if (/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
-          if (!seenUrls.has(dest)) {
-            seenUrls.add(dest);
-            directStreams.push(new StreamEntity({
-              name: this.name,
-              title: `${partName} (Direct)`,
-              resolution: '1080p',
-              url: dest,
-              behaviorHints: { notWebReady: false }
-            }));
-          }
         }
       }
 
@@ -503,18 +520,15 @@ class MlbLiveProvider extends BaseProvider {
   }
 
   _isByseUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    return /byse[a-z0-9]*\.[a-z]+/i.test(url);
+    return isByseHost(playerHostname(url));
   }
 
   _isVidaraUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    return /vidara\.so/i.test(url);
+    return matchesHost(playerHostname(url), 'vidara.so');
   }
 
   _isDailymotionUrl(url) {
-    if (!url || typeof url !== 'string') return false;
-    return /(?:dailymotion\.com|dai\.ly|geo\.dailymotion\.com)/i.test(url);
+    return ['dailymotion.com', 'dai.ly'].some(domain => matchesHost(playerHostname(url), domain));
   }
 
   _extractDailymotionVideoId(url) {

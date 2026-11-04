@@ -85,15 +85,15 @@ function playlistHasContent(text) {
 
 // Fetch + validate the upstream manifest. Throws on failure so coalesced
 // waiters share the same outcome; successful bodies are cached by the caller.
-async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseUrl = false } = {}) {
+async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseUrl = false, userAgent: requestedUserAgent = '' } = {}) {
   const deadlineAt = performance.now() + 10000;
   const isVavoo = Boolean(
     (targetUrl && (targetUrl.includes('/sunshine/') || targetUrl.includes('vavoo.') || targetUrl.includes(':8008'))) ||
     (referer && referer.includes('vavoo.'))
   );
-  const userAgent = isVavoo
+  const userAgent = requestedUserAgent || (isVavoo
     ? 'MediaHubMX/2'
-    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
 
   const headers = {
     'Referer': referer || (isVavoo ? 'https://vavoo.to/' : 'https://embed.st/'),

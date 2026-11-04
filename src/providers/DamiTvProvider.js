@@ -178,6 +178,7 @@ class DamiTvProvider extends BaseProvider {
     const seen = new Set();
     const out = [];
     for (const st of rawSources) {
+      if (st && st.embed != null && typeof st.embed !== 'string') continue;
       let embedUrl = (st && st.embed) || primaryEmbedUrl || '';
       if (!embedUrl) continue;
       if (embedUrl.startsWith('/')) embedUrl = 'https://damitv.st' + embedUrl;
@@ -287,23 +288,24 @@ class DamiTvProvider extends BaseProvider {
 
     try {
       const data = await this.fetchData.fire();
-      if (!data || !data.success || !Array.isArray(data.streams)) return [];
+      if (!data || !data.success || !Array.isArray(data.streams)) throw new Error('Invalid primary feed');
 
       const feedTimestamp = data.timestamp || 0;
 
       data.streams.forEach(categoryGroup => {
-        const streams = categoryGroup.streams || [];
+        if (!categoryGroup || !Array.isArray(categoryGroup.streams)) return;
+        const streams = categoryGroup.streams;
 
         streams.forEach(s => {
-          if (!s.id || !s.name) return;
+          if (!s || !s.id || typeof s.name !== 'string' || !s.name.trim()) return;
+          const poster = typeof s.poster === 'string' ? s.poster : '';
 
           // Fallback embed for items whose sources carry no embed of their
           // own: the match wrapper page, built the way the feed builds it.
           const primaryEmbed = `https://damitv.st/embed/?id=${encodeURIComponent(s.id)}`;
-          const rawSources = (s.sources && s.sources.length ? s.sources : [{}]);
+          const rawSources = (Array.isArray(s.sources) && s.sources.length ? s.sources : [{}]);
           let sources = this._dedupeSources(rawSources, primaryEmbed);
-          // When real channel feeds exist the wrapper page adds nothing: it
-          // only republishes the same content behind an unreadable embed.
+          // Prefer concrete channel feeds over a duplicate wrapper page.
           const channelSources = sources.filter(src => src.channelPath);
           if (channelSources.length) sources = channelSources;
           if (sources.length === 0) return;
@@ -341,8 +343,8 @@ class DamiTvProvider extends BaseProvider {
               popular: '1',
               status: '',
               league: 'Live TV',
-              thumbnail_url: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
-              poster: s.poster ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+              thumbnail_url: poster ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
+              poster: poster ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
               sources: enrichedSources
             });
             entity.channelIdentityKey = ident.identityKey;
@@ -382,8 +384,8 @@ class DamiTvProvider extends BaseProvider {
             popular: popular,
             sources: sources,
             league: s.league || '',
-            thumbnail_url: s.poster && !s.poster.includes('ppvservices.st') ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
-            poster: s.poster && !s.poster.includes('ppvservices.st') ? (s.poster.startsWith('//') ? 'https:' + s.poster : s.poster) : '',
+            thumbnail_url: poster && !poster.includes('ppvservices.st') ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
+            poster: poster && !poster.includes('ppvservices.st') ? (poster.startsWith('//') ? 'https:' + poster : poster) : '',
             team1: s.teams && s.teams.home && s.teams.home.name ? { name: s.teams.home.name, logo: s.teams.home.badge || null } : null,
             team2: s.teams && s.teams.away && s.teams.away.name ? { name: s.teams.away.name, logo: s.teams.away.badge || null } : null
           }));

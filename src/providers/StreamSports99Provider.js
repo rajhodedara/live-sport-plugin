@@ -65,7 +65,8 @@ class StreamSports99Provider extends BaseProvider {
         if (Array.isArray(events)) {
           for (const item of events) {
             // Only include matches that actually have stream channels available
-            if (!item.channels || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+            if (!item || !Array.isArray(item.channels) || item.channels.length === 0) continue;
+          if (item.name != null && typeof item.name !== 'string') continue;
 
             // Some events might just have 'name' instead of homeTeam/awayTeam
             const title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();
@@ -125,6 +126,7 @@ class StreamSports99Provider extends BaseProvider {
         const events = sportsData[key];
         if (Array.isArray(events)) {
           const found = events.find(e => {
+            if (!e || typeof e !== 'object') return false;
             const title = e.name || `${e.homeTeam || ''} vs ${e.awayTeam || ''}`.trim();
             const genId = title.toLowerCase().replace(/[^a-z0-9-]/g, '-');
             return e.gameID === sourceId || genId === sourceId;
@@ -140,7 +142,7 @@ class StreamSports99Provider extends BaseProvider {
 
 
         for (const [idx, ch] of item.channels.entries()) {
-          if (ch.url) {
+          if (ch && typeof ch.url === 'string' && ch.url) {
 
             // --- INTERNAL FALLBACK ---
             console.log("[DEBUG SS99] ENTERING EXTRACTION TRY BLOCK FOR", ch.url);

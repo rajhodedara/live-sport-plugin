@@ -115,7 +115,7 @@ const COUNTRY_RULES = [
 
   // Germany / Austria / Switzerland
   {
-    regex: /\b(Sportdigital|Magenta Sport|Das Erste|Sport1(\+| Germany|\s*DE)?|DAZN[12]\s*DE|Sky Sport.*DE|Sky Sport Mix Germany|Bundesliga|Sky\s*Sports?\s*Bundesliga|Sky\s*Port\s*Bundesliga|Germany|DE)\b/i,
+    regex: /\b(Sportdigital|Magenta Sport|Das Erste|Sport1(\+| Germany|\s*DE)?|DAZN[12]\s*DE|Sky Sport.*DE|Sky Sport Mix Germany|Bundesliga|Sky\s*Sports?\s*Bundesliga|Sky\s*Port\s*Bundesliga|Germany)\b|^\W*DE\b|\bDE(?:\W|\b(?:HD|FHD|UHD|SD|4K|1080P|720P|50FPS|60FPS)\b)*$/i,
     flag: '🇩🇪',
     name: 'DE',
     country: 'Germany',
@@ -422,6 +422,18 @@ const _COUNTRY_CACHE = new Map();
 const _COUNTRY_CACHE_MAX = 2000;
 
 class ChannelCountryService {
+  /** Exact provider country metadata, without interpreting brand words. */
+  static getCountryInfo(value) {
+    const key = String(value || '').trim().toLowerCase();
+    if (!key) return null;
+    const rules = COUNTRY_RULES.filter(rule =>
+      rule.name.toLowerCase() === key || rule.country.toLowerCase() === key);
+    // Some countries also have a language-specific brand rule. Use their
+    // general country rule for explicit metadata (US, Canada, MENA).
+    const rule = rules.find(candidate => candidate.regex.test(` ${candidate.country} `) || candidate.regex.test(` ${candidate.name} `)) || rules[0];
+    return rule ? { flag: rule.flag, name: rule.name, country: rule.country, language: rule.language } : null;
+  }
+
   /**
    * Detects country, flag, and commentary language for a given channel name.
    * @param {string} channelName
@@ -437,8 +449,8 @@ class ChannelCountryService {
     }
 
     const cn = ' ' + trimmed + ' ';
-    let result = null;
-    for (const rule of COUNTRY_RULES) {
+    let result = this.getCountryInfo(trimmed);
+    for (const rule of result ? [] : COUNTRY_RULES) {
       if (rule.regex.test(cn)) {
         result = {
           flag: rule.flag,

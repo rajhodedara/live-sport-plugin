@@ -250,7 +250,7 @@ class LeafProvider extends BaseProvider {
     const resolved = [];
 
     for (const st of streamsList) {
-      if (!st || !st.url) continue;
+      if (!st || typeof st.url !== 'string' || !st.url) continue;
 
       // Publish only targets accepted by the Leaf manifest route.
       try { validateLeafManifestUrl(st.url); } catch (_) { continue; }

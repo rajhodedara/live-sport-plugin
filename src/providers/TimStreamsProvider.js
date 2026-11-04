@@ -28,11 +28,12 @@ class TimStreamsProvider extends BaseProvider {
       const genres = data.genres || {};
       
       data.events.forEach((s, index) => {
-        const title = s.name || `TimStreams Event ${index}`;
+        if (!s || typeof s !== 'object') return;
+        const title = typeof s.name === 'string' && s.name ? s.name : `TimStreams Event ${index}`;
         let rawGenre = s.genre;
         let genreLabel = 'other';
         if (Array.isArray(genres)) {
-          const matchedGenre = genres.find(g => g.id === rawGenre);
+          const matchedGenre = genres.find(g => g && g.id === rawGenre);
           if (matchedGenre && matchedGenre.name) {
             genreLabel = matchedGenre.name;
           }
@@ -74,8 +75,8 @@ class TimStreamsProvider extends BaseProvider {
           }
         }
 
-        const sources = (s.streams || [])
-          .filter(st => !st.vip)
+        const sources = (Array.isArray(s.streams) ? s.streams : [])
+          .filter(st => st && typeof st === 'object' && !st.vip && (st.url == null || typeof st.url === 'string'))
           .map(st => {
             let id = st.name || 'Stream';
             if (st.url) {

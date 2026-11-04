@@ -118,19 +118,17 @@ class EmbedIndiaProvider extends BaseProvider {
     const streams = [];
 
     const embedUrl = src.embedUrl || sourceId;
-    if (!embedUrl || !embedUrl.startsWith('http')) {
+    let parsedEmbedUrl;
+    try {
+      if (typeof embedUrl !== 'string') throw new Error('Invalid URL type');
+      parsedEmbedUrl = new URL(embedUrl);
+      if (!['http:', 'https:'].includes(parsedEmbedUrl.protocol)) throw new Error('Invalid URL protocol');
+    } catch (_) {
       console.warn(`[${this.name}] Invalid embed URL: ${embedUrl}`);
       return streams;
     }
 
-    let referer = src.referer;
-    if (!referer) {
-      try {
-        referer = new URL(embedUrl).origin + '/';
-      } catch (err) {
-        referer = 'https://embedindia.st/';
-      }
-    }
+    const referer = src.referer || parsedEmbedUrl.origin + '/';
 
     // 🌟 Tier 1: Native WASM Extraction 🌟
     if (streams.length === 0) {

@@ -77,8 +77,13 @@ class FullRacesProvider extends BaseProvider {
     const matches = [];
     const itemRegex = /<div class="short_item block_elem">[\s\S]*?<div class="poster">\s*<a href="([^"]+)">\s*<img src="([^"]+)"[\s\S]*?<h3>\s*<a[^>]*>([^<]+)<\/a>\s*<\/h3>[\s\S]*?<div class="short_cat">\s*<a[^>]*>([^<]+)<\/a>\s*<\/div>[\s\S]*?<div class="short_descr">\s*<p>([^<]*)<\/p>/gi;
 
-    let m;
-    while ((m = itemRegex.exec(html)) !== null) {
+    // Parse each card separately so an incomplete card cannot consume fields
+    // from the next race and pair its title with the wrong link.
+    const cards = html.split(/(?=<div class="short_item block_elem">)/i);
+    for (const card of cards) {
+      itemRegex.lastIndex = 0;
+      const m = itemRegex.exec(card);
+      if (!m) continue;
       const rawUrl = (m[1] || '').trim();
       if (!rawUrl) continue;
       const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${this.baseUrl}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;

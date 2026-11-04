@@ -18,6 +18,7 @@ const {
 const { rewriteHlsUri, rewriteHlsPlaylist, preprobeManifestSegments } = require('../services/HlsRewriteService');
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
+const { manifestUserAgent } = require('../services/ManifestUserAgent');
 
 // Variant BANDWIDTH declarations seen in master playlists, keyed by the
 // absolute upstream URL of the child media playlist. When that child is served
@@ -37,6 +38,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
   const defaultOrigin = isVavooTarget ? 'https://vavoo.to' : 'https://embed.st';
   const referer = req.query.referer || defaultReferer;
   const origin = req.query.origin || defaultOrigin;
+  const userAgent = manifestUserAgent(req.query.hlsua);
 
   if (!targetUrl) return res.status(400).send('Missing url');
   if (targetUrl.includes('.mpd')) return handleDashManifestProxy(req, res);
@@ -51,7 +53,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
   // Explicit tuple boundaries prevent collisions when URL/header values contain '|'.
   // This identity also fences remint outcomes, rewritten per-host URLs, negative
   // entries, and in-flight manifest requests from unrelated viewers.
-  const cacheKey = JSON.stringify([targetUrl, referer, origin, rck || '', requestBaseUrl]);
+  const cacheKey = JSON.stringify([targetUrl, referer, origin, userAgent, rck || '', requestBaseUrl]);
   const entry = manifestCacheGet(cacheKey);
   if (entry && entry.negative) {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -83,7 +85,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
 
         let upstream;
         try {
-          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true, userAgent });
         } catch (firstErr) {
           const fresh = (isExpiryStatus(firstErr) && rck) ? await attemptRemint(rck, effectiveUrl || targetUrl) : null;
           if (!fresh || fresh === effectiveUrl) throw firstErr;
@@ -113,7 +115,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
           // Preserve the variant the player asked for (see mergeRemintedUrl).
           effectiveUrl = mergeRemintedUrl(targetUrl, fresh, rck);
           reminted = true;
-          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true });
+          upstream = await fetchUpstreamManifest(effectiveUrl, referer, origin, { withResponseUrl: true, userAgent });
         }
         const out = upstream.body;
         // Re-fetch redirected bases on later polls; concurrent viewers still coalesce.
@@ -181,6 +183,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
         const rewrittenResult = rewriteHlsPlaylist(out, effectiveUrl, {
           referer,
           origin,
+          userAgent,
           rckSuffix,
           absoluteAddonBaseUrl: requestBaseUrl,
           bitrate: out.includes('#EXT-X-STREAM-INF') ? undefined : variantBitrateCache.get(effectiveUrl)

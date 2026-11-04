@@ -138,7 +138,7 @@ class ChannelIdentityService {
   /**
    * Parses raw channel name and returns normalized identity and extracted attributes
    * @param {string} rawName 
-   * @param {Object} [meta] { group, league, language, country, is4k, isBackup, isTimeshift }
+   * @param {Object} [meta] { group, league, language, country, countryCode, is4k, isBackup, isTimeshift }
    * @returns {{
    *   canonicalTitle: string,
    *   identityKey: string,
@@ -170,7 +170,7 @@ class ChannelIdentityService {
     }
 
     const groupKey = (meta && (meta.group || meta.league || meta.country)) || '';
-    const cacheKey = `${raw}|${groupKey}|${(meta && meta.language) || ''}|${Boolean(meta && meta.isBackup)}|${Boolean(meta && meta.isTimeshift)}|${Boolean(meta && meta.is4k)}|${(meta && meta.resolution) || ''}`;
+    const cacheKey = `${raw}|${groupKey}|${meta.country || ''}|${meta.countryCode || ''}|${(meta && meta.language) || ''}|${Boolean(meta && meta.isBackup)}|${Boolean(meta && meta.isTimeshift)}|${Boolean(meta && meta.is4k)}|${(meta && meta.resolution) || ''}`;
     const cached = _channelParseCache.get(cacheKey);
     if (cached) return cached;
 
@@ -204,15 +204,16 @@ class ChannelIdentityService {
 
     // 4. Detect Country and Language
     // Explicit group or country metadata from provider is authoritative ground truth
+    const explicitCountryInfo = ChannelCountryService.getCountryInfo(meta.countryCode) || ChannelCountryService.getCountryInfo(meta.country);
     const groupCountryInfo = (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()))
       ? ChannelCountryService.detectChannelCountry(meta.group.trim())
       : (meta.country ? ChannelCountryService.detectChannelCountry(meta.country) : null);
     const detectedCountryInfo = ChannelCountryService.detectChannelCountry(raw);
-    const primaryCountryInfo = groupCountryInfo || detectedCountryInfo;
+    const primaryCountryInfo = explicitCountryInfo || groupCountryInfo || detectedCountryInfo;
 
-    let country = meta.country || (groupCountryInfo ? groupCountryInfo.country : (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()) ? meta.group.trim() : null)) || (detectedCountryInfo ? detectedCountryInfo.country : null);
-    let countryCode = (groupCountryInfo && groupCountryInfo.name) || (detectedCountryInfo && detectedCountryInfo.name) || (country && COUNTRY_LANG_MAP[country] ? country.slice(0, 2).toUpperCase() : null);
-    let countryFlag = (groupCountryInfo && groupCountryInfo.flag) || (detectedCountryInfo && detectedCountryInfo.flag) || null;
+    let country = (explicitCountryInfo ? explicitCountryInfo.country : meta.country) || (groupCountryInfo ? groupCountryInfo.country : (meta.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(meta.group.trim()) ? meta.group.trim() : null)) || (detectedCountryInfo ? detectedCountryInfo.country : null);
+    let countryCode = (primaryCountryInfo && primaryCountryInfo.name) || (country && COUNTRY_LANG_MAP[country] ? country.slice(0, 2).toUpperCase() : null);
+    let countryFlag = (primaryCountryInfo && primaryCountryInfo.flag) || null;
 
     let language = 'English';
     if (meta.language && typeof meta.language === 'string') {
@@ -298,8 +299,12 @@ class ChannelIdentityService {
 
     // Strip trailing or separated country qualifiers if substantive brand words remain
     // e.g., "Astro Cricket Malaysia" -> "Astro Cricket", "Cartoonito UK" -> "Cartoonito", "M6 France" -> "M6"
-    const countryPattern = /\b(?:uk|usa?|france|germany|deutschland|italy|italia|spain|espana|portugal|poland|polska|netherlands|turkey|turkiye|albania|malaysia|canada|australia|austria|switzerland|india|argentina|chile|brazil|de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\b/gi;
-    const testStrippedCountry = clean.replace(countryPattern, ' ').trim();
+    const countryPattern = /\b(?:uk|usa?|france|germany|deutschland|italy|italia|spain|espana|portugal|poland|polska|netherlands|turkey|turkiye|albania|malaysia|canada|australia|austria|switzerland|india|argentina|chile|brazil)\b/gi;
+    // Short codes can be brand words: the interior "de" in Liga de Campeones
+    // is not a Germany annotation. Only strip those at a name boundary.
+    const testStrippedCountry = clean.replace(countryPattern, ' ')
+      .replace(/^\s*(?:de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\b/gi, ' ')
+      .replace(/\b(?:de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\s*$/gi, ' ').trim();
     // Safety guard: only strip if at least 2 alphanumeric characters remain (so "M6", "F1", "TF1" won't lose acronym, but "France 2" won't lose "France")
     if (testStrippedCountry.replace(/[^a-zA-Z0-9]/g, '').length >= 2) {
       clean = testStrippedCountry;
@@ -354,6 +359,15 @@ class ChannelIdentityService {
       isBackup,
       isTimeshift
     };
+
+    // Older channel IDs were built after removing short country-like words
+    // anywhere in a brand (including Spanish "de"). Preserve that former
+    // display spelling for providers whose public IDs include the title slug.
+    const legacyCanonicalTitle = canonicalTitle.replace(/\b(?:de|nz|ar|cl|br|pt|es|it|fr|nl|pl|tr)\b/gi, ' ')
+      .replace(/\s+/g, ' ').trim();
+    if (legacyCanonicalTitle !== canonicalTitle && legacyCanonicalTitle.replace(/[^a-z0-9]/gi, '').length >= 2) {
+      result.legacyCanonicalTitle = legacyCanonicalTitle;
+    }
 
     if (_channelParseCache.size >= MAX_CHANNEL_CACHE) {
       const oldestKey = _channelParseCache.keys().next().value;

@@ -13,6 +13,21 @@
 
 const fs = require('fs');
 const path = require('path');
+const ChannelCountryService = require('./ChannelCountryService');
+
+const COUNTRY_ALIASES = {
+  'united kingdom': ['uk', 'gb', 'great britain', 'england'],
+  'united states': ['us', 'usa'], germany: ['de', 'ger', 'deutschland'],
+  france: ['fr', 'fra'], italy: ['it', 'ita'], spain: ['es', 'esp'],
+  portugal: ['pt', 'por'], poland: ['pl', 'pol', 'polska'],
+  netherlands: ['nl', 'ned', 'holland'], turkey: ['tr', 'tur', 'turkiye'],
+  belgium: ['be'], austria: ['at'], switzerland: ['ch'],
+  canada: ['ca'], australia: ['au', 'aus'], india: ['in', 'ind'],
+  'south africa': ['za'], brazil: ['br', 'bra'], argentina: ['ar', 'arg'],
+  arabia: ['mena', 'arabic', 'saudi / mena']
+};
+const fold = value => String(value || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').trim();
+const escapeRegex = value => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 function normalizeName(name) {
   if (!name || typeof name !== 'string') return '';
@@ -20,11 +35,12 @@ function normalizeName(name) {
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '') // strip diacritics
-    .replace(/\b(hd|fhd|uhd|4k|sd|raw|sat|hevc|backup|match time)\b/gi, ' ')
-    .replace(/\b(uk|us|de|es|fr|it|pt)\b/gi, ' ')
+    .replace(/\bbackup(?:[\s#_-]*\d+)?\b/gi, ' ')
+    .replace(/\.[bB]\s*$/g, ' ')
+    .replace(/\b(hd|fhd|uhd|4k|sd|raw|sat|hevc|match time|1080p|720p|50fps|60fps)\b/gi, ' ')
     .replace(/\bsports\b/gi, 'sport') // normalize sports -> sport
     .replace(/\bsuper\s*sport\b/gi, 'supersport')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
 
@@ -47,7 +63,21 @@ class BroadcasterMatchService {
     ].filter(Boolean);
     this._catalogPath = candidates.find(p => fs.existsSync(p)) || candidates[0];
     this._channelIndex = new Map();
-    this._aliasIndex = new Map();
+    this._literalIndex = new Map();
+    this._literalRegionalIndex = new Map();
+    this._aliasTargets = new Map();
+    this._regionalIndex = new Map();
+    this._countryAliases = new Map();
+    for (const [country, aliases] of Object.entries(COUNTRY_ALIASES)) {
+      for (const alias of [country, ...aliases]) this._countryAliases.set(alias, country);
+    }
+    // Provider country codes come from this same metadata (including RO/BG/HR).
+    // Keep established aliases such as MENA -> Arabia as the canonical group.
+    for (const { name, country } of ChannelCountryService.getRules()) {
+      const canonical = this._countryAliases.get(fold(name)) || this._countryAliases.get(fold(country)) || fold(country);
+      this._countryAliases.set(fold(name), canonical);
+      this._countryAliases.set(fold(country), canonical);
+    }
     this._initialized = false;
     this._init();
   }
@@ -61,6 +91,15 @@ class BroadcasterMatchService {
       const channels = JSON.parse(fs.readFileSync(this._catalogPath, 'utf8'));
       if (!Array.isArray(channels)) return;
 
+      for (const ch of channels) {
+        if (ch && typeof ch.group === 'string' && ch.group.trim()) {
+          const group = fold(ch.group);
+          if (!this._countryAliases.has(group)) this._countryAliases.set(group, group);
+        }
+      }
+      this._countryPattern = new RegExp('\\b(?:' + [...this._countryAliases.keys()]
+        .sort((a, b) => b.length - a.length).map(escapeRegex).join('|') + ')\\b', 'g');
+
       const GROUP_PRIORITY = {
         'United Kingdom': 100,
         'Spain': 90,
@@ -73,7 +112,14 @@ class BroadcasterMatchService {
       for (const ch of channels) {
         if (!ch || !ch.name || !ch.vavooUrl) continue;
 
-        const norm = normalizeName(ch.name);
+        const country = this._countryAliases.get(fold(ch.group));
+        const norm = normalizeName(this._countryName(ch.name, country).name);
+        const literal = normalizeName(ch.name);
+        if (!literal) continue;
+        const literalExisting = this._literalIndex.get(literal);
+        if (!literalExisting || (GROUP_PRIORITY[ch.group] || 10) > (GROUP_PRIORITY[literalExisting.group] || 10)) {
+          this._literalIndex.set(literal, ch);
+        }
         if (norm) {
           const existing = this._channelIndex.get(norm);
           const existingScore = existing ? (GROUP_PRIORITY[existing.group] || 10) : 0;
@@ -83,12 +129,13 @@ class BroadcasterMatchService {
           }
         }
 
-        // Index with group context
         if (ch.group) {
-          const normWithGroup = normalizeName(`${ch.name} ${ch.group}`);
-          if (normWithGroup && !this._channelIndex.has(normWithGroup)) {
-            this._channelIndex.set(normWithGroup, ch);
-          }
+          if (!this._regionalIndex.has(country)) this._regionalIndex.set(country, new Map());
+          const regional = this._regionalIndex.get(country);
+          if (norm && !regional.has(norm)) regional.set(norm, ch);
+          if (!this._literalRegionalIndex.has(country)) this._literalRegionalIndex.set(country, new Map());
+          const regionalLiteral = this._literalRegionalIndex.get(country);
+          if (literal && !regionalLiteral.has(literal)) regionalLiteral.set(literal, ch);
         }
       }
 
@@ -173,12 +220,9 @@ class BroadcasterMatchService {
     ];
 
     for (const { alias, target } of ALIAS_MAPPINGS) {
-      const normAlias = normalizeName(alias);
-      const normTarget = normalizeName(target);
-      const targetCh = this._channelIndex.get(normTarget);
-      if (targetCh) {
-        this._aliasIndex.set(normAlias, targetCh);
-      }
+      const normAlias = normalizeName(this._countryName(alias).name);
+      const normTarget = normalizeName(this._countryName(target).name);
+      this._aliasTargets.set(normAlias, normTarget);
     }
   }
 
@@ -189,42 +233,62 @@ class BroadcasterMatchService {
    * @param {string} rawChannelName
    * @returns {Object|null}
    */
-  findChannel(rawChannelName) {
+  _countryName(raw, onlyCountry) {
+    const countries = new Set();
+    let name = fold(raw);
+    if (!this._countryPattern) return { name, countries };
+    while (true) {
+      if (!onlyCountry && this._literalIndex.has(normalizeName(name))) break;
+      const candidates = [];
+      // Prefer removing an annotation that exposes a known complete brand,
+      // whether the annotation is before or after that brand.
+      for (const match of [...name.matchAll(this._countryPattern)].reverse()) {
+        const token = match[0], offset = match.index;
+        const country = this._countryAliases.get(token);
+        if (onlyCountry && country !== onlyCountry) continue;
+        // A language word within a brand (Liga DE Campeones) is not a
+        // country annotation. Read only leading/trailing country tags.
+        if (normalizeName(name.slice(0, offset)) && normalizeName(name.slice(offset + token.length))) continue;
+        candidates.push({ country, rest: name.slice(0, offset) + ' ' + name.slice(offset + token.length) });
+      }
+      const selected = candidates.find(candidate => this._literalIndex.has(normalizeName(candidate.rest))) || candidates[0];
+      if (!selected) break;
+      countries.add(selected.country);
+      name = selected.rest;
+    }
+    return { name, countries };
+  }
+
+  findChannel(rawChannelName, context = {}) {
     if (!rawChannelName || typeof rawChannelName !== 'string') return null;
-
-    const norm = normalizeName(rawChannelName);
+    const countries = new Set();
+    for (const field of ['group', 'country', 'countryCode']) {
+      const raw = context && context[field];
+      if (!raw) continue;
+      const country = this._countryAliases.get(fold(raw));
+      if (country) countries.add(country);
+      else if (field !== 'group') return null;
+    }
+    if (countries.size > 1) return null;
+    // Known literal catalog brands can contain country-looking tokens (ITV
+    // BE, BE SPORTS, BEINSPORT AR 1). Preserve their full channel identity.
+    const literal = normalizeName(rawChannelName);
+    if (!literal) return null;
+    if (this._literalIndex.has(literal)) {
+      return countries.size ? this._literalRegionalIndex.get([...countries][0])?.get(literal) || null
+        : this._literalIndex.get(literal);
+    }
+    const parsed = this._countryName(rawChannelName);
+    for (const country of countries) parsed.countries.add(country);
+    if (parsed.countries.size > 1) return null;
+    const norm = normalizeName(parsed.name);
     if (!norm) return null;
-
-    // 1. Direct O(1) match on normalized catalog name
-    if (this._channelIndex.has(norm)) {
-      return this._channelIndex.get(norm);
-    }
-
-    // 2. Direct O(1) match on alias dictionary
-    if (this._aliasIndex.has(norm)) {
-      return this._aliasIndex.get(norm);
-    }
-
-    // 3. Whole-word prefix check (e.g. "TNT Sports 1 (HD)" -> starts with "tnt sport 1 ")
-    for (const [key, ch] of this._aliasIndex.entries()) {
-      if (key.length >= 4 && (norm === key || norm.startsWith(key + ' '))) {
-        // Prevent generic unnumbered placeholders like "sky sport" from matching numbered channels like "sky sport 253"
-        const remainder = norm.slice(key.length).trim();
-        if (/\b\d+\b/.test(remainder) && !/\b\d+\b/.test(key)) continue;
-        return ch;
-      }
-    }
-
-    for (const [key, ch] of this._channelIndex.entries()) {
-      if (key.length >= 5 && (norm === key || norm.startsWith(key + ' '))) {
-        // Prevent generic unnumbered placeholders like "sky sport" from matching numbered channels like "sky sport 253"
-        const remainder = norm.slice(key.length).trim();
-        if (/\b\d+\b/.test(remainder) && !/\b\d+\b/.test(key)) continue;
-        return ch;
-      }
-    }
-
-    return null;
+    const index = parsed.countries.size
+      ? this._regionalIndex.get([...parsed.countries][0]) : this._channelIndex;
+    if (!index) return null;
+    // Only known aliases and quality/country annotations may refine a name.
+    // An arbitrary suffix can identify another numbered or regional signal.
+    return index.get(norm) || index.get(this._aliasTargets.get(norm)) || null;
   }
 
   /**
@@ -233,8 +297,8 @@ class BroadcasterMatchService {
    * @param {string} rawChannelName
    * @returns {Object|null} StreamSource compatible object for MatchEntity.sources
    */
-  createVavooSource(rawChannelName) {
-    const ch = this.findChannel(rawChannelName);
+  createVavooSource(rawChannelName, context = {}) {
+    const ch = this.findChannel(rawChannelName, context);
     if (!ch) return null;
 
     return {

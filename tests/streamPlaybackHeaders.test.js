@@ -56,6 +56,12 @@ test('proxy query Referer and Origin take precedence over contradictory hints',a
  safeFetch.mockResolvedValue(res(200));const s=stream({Referer:'https://hint.example/',Origin:'https://hint.example',Authorization:'Bearer audit'},true);
  expect(await run(s)).toHaveLength(1);expect(safeFetch.mock.calls[0][1].headers).toEqual(expect.objectContaining({Referer:wrong,Origin:'https://wrong.example',Authorization:'Bearer audit'}));
 });
+test('verification uses the validated HLS user agent from the proxy URL',async()=>{
+ safeFetch.mockResolvedValue(res(200));const s=stream({'User-Agent':'OldClient/1.0'},true);
+ const u=new URL(s.url);u.searchParams.set('hlsua','FixtureClient/1.0');s.url=u.href;
+ expect(await run(s)).toHaveLength(1);
+ expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toBe('FixtureClient/1.0');
+});
 test('repair keeps Authorization Cookie UA and custom header on the second request',async()=>{
  const h={Referer:wrong,Authorization:'Bearer audit',Cookie:'session=audit','User-Agent':'Provider-UA','X-Playback-Key':'custom'};
  safeFetch.mockImplementation(async(_,o)=>res(o.headers.Referer===right&&o.headers.Authorization===h.Authorization&&o.headers.Cookie===h.Cookie?200:403));

@@ -34,6 +34,7 @@ class WatchFootyProvider extends BaseProvider {
       
       if (Array.isArray(data)) {
         for (const item of data) {
+          if (!item || typeof item !== 'object' || (item.title != null && typeof item.title !== 'string')) continue;
           const matchId = item.matchId;
           const title = item.title || `${item.teams?.home?.name || 'Home'} vs ${item.teams?.away?.name || 'Away'}`;
           
@@ -63,7 +64,10 @@ class WatchFootyProvider extends BaseProvider {
           // Map dynamic sports directly from the API
           const category = this.normalizeCategory(item.sport);
 
-          const posterUrl = item.poster ? new URL(item.poster, 'https://api.watchfooty.st').toString() : null;
+          let posterUrl = null;
+          if (typeof item.poster === 'string' && item.poster) {
+            try { posterUrl = new URL(item.poster, 'https://api.watchfooty.st').toString(); } catch (_) {}
+          }
 
           matches.push(new MatchEntity({
             id: `wf_${matchId}`,

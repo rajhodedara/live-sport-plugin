@@ -1,7 +1,6 @@
 'use strict';
 
-const http = require('node:http');
-const express = require('express');
+jest.mock('express', () => ({ Router: () => ({ get: jest.fn(), use: jest.fn(), options: jest.fn(), all: jest.fn() }), json: () => () => {}, urlencoded: () => () => {} }));
 
 jest.mock('../src/container', () => ({ resolve: () => ({ noteFailure: jest.fn() }) }));
 jest.mock('../src/impitClient', () => ({ safeFetch: jest.fn() }));
@@ -11,17 +10,7 @@ const manifestProxy = require('../src/manifestProxy');
 const manifestRouter = require('../src/routes/manifest');
 
 describe('/api/manifest cache identity includes the rewritten request base URL', () => {
-  let server;
-  let addon;
   const body = '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nchild.m3u8\n';
-
-  beforeAll(async () => {
-    const app = express();
-    app.use(manifestRouter);
-    server = http.createServer(app);
-    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-    addon = `http://127.0.0.1:${server.address().port}`;
-  });
 
   beforeEach(() => {
     manifestProxy.manifestCache.clear();
@@ -30,30 +19,64 @@ describe('/api/manifest cache identity includes the rewritten request base URL',
     safeFetch.mockResolvedValue({ ok: true, status: 200, text: async () => body });
   });
 
-  afterAll(async () => {
-    await new Promise(resolve => {
-      server.closeAllConnections();
-      server.close(resolve);
-    });
+  async function requestWithHost(host, rck, overrides = {}, pathname = '/api/manifest') {
+    const query = { url: 'https://cdn.example/live/master.m3u8', ...(rck !== undefined ? {rck} : {}), ...overrides };
+    const req = { query, headers: {host}, protocol: 'http', url: pathname + '?' + new URLSearchParams(query), originalUrl: pathname + '?' + new URLSearchParams(query) };
+    const result = { status: 200, headers: {} };
+    const res = { setHeader(k,v) { result.headers[k.toLowerCase()] = v; }, status(code) { result.status=code;return this; }, send(body) { result.body=body;return this; } };
+    const handler = manifestRouter.get.mock.calls.find(([paths]) => (Array.isArray(paths) ? paths : [paths]).includes(pathname))[1];
+    await handler(req,res);
+    return result;
+  }
+
+  test('separates cached manifests by user agent and preserves it in the child URL', async () => {
+    const first = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-A/1.0' });
+    const second = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-B/1.0' });
+    const again = await requestWithHost('same.example', undefined, { hlsua: 'Fixture-A/1.0' });
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(again.headers['x-manifest-cache']).toBe('HIT');
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+    expect(safeFetch.mock.calls.map(call => call[1].headers['User-Agent'])).toEqual(['Fixture-A/1.0', 'Fixture-B/1.0']);
+    const child = first.body.split('\n').find(line => line.includes('/api/manifest?'));
+    expect(new URL(child).searchParams.get('hlsua')).toBe('Fixture-A/1.0');
+    const childQuery = Object.fromEntries(new URL(child).searchParams);
+    const childResponse = await requestWithHost('same.example', undefined, childQuery);
+    expect(childResponse.status).toBe(200);
+    expect(safeFetch.mock.calls[2][0]).toBe('https://cdn.example/live/child.m3u8');
+    expect(safeFetch.mock.calls[2][1].headers['User-Agent']).toBe('Fixture-A/1.0');
   });
 
-  async function requestWithHost(host, rck, overrides = {}, pathname = '/api/manifest') {
-    return new Promise((resolve, reject) => {
-      const url = new URL(pathname + '?' + new URLSearchParams({
-        url: 'https://cdn.example/live/master.m3u8',
-        ...(rck !== undefined ? { rck } : {}),
-        ...overrides,
-      }), addon);
-      const req = http.get(url, { headers: { Host: host } }, res => {
-        let text = '';
-        res.setEncoding('utf8');
-        res.on('data', chunk => { text += chunk; });
-        res.on('end', () => resolve({ status: res.statusCode, body: text, headers: res.headers }));
-      });
-      req.on('error', reject);
-      req.setTimeout(3000, () => req.destroy(new Error('manifest request timed out')));
-    });
-  }
+  test('invalid user agent does not reach the upstream request', async () => {
+    const result = await requestWithHost('same.example', undefined, { hlsua: 'bad\r\nInjected: value' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).not.toContain('\r');
+    expect(result.body).not.toContain('hlsua=');
+  });
+
+  test('legacy HLS ua parameter keeps the existing default user agent', async () => {
+    const result = await requestWithHost('same.example', undefined, { ua: 'LegacyClient/131.0' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toContain('Chrome/127.0.0.0');
+    expect(result.body).not.toContain('hlsua=');
+  });
+
+  test('Vavoo keeps its historical default when no HLS user agent is supplied', async () => {
+    const result = await requestWithHost('same.example', undefined, { referer: 'https://vavoo.to/' });
+    expect(result.status).toBe(200);
+    expect(safeFetch.mock.calls[0][1].headers['User-Agent']).toBe('MediaHubMX/2');
+  });
+
+  test('a rejected user agent does not negatively cache a different user agent', async () => {
+    safeFetch.mockImplementation(async (_url, opts) => opts.headers['User-Agent'] === 'BadClient/1.0'
+      ? { ok: false, status: 403 }
+      : { ok: true, status: 200, text: async () => body });
+    const bad = await requestWithHost('same.example', undefined, { hlsua: 'BadClient/1.0' });
+    const good = await requestWithHost('same.example', undefined, { hlsua: 'GoodClient/1.0' });
+    expect(bad.status).toBe(404); // Existing proxy behavior maps upstream 403 to failover 404.
+    expect(good.status).toBe(200);
+    expect(safeFetch).toHaveBeenCalledTimes(2);
+  });
 
   test('the published m3u8 alias preserves cache identity with the original route', async () => {
     const first = await requestWithHost('same.example', 'source-A');

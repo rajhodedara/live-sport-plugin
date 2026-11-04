@@ -34,7 +34,7 @@ class ReplayZoneProvider {
             const text = await body.text();
             
             const matches = [];
-            const blocks = text.split('\n\n').filter(b => b.trim());
+            const blocks = text.split(/\r?\n[ \t]*\r?\n/).filter(b => b.trim());
 
             for (const block of blocks) {
                 const lines = block.split('\n').map(l => l.trim()).filter(l => l);

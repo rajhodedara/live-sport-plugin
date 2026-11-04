@@ -459,6 +459,11 @@ class StreamResolveCache {
         if (Array.isArray(streams) && streams.length > 0) {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
+          // A PPV web fallback is usable as a hand-off, but it must not delay
+          // another direct-playback attempt longer than an empty result did.
+          if (sourceName === 'ppvst' && streams.every(s => s && !s.url && s.externalUrl)) {
+            ttl = Math.min(ttl, this.negativeTtlMs);
+          }
           for (const s of streams) {
             if (s && s.url) {
               const rem = this._extractTokenRemainingMs(s.url);
