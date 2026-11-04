@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - stable
   workflow_dispatch:
 
 jobs:
@@ -20,14 +21,21 @@ jobs:
           script_stop: true
           script: |
             cd /root/nuvio-live-sports
+            # Deploy the branch that triggered this run. The production checkout
+            # lives on stable, so a hardcoded "main" here would merge main into it
+            # instead of pulling the branch that was actually pushed.
+            BRANCH="${{ github.ref_name }}"
 
+            echo "==> Deploying branch $BRANCH"
             echo "==> Resetting any broken merge state..."
             git reset --hard HEAD
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
 
             LOCK_BEFORE="$(md5sum package-lock.json 2>/dev/null | awk '{print $1}')"
 
-            echo "==> Pulling latest changes from main..."
-            git pull origin main
+            echo "==> Pulling latest changes from $BRANCH..."
+            git pull --ff-only origin "$BRANCH"
 
             LOCK_AFTER="$(md5sum package-lock.json 2>/dev/null | awk '{print $1}')"
 
