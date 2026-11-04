@@ -25,11 +25,23 @@ class LeafProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
     this.name = 'Leaf';
+    // Stable source key. Aggregation code keys providers on `sourceName || name`,
+    // and the live-overlay refresh selects Leaf by that key, so leaning on the
+    // display name ('Leaf' vs 'leaf') is exactly how a selector silently matches
+    // nothing. Same convention as DaddyLive/ReplayZone/SoccerFull.
+    this.sourceName = 'leaf';
     this.apiUrl = LeafProvider.buildApiUrl();
     this.configured = Boolean(
       process.env.LEAF_API_URL || process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID
     );
     this._installNagWarned = false;
+
+    // Tri-state catalog health, same convention as DaddyLiveProvider's
+    // lastScheduleOk. getMatches() answers [] for "nothing is live" AND for
+    // "upstream threw", and a caller that replaces a live snapshot wholesale
+    // cannot tell those apart without this flag.
+    //   null = never fetched, true = last fetch parsed, false = last fetch failed
+    this.lastCatalogOk = null;
 
     if (this.circuitBreaker) {
       this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
@@ -118,6 +130,7 @@ class LeafProvider extends BaseProvider {
       }
       return await this._fetchLiveMatchesInternal();
     } catch (err) {
+      this.lastCatalogOk = false;
       console.warn(`[${this.name}] Failed to fetch live matches: ${err.code || 'ERR_LEAF_CATALOG'}`);
       return [];
     }
@@ -138,6 +151,9 @@ class LeafProvider extends BaseProvider {
     }
 
     const data = await res.json();
+    // Reaching a parseable catalog is the success signal, even when it lists
+    // nothing: an empty live schedule is a legitimate answer.
+    this.lastCatalogOk = true;
     const metas = data && Array.isArray(data.metas) ? data.metas : [];
     const matches = [];
 

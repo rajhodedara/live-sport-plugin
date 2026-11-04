@@ -5,13 +5,32 @@ const StreamResolveCache = require('../services/StreamResolveCache');
 // the next catalog/meta request triggers a background re-sync (see ensureFresh).
 const REVALIDATE_AFTER_MS = parseInt(process.env.CATALOG_REVALIDATE_MS, 10) || 10 * 60 * 1000;
 
+// Leaf-only live overlay cadence (ms). 0 disables the pass entirely. The
+// overlay no-ops when its snapshot is unchanged, so a short cadence costs one
+// small upstream GET per tick and nothing else.
+const LIVE_OVERLAY_REFRESH_MS = (() => {
+  const raw = process.env.LIVE_OVERLAY_REFRESH_MS;
+  if (raw === undefined || raw === '') return 2 * 60 * 1000;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 2 * 60 * 1000;
+})();
+
 class CronService {
-  constructor({ matchAggregator, streamResolveCache, cacheService, providerHealthService }) {
+  constructor({ matchAggregator, streamResolveCache, cacheService, providerHealthService, liveOverlayService }) {
     this.matchAggregator = matchAggregator;
     this.streamResolveCache = streamResolveCache;
     this.cacheService = cacheService;
     this.providerHealthService = providerHealthService;
+    this.liveOverlayService = liveOverlayService;
     this.syncing = false;
+    this._overlayBusy = false;
+    this._overlayFailStreak = 0;
+    // Consecutive failed fetches before the last-known-good overlay is cleared.
+    // Below this, a failed tick keeps serving the previous snapshot: Leaf
+    // answers [] both when nothing is live and when upstream throws, so a
+    // single timeout must never blank every Leaf source for a full cadence.
+    this._overlayFailStreakMax = Math.max(1, parseInt(process.env.LIVE_OVERLAY_MAX_CONSECUTIVE_FAILURES, 10) || 3);
+    this._lastIdentityWarnAt = 0;
   }
 
   /**
@@ -125,6 +144,27 @@ class CronService {
       }
     });
 
+    // Leaf-only live overlay: 1-5 ephemeral fixtures, refreshed on a short
+    // cadence without ever touching matches_cache.json.
+    //
+    // setInterval, not cron.schedule: node-cron has no leader election, so a
+    // cron job here would fire in BOTH cluster workers. This pass is owned by
+    // the primary worker; every other worker reads its snapshot off disk.
+    if (LIVE_OVERLAY_REFRESH_MS > 0) {
+      console.log(`[CronService] Live overlay refresh every ${Math.round(LIVE_OVERLAY_REFRESH_MS / 1000)}s (primary worker only)`);
+      this._overlayTimer = setInterval(() => {
+        this.refreshLiveOverlay().catch((err) => console.error('[CronService] Leaf overlay tick failed:', err.message));
+      }, LIVE_OVERLAY_REFRESH_MS);
+      // Never hold the process open just for this timer.
+      if (this._overlayTimer && typeof this._overlayTimer.unref === 'function') this._overlayTimer.unref();
+      // One pass at boot, not one cadence later: a deploy replaces dist/ and
+      // takes the overlay file with it, so waiting would cost minutes of
+      // missing Leaf sources on every release.
+      setImmediate(() => {
+        this.refreshLiveOverlay().catch(() => {});
+      });
+    }
+
     // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately
     setImmediate(async () => {
       try {
@@ -158,6 +198,104 @@ class CronService {
         console.error('[CronService] Match sync failed:', e.message);
       }
     }, 1000);
+  }
+
+  /**
+   * Leaf-only freshness pass.
+   *
+   * Rebuilds the overlay from upstream, replaces the snapshot wholesale, and
+   * drops resolved-stream entries for the fixtures that entered, left or
+   * changed. It never writes the catalog - see LiveOverlayService for why that
+   * matters (14 MB rewrite, read-modify-write race with the 4h sync, and a
+   * lastFetchTime reset that would starve the SWR path).
+   */
+  async refreshLiveOverlay() {
+    if (!this._isPrimaryWorker()) return { skipped: 'secondary-worker' };
+    if (this._overlayBusy) return { skipped: 'busy' };
+    const overlay = this.liveOverlayService;
+    const aggregator = this.matchAggregator;
+    if (!overlay || !aggregator || typeof aggregator.buildLiveOverlay !== 'function') {
+      return { skipped: 'unavailable' };
+    }
+    this._overlayBusy = true;
+    try {
+      const result = await aggregator.buildLiveOverlay('leaf');
+      const fetched = result && Number.isFinite(result.fetched) ? result.fetched : 0;
+      const matched = result && Number.isFinite(result.matched) ? result.matched : 0;
+      let nextMap = result && result.map instanceof Map ? result.map : null;
+
+      if (!result || !result.ok) {
+        this._overlayFailStreak += 1;
+        if (this._overlayFailStreak < this._overlayFailStreakMax) {
+          console.warn(`[CronService] Leaf overlay fetch failed (${(result && result.reason) || 'unknown'}); keeping previous snapshot (${this._overlayFailStreak}/${this._overlayFailStreakMax})`);
+          return { ok: false, kept: true, fetched, matched };
+        }
+        console.warn(`[CronService] Leaf overlay failed ${this._overlayFailStreak}x (${(result && result.reason) || 'unknown'}); clearing overlay`);
+        nextMap = new Map();
+      } else {
+        this._overlayFailStreak = 0;
+        // "Live upstream but matched nothing" is the identity-regression
+        // canary: the match guard or the kickoff window stopped agreeing with
+        // the catalog. Rate-limited - a genuinely card-less fixture would
+        // otherwise warn every tick.
+        if (fetched > 0 && matched === 0 && Date.now() - this._lastIdentityWarnAt > 30 * 60 * 1000) {
+          this._lastIdentityWarnAt = Date.now();
+          console.warn(`[CronService] Leaf overlay: ${fetched} live fixture(s) matched 0 catalog cards - identity regression?`);
+        }
+      }
+      if (!nextMap) return { ok: false, skipped: 'no-snapshot' };
+
+      const applied = overlay.setOverlay(nextMap);
+      if (!applied.changed) {
+        return { ok: Boolean(result && result.ok), changed: false, revision: applied.revision };
+      }
+
+      for (const matchId of applied.touchedIds) this._invalidateOverlayMatch(matchId);
+
+      console.log(`[CronService] Leaf overlay r${applied.revision}: +${applied.addedIds.length} -${applied.removedIds.length} (fetched ${fetched}, matched ${matched})`);
+      return {
+        ok: true,
+        changed: true,
+        revision: applied.revision,
+        fetched,
+        matched,
+        added: applied.addedIds.length,
+        removed: applied.removedIds.length
+      };
+    } catch (err) {
+      console.error('[CronService] Leaf overlay refresh failed:', err.message);
+      return { ok: false, error: err.message };
+    } finally {
+      this._overlayBusy = false;
+    }
+  }
+
+  /**
+   * Drop resolved-stream entries for one match whose overlay just changed.
+   *
+   * Lifecycle policy lives with the caller that knows *why* the entry is stale
+   * (a source appeared, or the fixture ended), so the resolve cache keeps no
+   * knowledge of the overlay. Deliberately NOT a correctness mechanism for new
+   * sources either: an unseen source has no cache key to evict. The loop mirrors
+   * StreamResolveCache#pruneEnded.
+   */
+  _invalidateOverlayMatch(matchId) {
+    try {
+      const cache = this.streamResolveCache;
+      if (!cache || !cache.entries || typeof cache.entries.delete !== 'function') return 0;
+      const target = String(matchId);
+      let dropped = 0;
+      for (const [key, entry] of cache.entries) {
+        if (entry && String(entry.matchId) === target) {
+          cache.entries.delete(key);
+          dropped += 1;
+        }
+      }
+      if (dropped > 0 && cache.statsCounters) cache.statsCounters.evictions += dropped;
+      return dropped;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /** Drop stream-cache entries for matches that are no longer active. */

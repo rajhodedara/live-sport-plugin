@@ -48,6 +48,11 @@ function _parseEventDate(raw) {
 }
 
 const DAY_MS = 86400000;
+// Live-overlay candidate window. An ephemeral provider only publishes fixtures
+// that are live or about to be; a catalog row dated further away than this
+// cannot be the same event, so it is dropped before the expensive
+// normalisation pass (see buildLiveOverlay).
+const LIVE_OVERLAY_WINDOW_MS = 12 * 60 * 60 * 1000;
 const MAX_REPLAY_CLAIMS = 32;
 const REPLAY_DAY_PROVIDERS = new Set(['basketballvideo', 'hockeyreplays', 'nflvideo', 'mlblive', 'soccerfull']);
 const REPLAY_MONTHS = 'january february march april may june july august september october november december'.split(' ');
@@ -958,6 +963,133 @@ class MatchAggregator {
     const union = p1.tokens.size + p2.tokens.size - common;
     if (union > 0 && common / union >= 0.75) return true;
     return false;
+  }
+
+  /**
+   * Read-only scan: which catalog cards should carry this provider's sources
+   * right now?
+   *
+   * This is the read half of the live-overlay feature. It never writes the
+   * catalog: it returns `matchId -> sources[]` for the handful of fixtures an
+   * ephemeral provider is publishing, and the caller decides what to persist.
+   *
+   * Cost matters (this runs on a short cadence): the catalog is filtered to a
+   * narrow kickoff window BEFORE any _precompute call, because _precompute is
+   * the regex-heavy normaliser and matching 1-5 incoming fixtures must not pay
+   * for 16k catalog rows.
+   *
+   * `ok` is not "did we get rows": it is "did the provider prove it answered".
+   * A provider that returns [] after a thrown request is indistinguishable from
+   * a quiet live schedule by its return value alone, and a wholesale snapshot
+   * replace must not treat those the same (see LeafProvider.lastCatalogOk).
+   *
+   * @param {string} providerName stable source key (`sourceName || name`)
+   * @returns {Promise<{ok: boolean, reason: string, fetched: number, matched: number, map: Map<string, Array>}>}
+   */
+  async buildLiveOverlay(providerName = 'leaf') {
+    const result = (ok, reason, extra = {}) => ({
+      ok, reason, fetched: 0, matched: 0, map: new Map(), ...extra
+    });
+    const wanted = String(providerName || '').toLowerCase();
+    // Key on sourceName first: display names are capitalised ('Leaf') and would
+    // never match a lowercase selector.
+    const provider = (this.providers || []).find((p) => {
+      if (!p) return false;
+      const key = p.sourceName || p.name;
+      return typeof key === 'string' && key.toLowerCase() === wanted;
+    });
+    if (!provider || typeof provider.getMatches !== 'function') return result(false, 'provider-missing');
+    // Unconfigured providers answer [] and look exactly like "nothing live".
+    // Never let one clear a snapshot it cannot vouch for.
+    if (provider.configured === false) return result(false, 'provider-unconfigured');
+
+    let incoming = [];
+    try {
+      incoming = await provider.getMatches();
+    } catch (err) {
+      return result(false, 'fetch-failed', { error: err && err.message });
+    }
+    const ok = provider.lastCatalogOk === true;
+    if (!Array.isArray(incoming) || incoming.length === 0) {
+      return result(ok, ok ? 'empty' : 'empty-unverified');
+    }
+
+    const cacheService = this.cacheService;
+    const current = cacheService
+      ? ((cacheService.getMatchesReadOnly ? cacheService.getMatchesReadOnly() : cacheService.getMatches()) || [])
+      : [];
+    if (!Array.isArray(current) || current.length === 0) {
+      return result(ok, 'catalog-empty', { fetched: incoming.length });
+    }
+
+    const now = Date.now();
+    const candidates = [];
+    for (const m of current) {
+      if (!m || !m.id) continue;
+      const kickoff = _parseEventDate(m.date);
+      if (kickoff > 0) {
+        if (Math.abs(kickoff - now) > LIVE_OVERLAY_WINDOW_MS) continue;
+      } else if (String(m.status || '').toLowerCase() !== 'live') {
+        // Undated and not marked live: 24/7 channels and undated archive rows.
+        continue;
+      }
+      candidates.push(m);
+    }
+    if (candidates.length === 0) {
+      return result(ok, 'no-candidates', { fetched: incoming.length });
+    }
+
+    // Exact id/alias hits skip the comparison entirely. Built over candidates
+    // only: a row outside the window is not the fixture being published.
+    const byId = new Map();
+    for (const m of candidates) {
+      byId.set(String(m.id), m);
+      if (Array.isArray(m.aliasIds)) {
+        for (const alias of m.aliasIds) {
+          if (alias == null || alias === '') continue;
+          const key = String(alias);
+          if (!byId.has(key)) byId.set(key, m);
+        }
+      }
+    }
+    const candidatePres = candidates.map((m) => this._precompute(m));
+
+    const map = new Map();
+    let matched = 0;
+
+    for (const providerMatch of incoming) {
+      if (!providerMatch || !Array.isArray(providerMatch.sources) || providerMatch.sources.length === 0) continue;
+      const sources = providerMatch.sources.filter((s) => s && String(s.source || '').toLowerCase() === wanted);
+      if (sources.length === 0) continue;
+
+      let target = null;
+      for (const id of [providerMatch.id, ...(Array.isArray(providerMatch.aliasIds) ? providerMatch.aliasIds : [])]) {
+        if (id == null || id === '') continue;
+        const hit = byId.get(String(id));
+        if (hit) { target = hit; break; }
+      }
+      if (!target) {
+        const incomingPre = this._precompute(providerMatch);
+        for (let i = 0; i < candidatePres.length; i++) {
+          if (this._sameEventPre(candidatePres[i], incomingPre)) { target = candidates[i]; break; }
+        }
+      }
+      if (!target) continue;
+
+      const targetId = String(target.id);
+      const list = map.get(targetId) || [];
+      for (const src of sources) {
+        const id = src.id == null ? '' : String(src.id);
+        if (!id) continue;
+        if (list.some((s) => s.id === id)) continue;
+        list.push({ source: wanted, id, ...(src.name ? { name: String(src.name) } : {}) });
+      }
+      if (list.length === 0) continue;
+      map.set(targetId, list);
+      matched++;
+    }
+
+    return { ok, reason: 'ok', fetched: incoming.length, matched, map };
   }
 
   /** Public API preserved: decision on raw matches (computes pre on the fly). */

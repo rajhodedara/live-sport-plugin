@@ -879,12 +879,41 @@ const _metaCache = new Map(); // key → { data, expiresAt, revision }
 const HUB_META_CACHE_MAX = 24;
 const _hubMetaCache = new Map(); // key → { data, expiresAt, revision }
 
+let _liveOverlayRef;
+/**
+ * Resolve the live overlay service once per process.
+ *
+ * Guarded rather than required: catalog.js is also loaded by tests that build a
+ * partial container, and a missing registration must degrade to "no overlay"
+ * (the exact pre-feature behaviour) instead of throwing on a request path.
+ */
+function _liveOverlay() {
+  if (_liveOverlayRef !== undefined) return _liveOverlayRef;
+  try {
+    if (typeof container.hasRegistration === 'function' && !container.hasRegistration('liveOverlayService')) {
+      _liveOverlayRef = null;
+      return null;
+    }
+    _liveOverlayRef = container.resolve('liveOverlayService') || null;
+  } catch (_) {
+    _liveOverlayRef = null;
+  }
+  return _liveOverlayRef;
+}
+
 function _metaCacheRevision() {
   const cacheService = container.resolve('cacheService');
   // Poll for cross-worker snapshots before trusting a memo hit. This returns
   // the internal read-only array without cloning or projecting any matches.
   if (typeof cacheService.getMatchesReadOnly === 'function') cacheService.getMatchesReadOnly();
-  return cacheService.rev || 0;
+  // The overlay is a second source of truth for stream availability. Meta
+  // projections do not list sources today, so this is an invariant guard rather
+  // than a bug fix: it stops a memoised projection from ever disagreeing with
+  // what /streams is about to return if availability reaches the preview later.
+  // Cheap - getRevision() polls the shared file, throttled to 1s.
+  const overlay = _liveOverlay();
+  const overlayRev = overlay ? overlay.getRevision() : 0;
+  return `${cacheService.rev || 0}:${overlayRev}`;
 }
 
 function _metaCacheKey(id, config, responseType) {

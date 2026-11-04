@@ -22,6 +22,7 @@ const DamiTvProvider = require('./providers/DamiTvProvider');
 const TeamLogoService = require('./services/TeamLogoService');
 const YamlProviderBuilder = require('./services/YamlProviderBuilder');
 const StreamResolveCache = require('./services/StreamResolveCache');
+const LiveOverlayService = require('./services/LiveOverlayService');
 const { resolverTransport } = require('./services/ResolverTransportRuntime');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const StreamedWasmPool = require('./services/StreamedWasmPool');
@@ -55,6 +56,10 @@ container.register({
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),
   streamResolveCache: asValue(new StreamResolveCache({ timingRelations, sharedResolver: resolverTransport })),
+  // Live ephemeral-source overlay (Leaf). asValue, not asClass: the instance
+  // takes constructor options and needs no injected dependencies, exactly like
+  // streamResolveCache above.
+  liveOverlayService: asValue(new LiveOverlayService()),
   streamedWasmPool: asValue(StreamedWasmPool),
   dashToHlsService: asClass(DashToHlsService).singleton(),
   providerHealthService: asClass(ProviderHealthService).singleton(),

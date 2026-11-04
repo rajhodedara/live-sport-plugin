@@ -12,6 +12,28 @@ const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream } = require('./services/StreamPolicy');
 
+let _liveOverlayRef;
+/**
+ * Resolve the live overlay once per process.
+ *
+ * Guarded rather than required: streams.js is loaded by unit tests with a
+ * partial container, and a missing registration must degrade to "no overlay"
+ * instead of throwing while resolving somebody's stream.
+ */
+function _liveOverlay() {
+  if (_liveOverlayRef !== undefined) return _liveOverlayRef;
+  try {
+    if (typeof container.hasRegistration === 'function' && !container.hasRegistration('liveOverlayService')) {
+      _liveOverlayRef = null;
+      return null;
+    }
+    _liveOverlayRef = container.resolve('liveOverlayService') || null;
+  } catch (_) {
+    _liveOverlayRef = null;
+  }
+  return _liveOverlayRef;
+}
+
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
   return ChannelCountryService.detectChannelCountry(channelName);
@@ -1007,9 +1029,18 @@ function schedulePrewarm(task) {
 
 async function prewarmMatchNow(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
-    if (!match || !match.sources || !match.sources.length) return;
+    if (!match) return;
+    // Prewarm reads the same effective source list the resolver will use, so a
+    // source that only exists in the live overlay is not silently skipped here
+    // if the prewarm skip list ever drops leaf.
+    const overlay = _liveOverlay();
+    const baseSources = Array.isArray(match.sources) ? match.sources : [];
+    const effectiveSources = (overlay && match.id)
+      ? overlay.mergeSources(match.id, baseSources, match.aliasIds)
+      : baseSources;
+    if (effectiveSources.length === 0) return;
     const resolveCache = container.resolve('streamResolveCache');
-    const activeSources = selectSources(match.sources, config || null, match);
+    const activeSources = selectSources(effectiveSources, config || null, match);
     const skip = prewarmSkipProvidersSet();
     const eligible = skip.size ? activeSources.filter((s) => !skip.has(String(s.source || '').toLowerCase())) : activeSources;
     const targets = eligible.slice(0, topN);
@@ -1032,7 +1063,9 @@ async function prewarmMatchNow(match, config, topN = Number.MAX_SAFE_INTEGER, op
 
 
 async function prewarmMatch(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
-  if (!match || !match.sources || !match.sources.length) return;
+  // A card with no catalog sources may still be live through the overlay, and
+  // prewarmMatchNow merges that in. Only an absent match is a real no-op.
+  if (!match) return;
   return schedulePrewarm(() => prewarmMatchNow(match, config, topN, opts));
 }
 
@@ -1193,15 +1226,25 @@ async function handleStream(type, id, config) {
   if (!matchId) return { streams: [] };
   const match = cacheService.findMatch(matchId);
 
-  if (!match || !match.sources || match.sources.length === 0) {
+  // Live overlay (see LiveOverlayService): an ephemeral provider publishes
+  // sources outside the catalog snapshot. Merge BEFORE the empty-sources guard,
+  // or the exact case this exists for - a card whose catalog sources do not
+  // contain the live source yet - would return no streams at all.
+  const overlay = _liveOverlay();
+  const baseSources = (match && Array.isArray(match.sources)) ? match.sources : [];
+  const effectiveSources = (overlay && match && match.id)
+    ? overlay.mergeSources(match.id, baseSources, match.aliasIds)
+    : baseSources;
+
+  if (!match || effectiveSources.length === 0) {
     return { streams: [] };
   }
 
   const streams = [];
 
-  let candidateSources = match.sources;
+  let candidateSources = effectiveSources;
   if (!isHubEpisode && episodeIndex && !isNaN(episodeIndex) && episodeIndex > 0) {
-    const cleanSources = match.sources.filter(s => s && s.url && !s.source?.includes('timstreams'));
+    const cleanSources = effectiveSources.filter(s => s && s.url && !s.source?.includes('timstreams'));
     // Prioritize dedicated full replay providers and ordered parts over goal clips
     const getReplaySourceRank = (s) => {
       const name = (s.name || '').toLowerCase();
