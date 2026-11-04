@@ -144,7 +144,7 @@ describe('impitClient.safeFetch — undici fallback follows redirects', () => {
     expect(request.mock.calls[1][1].method).toBe('GET');
     expect(request.mock.calls[1][1].body).toBeUndefined();
     expect(request.mock.calls[1][1].headers['content-length']).toBeUndefined();
-    expect(request.mock.calls[1][1].headers['content-type']).toBe('text/plain');
+    expect(request.mock.calls[1][1].headers['content-type']).toBeUndefined();
     expect(res.status).toBe(200);
   });
 });

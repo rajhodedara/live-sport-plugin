@@ -17,6 +17,8 @@ const express = require('express');
 const cors    = require('cors');
 const { getRouter } = require('stremio-addon-sdk');
 const { createProxyMiddleware } = require('http-proxy-middleware');
+const resolverProxyEvents = require('./services/ResolverProxyEvents');
+const { resolverTransport } = require('./services/ResolverTransportRuntime');
 const child_process = require('child_process');
 const path = require('path');
 
@@ -850,18 +852,22 @@ app.use(require('./routes/dash'));
 // Internal resolver cache APIs are used directly over loopback by cluster workers.
 // Only the resolver's stream and health endpoints may cross the public /api proxy.
 app.use('/api', require('./services/PublicResolverApiGate'));
+app.use('/api', require('./services/ResolverTrustPolicy').createResolverTrustGate());
+// Do not route new requests to a port where this worker observed that its
+// resolver failed to bind. This does not verify other workers' ownership.
+app.use('/api', require('./services/ResolverConflictGate'));
 // Mount the HLS Video Proxy (routes to the internal resolver on port RESOLVER_PORT)
 app.use('/api', createProxyMiddleware({
-  target: `http://127.0.0.1:${RESOLVER_PORT}/api`,
-  changeOrigin: true,
+  ...(resolverTransport ? resolverTransport.proxyOptions : { target: `http://127.0.0.1:${RESOLVER_PORT}/api` }),
+  // A socket target has no TCP hostname to synthesize as Host. Preserve the
+  // incoming host in that mode; the configured TLS servername is separate.
+  changeOrigin: !resolverTransport,
   xfwd: true,
-  logLevel: 'debug',
-  onError: (err, req, res) => {
-    console.error('[Proxy Error] Failed to proxy /api request to internal resolver:', err.message);
-    if (!res.headersSent) {
-      res.status(502).send('Bad Gateway: Internal stream resolver is not responding.');
-    }
-  }
+  // The proxy library's default logger includes request URLs. Resolver URLs
+  // can contain playback credentials, so log only fixed messages.
+  logger: { info: () => {}, warn: () => console.warn('[Resolver Proxy] Warning'),
+    error: () => console.error('[Resolver Proxy] Request failed') },
+  on: { proxyReq: resolverProxyEvents.proxyReq, error: resolverProxyEvents.error }
 }));
 
 // ─── Universal Dynamic Base URL Response Rewriter ─────────────────────────────
@@ -895,6 +901,12 @@ const METADATA_PREFIXES = [
 ];
 
 const REWRITE_SCAN_PREFIXES = [...STREAM_PREFIXES, ...METADATA_PREFIXES];
+// Match complete endpoint names or their path/file forms, never a lookalike
+// such as /api/leaflet. Generic upstream /hls paths are not addon endpoints.
+const matchesRewritePrefix = (url, prefix) => url === prefix ||
+  url.startsWith(`${prefix}/`) || url.startsWith(`${prefix}?`) ||
+  url.startsWith(`${prefix}#`) ||
+  (url.startsWith(`${prefix}.`) && /^\.[A-Za-z0-9]+(?:[?#]|$)/.test(url.slice(prefix.length)));
 
 app.use((req, res, next) => {
   const isAddonRoute = req.path === '/manifest.json' || 
@@ -940,19 +952,20 @@ app.use((req, res, next) => {
           if (!url || typeof url !== 'string') return url;
           // Relative stream URLs -> dedicated stream subdomain (if configured)
           for (const prefix of STREAM_PREFIXES) {
-            if (url.startsWith(prefix)) {
+            if (matchesRewritePrefix(url, prefix)) {
               modified = true;
               return `${effectiveStreamBaseUrl}${url}`;
             }
           }
           // Relative metadata & static URLs -> main addon domain
           for (const prefix of METADATA_PREFIXES) {
-            if (url.startsWith(prefix)) {
+            if (matchesRewritePrefix(url, prefix)) {
               modified = true;
               return `${currentBaseUrl}${url}`;
             }
           }
-          // Absolute URLs matching stream prefixes (e.g. localhost or legacy base)
+          // Absolute URLs matching known addon stream endpoints. Keep generic
+          // CDN /hls/ paths untouched; only /hls/resource belongs to the addon.
           const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
           if (streamMatch) {
             modified = true;

@@ -296,7 +296,7 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       cached.expiresAt = Date.now() - 100;
 
       // Upstream now fails
-      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockRejectedValueOnce(new Error('Gateway Timeout 504'));
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockRejectedValueOnce(Object.assign(new Error('Gateway Timeout 504'), { code: 'ETIMEDOUT' }));
 
       const second = await getOrFetchLiveManifest(url);
       expect(second).toBe(initialPlaylist + '\n');

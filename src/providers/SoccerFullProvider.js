@@ -1,6 +1,6 @@
 const { BASE_URL } = require('../config');
 const crypto = require('crypto');
-const undici = require('undici');
+const undici = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');

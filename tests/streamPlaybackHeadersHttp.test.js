@@ -6,13 +6,18 @@ jest.mock('../src/container', () => {
   const registry = new Registry();
   return { resolve: name => name === 'iframeDomainRegistry' ? registry : undefined };
 });
-jest.mock('impit', () => { throw new Error('fixture: native impit disabled'); }, { virtual: true });
+jest.mock('impit', () => { throw new Error('fixture: native impit disabled'); });
 jest.mock('undici', () => {
   const actual = jest.requireActual('undici'), agents = [];
   return { ...actual, _testAgents: agents, Agent: class extends actual.Agent {
     constructor(...args) { super(...args); agents.push(this); }
   } };
 });
+// This fixture exercises local HTTP header handling; guard behavior is covered separately.
+jest.mock('../src/services/SharedOutboundFetch', () => ({
+  fetchSharedOutbound: (url, options) => require('../src/impitClient').safeFetch(url, { ...options, guardExternal: false }),
+  closeSharedOutbound: async () => {}
+}));
 const { safeFetch } = require('../src/impitClient');
 const { verifyStreams } = require('../src/streams');
 const Parser = require('../src/services/M3U8ParserService');

@@ -883,11 +883,11 @@ class MatchAggregator {
     return merged;
   }
 
-  async _fetchProviderMatches(provider) {
+  async _fetchProviderMatches(provider, shouldRecord = () => true) {
     const startedAt = Date.now();
     try {
       const matches = await provider.getMatches();
-      if (this.providerHealthService) {
+      if (this.providerHealthService && shouldRecord()) {
         this.providerHealthService.recordResult(provider, {
           matches,
           durationMs: Date.now() - startedAt,
@@ -895,7 +895,7 @@ class MatchAggregator {
       }
       return matches;
     } catch (error) {
-      if (this.providerHealthService) {
+      if (this.providerHealthService && shouldRecord()) {
         this.providerHealthService.recordResult(provider, {
           matches: [],
           durationMs: Date.now() - startedAt,
@@ -1358,18 +1358,24 @@ class MatchAggregator {
       // top of runSync(). Observed on production 2026-10-27: sktech never settled,
       // the sync sat in "running" for 16 h and the catalogue stayed frozen. Bound
       // each provider so one hang costs that provider's data, not the refresh.
-      const PROVIDER_SYNC_TIMEOUT_MS = Math.max(5000, Number(process.env.PROVIDER_SYNC_TIMEOUT_MS || 180000));
+      const configuredTimeout = Number(process.env.PROVIDER_SYNC_TIMEOUT_MS || 180000);
+      const PROVIDER_SYNC_TIMEOUT_MS = Number.isFinite(configuredTimeout) ? Math.min(2147483647, Math.max(5000, configuredTimeout)) : 180000;
       const withProviderTimeout = (provider) => {
         let timer = null;
+        let current = true;
+        const startedAt = Date.now();
         const limit = new Promise((resolve) => {
           timer = setTimeout(() => {
-            const name = (provider && (provider.name || provider.id)) || 'unknown';
+            current = false;
+            const name = (provider && (provider.sourceName || provider.name || provider.id)) || 'unknown';
+            const error = new Error('provider sync timeout');
             console.warn('[MatchAggregator] provider ' + name + ' exceeded ' + PROVIDER_SYNC_TIMEOUT_MS + 'ms during sync; continuing without it');
-            resolve({ status: 'rejected', reason: new Error('provider sync timeout') });
+            try { this.providerHealthService?.recordResult(provider, { matches: [], durationMs: Date.now() - startedAt, error }); } catch (_) {}
+            resolve({ status: 'rejected', reason: error });
           }, PROVIDER_SYNC_TIMEOUT_MS);
           if (timer && typeof timer.unref === 'function') timer.unref();
         });
-        const work = this._fetchProviderMatches(provider).finally(() => { if (timer) clearTimeout(timer); });
+        const work = this._fetchProviderMatches(provider, () => current).finally(() => { if (timer) clearTimeout(timer); });
         return Promise.race([work, limit]);
       };
 
@@ -1466,18 +1472,37 @@ class MatchAggregator {
     // Entries within each priority tier retain their original relative order (stable sort).
     try {
       const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf'];
-      const CARRY_FORWARD_MAX = Number(process.env.CARRY_FORWARD_MAX || 600);
+      const configuredCarryMax = Number(process.env.CARRY_FORWARD_MAX || 600);
+      const CARRY_FORWARD_MAX = Number.isFinite(configuredCarryMax) ? Math.max(0, Math.trunc(configuredCarryMax)) : 0;
       const nowForCarry = Date.now();
       const retentionMs = 24 * 3600 * 1000;
 
       const usedProvider = (provider) => finalMatches.some((m) =>
         Array.isArray(m.sources) && m.sources.some((s) => s && s.source === provider));
 
-        let previous = [];
-        try {
-          previous = (this.cacheService.getMatchesReadOnly ? this.cacheService.getMatchesReadOnly() : this.cacheService.getMatches()) || [];
-        } catch (_) { previous = []; }
-        const presentIds = new Set(activeMatches.map((m) => m && m.id).filter(Boolean));
+      let previous = [];
+      try {
+        previous = (this.cacheService.getMatchesReadOnly ? this.cacheService.getMatchesReadOnly() : this.cacheService.getMatches()) || [];
+      } catch (_) { previous = []; }
+      // Keep canonical identities separate from aliases. A shared legacy alias
+      // must never overwrite a current canonical ID or select an arbitrary row.
+      const identityKeys = (m) => [...new Set([m && m.id, ...(Array.isArray(m && m.aliasIds) ? m.aliasIds : [])]
+        .filter((id) => id !== null && id !== undefined && String(id).trim() !== '').map(String))];
+      const indexIdentities = (rows) => {
+        const canonical = new Map();
+        const all = new Map();
+        const add = (map, key, row) => {
+          if (!map.has(key)) map.set(key, new Set());
+          map.get(key).add(row);
+        };
+        for (const row of rows) {
+          if (!row || !row.id) continue;
+          add(canonical, String(row.id), row);
+          for (const key of identityKeys(row)) add(all, key, row);
+        }
+        return { canonical, all };
+      };
+      const previousIdentities = indexIdentities(previous);
 
       for (const provider of CARRY_FORWARD_PROVIDERS) {
         // 'Provider answered' is not enough to decide health: a provider can
@@ -1514,8 +1539,8 @@ class MatchAggregator {
           return { bucket: 3, kickoff };
         };
 
-        const carried = previous.filter((m) => {
-          if (!m || !m.id || presentIds.has(m.id)) return false;
+        const eligiblePrevious = previous.filter((m) => {
+          if (!m || !m.id) return false;
           if (!Array.isArray(m.sources) || !m.sources.some((s) => s && s.source === provider)) return false;
           // Date-less rows are 24/7 channels: evergreen, always keep.
           //
@@ -1537,37 +1562,64 @@ class MatchAggregator {
           // fixtures survive the cap; other buckets keep insertion order (0).
           if (a.p.bucket === 1) return a.p.kickoff - b.p.kickoff;
           return 0;
-        }).map((d) => d.m).slice(0, CARRY_FORWARD_MAX);
+        }).map((d) => d.m);
+
+        // Resolve against the fresh rows before admitting standalone carry-over
+        // rows. Otherwise an old legacy ID becomes its own canonical match and
+        // hides the fresh (possibly ambiguous) fixtures sharing that ID.
+        const activeIdentities = indexIdentities(activeMatches);
+        const findCarryTarget = (prev) => {
+          const exact = activeIdentities.canonical.get(String(prev.id));
+          let target;
+          if (exact) {
+            if (exact.size !== 1 || previousIdentities.canonical.get(String(prev.id)).size !== 1) return { overlaps: true };
+            [target] = exact;
+          } else {
+            const candidates = new Set();
+            let overlaps = false;
+            for (const key of identityKeys(prev)) {
+              const matches = activeIdentities.all.get(key);
+              if (!matches) continue;
+              overlaps = true;
+              if (matches.size !== 1 || previousIdentities.all.get(key).size !== 1) return { overlaps: true };
+              for (const match of matches) candidates.add(match);
+            }
+            if (candidates.size !== 1) return { overlaps };
+            [target] = candidates;
+          }
+          // The old exact-ID shortcut predates stronger fixture IDs. Carrying a
+          // source must still satisfy event/date/session/channel identity even
+          // when a stale ID has been reused for a different meeting.
+          const before = this._precompute({ ...prev });
+          const current = this._precompute({ ...target });
+          if (!this._sameEventPre({ ...before, id: '' }, { ...current, id: '' })) return { overlaps: true };
+          return { overlaps: true, target };
+        };
+
+        const carried = [];
+        let sourcesCarried = 0;
+        for (const prev of eligiblePrevious) {
+          if (carried.length + sourcesCarried >= CARRY_FORWARD_MAX) break;
+          const { overlaps, target } = findCarryTarget(prev);
+          if (target) {
+            if (Array.isArray(target.sources) && !target.sources.some((s) => s && s.source === provider)) {
+              target.sources.push(...prev.sources.filter((s) => s && s.source === provider).map((s) => ({ ...s })));
+              sourcesCarried++;
+            }
+          } else if (!overlaps && previousIdentities.canonical.get(String(prev.id)).size === 1) {
+            carried.push(prev);
+          }
+        }
 
         if (carried.length > 0) {
           // Clone-on-admit: carried rows are live cache objects, and the
           // backfill/enrichment passes below mutate rows in activeMatches.
           activeMatches.push(...carried.map(cloneRowForSync));
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync; carried forward ${carried.length} entry(ies) from the previous cache.`);
-        } else {
+        } else if (sourcesCarried === 0) {
           console.warn(`[MatchAggregator] ${provider} returned nothing this sync and no valid entries were available to carry forward.`);
         }
 
-        // Backfill missing provider sources onto existing active matches that lost this source
-        const activeMatchMap = new Map();
-        for (const m of activeMatches) {
-          if (m && m.id) activeMatchMap.set(m.id, m);
-          if (m && Array.isArray(m.aliasIds)) {
-            for (const aid of m.aliasIds) if (aid) activeMatchMap.set(aid, m);
-          }
-        }
-        let sourcesCarried = 0;
-        for (const prev of previous) {
-          if (!prev || !Array.isArray(prev.sources)) continue;
-          const prevSources = prev.sources.filter(s => s && s.source === provider);
-          if (prevSources.length === 0) continue;
-          const curr = (prev.id && activeMatchMap.get(prev.id)) ||
-            (Array.isArray(prev.aliasIds) && prev.aliasIds.map(aid => activeMatchMap.get(aid)).find(Boolean));
-          if (curr && Array.isArray(curr.sources) && !curr.sources.some(s => s && s.source === provider)) {
-            curr.sources.push(...prevSources.map(s => ({ ...s })));
-            sourcesCarried++;
-          }
-        }
         if (sourcesCarried > 0) {
           console.warn(`[MatchAggregator] ${provider} source backfilled onto ${sourcesCarried} existing active match(es).`);
         }

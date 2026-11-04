@@ -5,14 +5,9 @@
  *
  * Upstream (`sports.highfly.to/<install-config>/stream/sport/<matchId>.json`) answers
  * with stream objects whose `url` is `https://papacito.cfd/m3u/<slug>/live.m3u8?ft=<JWT>`.
- * That JWT is bound to the IP that asked for it, so the ONLY safe pattern is:
- *
- *     mint  ->  fetch the playlist  ->  discard
- *
- * inside one request, on one connection pool. Anything that stores the minted URL for
- * later (a resolve cache, a player-held tile) resurrects the stale-credential problem:
- * papacito answers `200` with a well-formed playlist whose segments point at
- * `w1.papacito.cfd/leaf/stream_notice/...` - a honey-pot reel, not media.
+ * That JWT is bound to the IP that asked for it. Mint and manifest fetch use the same
+ * guarded Leaf egress policy. A bounded server-side cache avoids mint storms; the URL
+ * is never stored in a player tile and a denied manifest invalidates this cache.
  *
  * Failure handling:
  *
@@ -25,7 +20,8 @@
  * to allow immediate recovery without waiting up to 5 minutes.
  */
 
-const impitClient = require('../impitClient');
+const providerOutbound = require('./ProviderOutbound');
+const { validateLeafManifestUrl } = require('./GuardedEgressPolicy');
 
 const DEFAULT_ORIGIN = 'https://sports.highfly.to';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
@@ -36,13 +32,14 @@ const num = (v, dflt) => {
 };
 
 const MINT_TTL_MS = Math.min(10 * 60 * 1000, Math.max(5 * 1000, num(process.env.LEAF_MINT_TTL_MS, 60 * 1000)));
-const MINT_TIMEOUT_MS = Math.max(2000, num(process.env.LEAF_MINT_TIMEOUT_MS, 8000));
+const MINT_TIMEOUT_MS = Math.min(30000, Math.max(2000, num(process.env.LEAF_MINT_TIMEOUT_MS, 8000)));
+const MAX_MINT_BYTES = 256 * 1024;
 
 // Backoff: base delay per failure class, doubling per consecutive failure, capped.
 const NEG_BASE_MS = num(process.env.LEAF_MINT_BACKOFF_MS, 15 * 1000); // transport errors / 5xx
 const NEG_BASE_429_MS = 30 * 1000;   // explicit throttling
 const NEG_BASE_NOMEDIA_MS = 60 * 1000; // no signed URL
-const NEG_BASE_HONEYPOT_MS = 10 * 1000; // playlist came back stream_notice after re-mint
+const NEG_BASE_HONEYPOT_MS = 10 * 1000; // playlist denied or returned invalid media
 const NEG_MAX_MS = 5 * 60 * 1000;
 
 const CACHE_MAX = 500;
@@ -120,11 +117,13 @@ function apiBase() {
 const mintCache = new Map();
 /** @type {Map<string, {until: number, count: number, reason: string}>} failure backoff */
 const fails = new Map();
+const inFlightMints = new Map();
 
-const keyOf = (matchId, slug) => `${matchId}|${slug || ''}`;
+// A changed install or API kill switch must never reuse the previous credential.
+const keyOf = (matchId, slug, base = apiBase()) => JSON.stringify([base, matchId, slug || '']);
 
 function evictOldest(map) {
-  if (map.size >= CACHE_MAX) map.delete(map.keys().next().value);
+  if (map.size > CACHE_MAX) map.delete(map.keys().next().value);
 }
 
 function cooldownRemaining(matchId, slug) {
@@ -137,20 +136,22 @@ function isCoolingDown(matchId, slug) {
   return cooldownRemaining(matchId, slug) > 0;
 }
 
-function recordFailure(matchId, slug, reason, baseMs) {
-  const key = keyOf(matchId, slug);
+function recordFailure(matchId, slug, reason, baseMs, base = apiBase()) {
+  const key = keyOf(matchId, slug, base);
   const now = Date.now();
   const prev = fails.get(key);
   const count = prev && now < prev.until ? prev.count + 1 : 1;
   const delay = Math.min(baseMs * 2 ** (count - 1), NEG_MAX_MS);
   fails.set(key, { until: now + delay, count, reason });
   evictOldest(fails);
-  console.warn(`[LeafMint] ${key} cooling down ${Math.round(delay / 1000)}s after ${count} consecutive failure(s); last: ${reason}`);
+  // Neither install paths nor upstream exception messages belong in logs.
+  console.warn(`[LeafMint] cooling down ${Math.round(delay / 1000)}s after ${count} consecutive failure(s); class: ${reason}`);
   return delay;
 }
 
 function noteFailure(matchId, slug, opts = {}) {
-  return recordFailure(matchId, slug, opts.reason || 'honeypot', Math.max(1000, num(opts.baseMs, NEG_BASE_HONEYPOT_MS)));
+  const reason = typeof opts.reason === 'string' && /^ERR_[A-Z0-9_]{1,80}$/.test(opts.reason) ? opts.reason : 'ERR_LEAF_PLAYLIST';
+  return recordFailure(matchId, slug, reason, Math.max(1000, num(opts.baseMs, NEG_BASE_HONEYPOT_MS)));
 }
 
 function invalidate(matchId, slug) {
@@ -175,17 +176,20 @@ function isConfigured() {
  * @returns {Promise<string>} signed papacito playlist URL
  */
 async function mintUrl(matchId, slug, opts = {}) {
-  if (!matchId) throw new Error('leaf mint: matchId required');
-  if (!isConfigured()) throw new Error('leaf mint: no LEAF_INSTALL_CONFIG / LEAF_FREE_USER_ID');
+  if (typeof matchId !== 'string' || !matchId.trim() || matchId.length > 1024 || /[\u0000-\u001f\u007f]/.test(matchId) ||
+      (slug !== undefined && (typeof slug !== 'string' || slug.length > 256 || !/^[a-z0-9-]*$/i.test(slug)))) {
+    throw Object.assign(new Error('Leaf mint input is invalid'), { code: 'ERR_LEAF_MINT_INPUT' });
+  }
+  if (!isConfigured()) throw Object.assign(new Error('Leaf mint is not configured'), { code: 'ERR_LEAF_MINT_UNCONFIGURED' });
 
-  const key = keyOf(matchId, slug);
+  const base = apiBase();
+  const key = keyOf(matchId, slug, base);
 
   // If force is NOT set, honor active cooldown
   if (!opts.force) {
     const remaining = cooldownRemaining(matchId, slug);
     if (remaining > 0) {
-      const f = fails.get(key);
-      const err = new Error(`leaf mint: cooling down ${Math.ceil(remaining / 1000)}s after ${f ? f.count : '?'} failure(s) (last: ${f ? f.reason : 'unknown'})`);
+      const err = Object.assign(new Error('Leaf mint is cooling down'), { code: 'ERR_LEAF_MINT_COOLDOWN' });
       err.cooldown = true;
       err.retryAfterMs = remaining;
       throw err;
@@ -197,45 +201,74 @@ async function mintUrl(matchId, slug, opts = {}) {
     fails.delete(key);
   }
 
+  const flightKey = `${key}|${opts.force ? 'force' : 'normal'}`;
+  if (inFlightMints.has(flightKey)) return inFlightMints.get(flightKey);
+  // Set the promise before entering I/O, including synchronous dependency throws.
+  const pending = Promise.resolve().then(() => fetchMint(matchId, slug, opts, key, base))
+    .finally(() => inFlightMints.delete(flightKey));
+  inFlightMints.set(flightKey, pending);
+  return pending;
+}
+
+async function fetchMint(matchId, slug, opts, key, base) {
   const qs = opts.force ? `?cb=${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}` : '';
-  const url = `${apiBase()}/stream/sport/${encodeURIComponent(matchId)}.json${qs}`;
+  const url = `${base}/stream/sport/${encodeURIComponent(matchId)}.json${qs}`;
 
   let res;
   try {
-    res = await impitClient.safeFetch(url, {
+    res = await providerOutbound.safeFetch(url, {
       headers: { 'User-Agent': UA, Accept: 'application/json' },
       timeoutMs: MINT_TIMEOUT_MS,
+      maxBodyBytes: MAX_MINT_BYTES,
+      diagnosticOwner: 'provider',
     });
   } catch (err) {
-    recordFailure(matchId, slug, `transport: ${err.message}`, NEG_BASE_MS);
-    throw err;
+    const code = typeof err?.code === 'string' && /^[A-Z][A-Z0-9_]{1,80}$/.test(err.code) ? err.code : 'ERR_LEAF_MINT_TRANSPORT';
+    recordFailure(matchId, slug, code, NEG_BASE_MS, base);
+    throw Object.assign(new Error('Leaf mint request failed'), { code });
   }
 
   if (!res || !res.ok) {
     const status = res ? res.status : 0;
-    const err = new Error(`leaf mint HTTP ${status || 'no response'}`);
+    const err = Object.assign(new Error('Leaf mint upstream request failed'), { code: 'ERR_LEAF_MINT_STATUS' });
     err.upstreamStatus = status;
-    recordFailure(matchId, slug, `HTTP ${status}`, status === 429 ? NEG_BASE_429_MS : NEG_BASE_MS);
+    recordFailure(matchId, slug, `HTTP_${status}`, status === 429 ? NEG_BASE_429_MS : NEG_BASE_MS, base);
     throw err;
   }
 
-  const body = await res.json().catch(() => null);
+  if (res.bodyTruncated) {
+    recordFailure(matchId, slug, 'ERR_LEAF_MINT_BODY_LIMIT', NEG_BASE_MS, base);
+    throw Object.assign(new Error('Leaf mint metadata exceeds its body limit'), { code: 'ERR_LEAF_MINT_BODY_LIMIT' });
+  }
+  let body;
+  try { body = await res.json(); }
+  catch (_) {
+    recordFailure(matchId, slug, 'ERR_LEAF_MINT_BODY', NEG_BASE_MS, base);
+    throw Object.assign(new Error('Leaf mint returned invalid metadata'), { code: 'ERR_LEAF_MINT_BODY' });
+  }
   const streams = body && Array.isArray(body.streams) ? body.streams : [];
   const candidates = streams
     .map((s) => s && s.url)
-    .filter((u) => typeof u === 'string' && u.includes('papacito.cfd') && u.includes('?'));
+    .filter((u) => {
+      try { validateLeafManifestUrl(u); return Boolean(new URL(u).search); }
+      catch (_) { return false; }
+    });
 
-  const picked = (slug && candidates.find((u) => u.includes(`/m3u/${slug}/`))) || candidates[0];
+  // State identifies a particular channel. Never silently substitute the first
+  // channel when that slug disappeared from the official response.
+  const picked = slug
+    ? candidates.find(u => new URL(u).pathname === `/m3u/${slug}/live.m3u8`)
+    : candidates[0];
   if (!picked) {
-    const err = new Error('leaf mint: upstream served no signed papacito URL (retired install or pre-match fixture)');
+    const err = Object.assign(new Error('Leaf mint returned no signed media URL'), { code: 'ERR_LEAF_MINT_NO_MEDIA' });
     err.noMedia = true;
-    recordFailure(matchId, slug, 'no signed URL', NEG_BASE_NOMEDIA_MS);
+    recordFailure(matchId, slug, 'ERR_LEAF_MINT_NO_MEDIA', NEG_BASE_NOMEDIA_MS, base);
     throw err;
   }
 
   fails.delete(key);
-  evictOldest(mintCache);
   mintCache.set(key, { url: picked, at: Date.now() });
+  evictOldest(mintCache);
   return picked;
 }
 

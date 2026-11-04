@@ -1,20 +1,9 @@
-/** LSP-114: regression cases ported from PR #26 onto modern stable HLS router.
- * Container/provider resolution are mocked; no full addon is started.
- */
-const http = require('node:http');
-const net = require('node:net');
-jest.mock('../src/container', () => ({resolve:jest.fn()}));
-jest.mock('../src/streams', () => ({resolveSource:jest.fn()}));
-jest.mock('impit', () => {throw new Error('test: native impit disabled');}, {virtual:true});
-jest.mock('undici', () => {
-  const actual=jest.requireActual('undici');
-  const agents=[];
-  return {...actual,_testAgents:agents,Agent:class extends actual.Agent {
-    constructor(...args){super(...args);agents.push(this);}
-  }};
-});
-const express=require('express');
-const undici=require('undici');
+/** Actual HLS router, remint and cache; simulated upstream I/O, no sockets. */
+jest.mock('express',()=>({Router:()=>({get:jest.fn(),use:jest.fn(),options:jest.fn(),all:jest.fn()}),json:()=>()=>{},urlencoded:()=>()=>{}}));
+jest.mock('../src/container',()=>({resolve:jest.fn()}));
+jest.mock('../src/streams',()=>({resolveSource:jest.fn()}));
+jest.mock('../src/impitClient',()=>({safeFetch:jest.fn()}));
+const {safeFetch}=require('../src/impitClient');
 const container=require('../src/container');
 const {resolveSource}=require('../src/streams');
 const proxy=require('../src/manifestProxy');
@@ -22,53 +11,37 @@ const remint=require('../src/remint');
 const router=require('../src/routes/manifest');
 const master='#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000\nchild.m3u8\n';
 const media='#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nsegment.ts\n';
-const originalConnect=net.Socket.prototype.connect;
-const ports=new Set(),servers=[],gates=new Map(),events=[],clientRequests=[],longTimers=[];
-let upstream,addon,client,matches,timeoutSpy;
-async function listen(handler){
-  const s=http.createServer(handler);servers.push(s);
-  await new Promise((r,j)=>{s.once('error',j);s.listen(0,'127.0.0.1',r);});
-  ports.add(s.address().port);return 'http://127.0.0.1:'+s.address().port;
-}
+const gates=new Map(),events=[],clientRequests=[],longTimers=[];
+const upstream='https://cdn.example.test',addon='https://addon.example.test';
+let matches,timeoutSpy;
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 function url(target,rck,query={}){return addon+'/api/manifest?'+new URLSearchParams({url:target,...(rck===undefined?{}:{rck}),...query});}
 async function request(target,rck,query={}){
-  const res=await undici.request(url(target,rck,query),{dispatcher:client,headersTimeout:3000,bodyTimeout:3000});
-  return {status:res.statusCode,headers:res.headers,body:await res.body.text()};
+ const raw=url(target,rck,query),parsed=new URL(raw);clientRequests.push(raw);
+ const result={status:200,headers:{}};
+ const res={setHeader(k,v){result.headers[k.toLowerCase()]=v;},status(code){result.status=code;return this;},send(body){result.body=body;return this;}};
+ await router.get.mock.calls[0][1]({query:Object.fromEntries(parsed.searchParams),headers:{host:parsed.host},protocol:'https',url:parsed.pathname+parsed.search,originalUrl:parsed.pathname+parsed.search},res);
+ return result;
 }
 function identity(res){const line=res.body.split('\n').find(x=>!x.trim().startsWith('#')&&x.includes('/api/manifest?'));expect(line).toBeDefined();return new URL(line,addon).searchParams.get('rck');}
 function count(prefix){return events.filter(p=>p.startsWith(prefix)).length;}
 async function concurrent(path,keys){
-  let release;let jobs=[];gates.set(path,new Promise(r=>release=r));
-  try{
-    jobs=keys.map(key=>request(upstream+path,key));
-    const deadline=Date.now()+2000;
-    while((clientRequests.length<keys.length || events.length===0) && Date.now()<deadline)await pause(5);
-    expect(clientRequests).toHaveLength(keys.length);
-    expect(events.length).toBeGreaterThan(0);
-    release();return await Promise.all(jobs);
-  }finally{release();await Promise.allSettled(jobs);gates.delete(path);}
+ let release;let jobs=[];gates.set(path,new Promise(r=>release=r));
+ try{jobs=keys.map(key=>request(upstream+path,key));const deadline=Date.now()+2000;
+ while((clientRequests.length<keys.length||events.length===0)&&Date.now()<deadline)await pause(5);
+ expect(clientRequests).toHaveLength(keys.length);expect(events.length).toBeGreaterThan(0);release();return await Promise.all(jobs);
+ }finally{release();await Promise.allSettled(jobs);gates.delete(path);}
 }
-beforeAll(async()=>{
-  net.Socket.prototype.connect=function(...args){
-    const a=Array.isArray(args[0])?args[0][0]:args[0];
-    if(typeof a!=='object'||a.host!=='127.0.0.1'||!ports.has(Number(a.port)))throw new Error('TEST_NETWORK_BLOCKED');
-    return originalConnect.apply(this,args);
-  };
-  // Cleanup seam, not a fix for production remint timer retention (LSP-113).
-  const nativeTimeout=global.setTimeout;
-  timeoutSpy=jest.spyOn(global,'setTimeout').mockImplementation((fn,ms,...rest)=>{
-    const t=nativeTimeout(fn,ms,...rest);if(ms===remint.REMINT_TIMEOUT_MS)longTimers.push(t);return t;
-  });
-  upstream=await listen(async(req,res)=>{
-    events.push(req.url);const path=req.url.split('?')[0];
-    if(gates.has(path))await gates.get(path);
-    if(path==='/old/master.m3u8'){res.writeHead(403);res.end('expired');return;}
-    if(path==='/bad'){res.end('<html>not HLS</html>');return;}
-    res.end(path.endsWith('master.m3u8')?master:media);
-  });
-  const app=express();app.use((req,res,next)=>{clientRequests.push(req.originalUrl);next();});app.use(router);addon=await listen(app);
-  client=new undici.Agent();
+beforeAll(()=>{
+ const nativeTimeout=global.setTimeout;
+ timeoutSpy=jest.spyOn(global,'setTimeout').mockImplementation((fn,ms,...rest)=>{const t=nativeTimeout(fn,ms,...rest);if(ms===remint.REMINT_TIMEOUT_MS)longTimers.push(t);return t;});
+ safeFetch.mockImplementation(async(raw,opts)=>{
+  expect(opts.guardExternal).toBe(true);
+  const parsed=new URL(raw),path=parsed.pathname;events.push(path+parsed.search);
+  if(gates.has(path))await gates.get(path);
+  if(path==='/old/master.m3u8')return {ok:false,status:403};
+  return {ok:true,status:200,text:async()=>path==='/bad'?'<html>not HLS</html>':path.endsWith('master.m3u8')?master:media};
+ });
 });
 beforeEach(()=>{
   proxy.manifestCache.clear();proxy.manifestInFlight.clear();remint.remintCache.clear();events.length=0;clientRequests.length=0;
@@ -83,13 +56,7 @@ beforeEach(()=>{
   });
 });
 afterEach(()=>{for(const t of longTimers.splice(0))clearTimeout(t);expect(proxy.manifestInFlight.size).toBe(0);});
-afterAll(async()=>{
-  timeoutSpy?.mockRestore();for(const t of longTimers)clearTimeout(t);
-  await Promise.all(undici._testAgents.map(a=>a.destroy()));
-  await Promise.all(servers.map(s=>new Promise(r=>{s.closeAllConnections();s.close(r);})));
-  net.Socket.prototype.connect=originalConnect;
-  expect(servers.every(s=>!s.listening)).toBe(true);
-});
+afterAll(()=>{timeoutSpy?.mockRestore();for(const t of longTimers)clearTimeout(t);});
 
 test('negative result without rck must not block valid keyed recovery',async()=>{
   expect((await request(upstream+'/old/master.m3u8')).status).toBe(404);

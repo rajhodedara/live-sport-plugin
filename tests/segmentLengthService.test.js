@@ -18,7 +18,7 @@ describe('SegmentLengthService', () => {
   let service;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     service = new SegmentLengthService({ maxSize: 10, autoProbe: false });
   });
 
@@ -30,6 +30,50 @@ describe('SegmentLengthService', () => {
     expect(service.alignToTsPacket(1000)).toBe(940); // 188 * 5 = 940
     expect(service.alignToTsPacket(188)).toBe(188);
     expect(service.alignToTsPacket(100)).toBe(188); // floor guard
+  });
+
+  test('local guarded capacity denial releases the probe without recording a CDN failure', async () => {
+    safeFetch.mockRejectedValueOnce(Object.assign(new Error('Local capacity'), { code: 'ERR_OUTBOUND_CAPACITY' }));
+    const svc = new SegmentLengthService({ maxSize: 10 });
+    const url = 'https://cdn.example.com/capacity.image';
+    expect(await svc.probeContentLength(url)).toBeNull();
+    expect(svc.probeFailures.has(url)).toBe(false);
+    expect(svc.activeProbes).toBe(0); expect(svc.inFlightProbes.size).toBe(0);
+    expect(safeFetch).toHaveBeenCalledTimes(1);
+    svc.clear();
+  });
+
+  test.each([
+    ['bare GET', []],
+    ['gated GET', [403]],
+    ['gated HEAD after refused GET', [403, 200]],
+    ['bare HEAD', [200]],
+    ['gated HEAD after refused HEAD', [200, 403]],
+  ])('capacity denial on %s does not mark the CDN as failed', async (_label, statuses) => {
+    for (const status of statuses) safeFetch.mockResolvedValueOnce({ status, headers: fakeHeaders() });
+    safeFetch.mockRejectedValueOnce(Object.assign(new Error('Local capacity'), { code: 'ERR_OUTBOUND_CAPACITY' }));
+    const url = 'https://cdn.example.com/capacity-attempt.image';
+    expect(await service.probeContentLength(url)).toBeNull();
+    expect(safeFetch).toHaveBeenCalledTimes(statuses.length + 1);
+    for (const [, options] of safeFetch.mock.calls) {
+      expect(options).toEqual(expect.objectContaining({ guardExternal: true, attempts: 1, maxBodyBytes: 1024 }));
+    }
+    expect(service.probeFailures.has(url)).toBe(false);
+    expect(service.cache.has(url)).toBe(false);
+    expect(service.activeProbes).toBe(0);
+    expect(service.inFlightProbes.size).toBe(0);
+  });
+
+  test('HEAD refusal retries guarded HEAD with provider headers', async () => {
+    safeFetch.mockResolvedValueOnce({ status: 200, headers: fakeHeaders() })
+      .mockResolvedValueOnce({ status: 403, headers: fakeHeaders() })
+      .mockResolvedValueOnce({ status: 200, headers: fakeHeaders({ 'content-length': '1000042' }) });
+    const url = 'https://cdn.example.com/head-gated.image';
+    expect(await service.probeContentLength(url, { referer: 'https://provider.example/' })).toBe(1000000);
+    expect(safeFetch.mock.calls.map(([, options]) => options.method)).toEqual(['GET', 'HEAD', 'HEAD']);
+    expect(headerNames(safeFetch.mock.calls[1])).not.toContain('referer');
+    expect(safeFetch.mock.calls[2][1].headers.Referer).toBe('https://provider.example/');
+    expect(safeFetch.mock.calls.every(([, options]) => options.guardExternal === true)).toBe(true);
   });
 
   test('returns cached length if available and not expired', () => {

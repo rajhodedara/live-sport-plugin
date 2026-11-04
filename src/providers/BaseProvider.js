@@ -6,7 +6,7 @@ if (process.env.CF_PROXY_URL) {
 
 // Safe impit wrapper — falls back to undici when impit native binary is
 // unavailable (ARM64 VPS, Alpine/musl Linux, certain Windows Server builds).
-const { safeFetch: _safeFetch } = require('../impitClient');
+const { safeFetch: _safeFetch } = require('../services/ProviderOutbound');
 
 // Pick a random proxy from the pool
 function getCfProxyUrl() {
@@ -120,6 +120,8 @@ class BaseProvider {
       signal: options.signal,
       timeoutMs: options.timeoutMs || 15000,
       attempts: options.attempts,
+      diagnosticOwner: options.diagnosticOwner,
+      maxBodyBytes: options.maxBodyBytes,
     };
 
     return await _safeFetch(url, reqOptions);

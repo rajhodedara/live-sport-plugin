@@ -1,4 +1,17 @@
+// These parser/extractor unit tests do not exercise or launch WASM workers.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in provider unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
+
+jest.mock('../src/services/ProviderOutbound', () => ({
+  request: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  safeFetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
+
 
 const HockeyReplaysProvider = require('../src/providers/HockeyReplaysProvider');
 const MatchAggregator = require('../src/services/MatchAggregator');

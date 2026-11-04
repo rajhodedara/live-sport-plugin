@@ -21,10 +21,9 @@
 
 process.env.NODE_ENV = 'test';
 
-jest.mock('../src/impitClient', () => ({
+jest.mock('../src/services/ProviderOutbound', () => ({
   safeFetch: jest.fn()
 }));
-const { safeFetch } = require('../src/impitClient');
 
 const DamiTvProvider = require('../src/providers/DamiTvProvider');
 const CircuitBreakerService = require('../src/services/CircuitBreakerService');
@@ -110,6 +109,30 @@ function makeProvider(opts = {}) {
   provider.fetchAllMatches = { fire: async () => opts.allPayload };
   return provider;
 }
+
+describe('DamiTV deployment opt-out', () => {
+  const original = process.env.DAMITV_ENABLED;
+  afterEach(() => {
+    if (original === undefined) delete process.env.DAMITV_ENABLED;
+    else process.env.DAMITV_ENABLED = original;
+  });
+  test('remains enabled when unset and when explicitly enabled', () => {
+    delete process.env.DAMITV_ENABLED;
+    expect(makeProvider().isEnabled()).toBe(true);
+    process.env.DAMITV_ENABLED = 'true';
+    expect(makeProvider().isEnabled()).toBe(true);
+  });
+  test('explicit false skips both catalog and playback without outbound calls', async () => {
+    process.env.DAMITV_ENABLED = 'false';
+    const provider = makeProvider();
+    provider.proxyFetch = jest.fn();
+    provider.fetchData = { fire: jest.fn() }; provider.fetchAllMatches = { fire: jest.fn() };
+    expect(await provider.getMatches()).toEqual([]);
+    expect(await provider.resolveStream('https://damitv.st/embed/?id=fixture', '', '')).toEqual([]);
+    expect(provider.fetchData.fire).not.toHaveBeenCalled(); expect(provider.fetchAllMatches.fire).not.toHaveBeenCalled();
+    expect(provider.proxyFetch).not.toHaveBeenCalled();
+  });
+});
 
 describe('DamiTvProvider.getMatches — fixtures', () => {
   test('keeps the league as property and the real kickoff for a scheduled fixture', async () => {

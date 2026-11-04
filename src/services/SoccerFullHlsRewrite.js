@@ -93,10 +93,15 @@ function rewriteSoccerFullPlaylist(body, manifestUrl, opts = {}) {
   }
 
   // #EXT-X-BYTERANGE requires protocol version 4.
-  if (injectedByteRange && versionLineIndex >= 0) {
-    const existing = parseInt(String(out[versionLineIndex]).split(':')[1], 10);
-    if (!Number.isFinite(existing) || existing < 4) {
-      out[versionLineIndex] = '#EXT-X-VERSION:4';
+  if (injectedByteRange) {
+    if (versionLineIndex < 0) {
+      const headerIndex = out.findIndex(line => line.trim() === '#EXTM3U');
+      out.splice(headerIndex + 1, 0, '#EXT-X-VERSION:4');
+    } else {
+      const existing = parseInt(String(out[versionLineIndex]).split(':')[1], 10);
+      if (!Number.isFinite(existing) || existing < 4) {
+        out[versionLineIndex] = '#EXT-X-VERSION:4';
+      }
     }
   }
 

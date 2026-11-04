@@ -61,10 +61,10 @@ afterAll(async () => {
 function stripped(result, origin) {
   for (const name of ['authorization', 'cookie', 'cookie2', 'proxy-authorization']) expect(result.headers[name]).toBeUndefined();
   expect(result.headers.host).toBe(new URL(origin).host);
-  expect(result.headers['x-fixture']).toBe('preserved');
-  // This fixed-name policy does not strip provider-specific token headers.
-  expect(result.headers['x-api-key']).toBe('provider-fixture');
-  expect(result.headers.referer).toBe('https://fixture.example/');
+  expect(result.headers['x-fixture']).toBeUndefined();
+  // Cross-origin redirects must also remove custom provider credentials.
+  expect(result.headers['x-api-key']).toBeUndefined();
+  expect(result.headers.referer).toBeUndefined();
 }
 test.each([
   ['object', h => h],

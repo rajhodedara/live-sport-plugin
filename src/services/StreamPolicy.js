@@ -14,28 +14,50 @@
  * `/api/dash` URLs, and the stream assembler drops any that still arrive
  * (cached entries, older call sites, future providers).
  *
- * Deliberately NOT in scope: `/api/manifest.mpd` and `/api/manifest?url=<mpd>`.
- * Those inject a BaseURL and strip protection, so the media segments are pulled
- * by the player straight from the CDN — only the manifest transits the addon.
- * They cost kilobytes, not gigabytes, and are handled by the 24/7 channel path.
+ * Manifest-only proxies are not media relays. Their actual target still decides
+ * whether a source is DASH and therefore excluded from the offered stream list.
+ * Proxied HLS must stay available even though it uses the same endpoint family.
  */
 
-const DASH_RELAY_PATH = /\/api\/dash(\/|\?|$)/i;
-const MPD_TARGET = /\.mpd(\?|#|$)/i;
+// Match parsed pathnames, never arbitrary query/fragment text. Optional leading
+// paths retain reverse-proxy installations such as /addon/api/manifest.
+const DASH_RELAY_PATH = /(?:^|\/)api\/dash(?:\/|$)/i;
+const MPD_TARGET = /\.mpd$/i;
+const MANIFEST_PROXY_PATH = /(?:^|\/)api\/manifest(?:\.m3u8|\.mpd)?$/i;
+const MAX_PROXY_DEPTH = 8;
+
+function inspectStreamTarget(stream) {
+  const result = { relay: false, dash: false };
+  if (!stream || typeof stream !== 'object') return result;
+  let target = String(stream.url || stream.streamUrl || stream._rawMpdUrl || '');
+  let base = 'https://stream-policy.invalid/';
+  const seen = new Set();
+
+  for (let depth = 0; target && depth < MAX_PROXY_DEPTH; depth++) {
+    let parsed;
+    try { parsed = new URL(target, base); } catch (_) { break; }
+    if (!['http:', 'https:'].includes(parsed.protocol) || seen.has(parsed.href)) break;
+    seen.add(parsed.href);
+    if (DASH_RELAY_PATH.test(parsed.pathname)) result.relay = true;
+    if (MPD_TARGET.test(parsed.pathname)) result.dash = true;
+    if (!MANIFEST_PROXY_PATH.test(parsed.pathname)) break;
+    // URLSearchParams performs exactly the normal outer query decoding; CDN
+    // signatures are never decoded again or reconstructed by this classifier.
+    target = parsed.searchParams.get('url');
+    base = parsed.href;
+  }
+  return result;
+}
 
 /** True when the playable bytes would transit this addon (the media relay). */
 function isRelayedDashStream(stream) {
-  if (!stream || typeof stream !== 'object') return false;
-  const url = String(stream.url || stream.streamUrl || stream._rawMpdUrl || '');
-  if (!url) return false;
-  return DASH_RELAY_PATH.test(url);
+  return inspectStreamTarget(stream).relay;
 }
 
 /** True when the stream is DASH in any form — unplayable natively, never offered. */
 function isDashStream(stream) {
   if (!stream || typeof stream !== 'object') return false;
-  const url = String(stream.url || stream.streamUrl || stream._rawMpdUrl || '');
-  if (url && MPD_TARGET.test(url)) return true;
+  if (inspectStreamTarget(stream).dash) return true;
   if (stream.clearkey) return true;
   if (String(stream.format || '').toLowerCase() === 'dash') return true;
   if (String(stream.type || '').toLowerCase().includes('dash')) return true;

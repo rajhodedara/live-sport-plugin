@@ -1,4 +1,17 @@
+// These parser/extractor unit tests do not exercise or launch WASM workers.
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: jest.fn(() => { throw new Error('Unexpected WASM execution in provider unit fixture'); }),
+  destroy: jest.fn(async () => {})
+}));
+
 'use strict';
+
+jest.mock('../src/services/ProviderOutbound', () => ({
+  request: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  safeFetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); }),
+  fetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); })
+}));
+
 
 const crypto = require('crypto');
 const FullRacesProvider = require('../src/providers/FullRacesProvider');
@@ -186,7 +199,7 @@ describe('FullRacesProvider', () => {
       const okHtml = `<html><body><div data-module="OKVideo" data-options="${mockDataOptions}"></div></body></html>`;
 
       // Mock undici.request for OK.ru
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       jest.spyOn(undici, 'request').mockResolvedValueOnce({
         statusCode: 200,
         body: {
@@ -249,7 +262,7 @@ describe('FullRacesProvider', () => {
       expect(decrypted.sources[0].url).toBe('https://sprintcdn.net/hls/master.m3u8');
 
       // Test extractByse end-to-end with mock API response
-      const undici = require('undici');
+      const undici = require('../src/services/ProviderOutbound');
       jest.spyOn(undici, 'request').mockResolvedValueOnce({
         statusCode: 200,
         body: {

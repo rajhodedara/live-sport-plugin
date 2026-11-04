@@ -1,5 +1,5 @@
 const http=require('node:http');const net=require('node:net');
-jest.mock('impit',()=>{throw new Error('test: native impit disabled');},{virtual:true});
+jest.mock('impit',()=>{throw new Error('test: native impit disabled');});
 jest.mock('undici',()=>{const actual=jest.requireActual('undici'),agents=[];return {...actual,_testAgents:agents,Agent:class extends actual.Agent{constructor(...args){super(...args);agents.push(this);}}};});
 const undici=require('undici');const {safeFetch}=require('../src/impitClient');
 let server,base;const originalConnect=net.Socket.prototype.connect;

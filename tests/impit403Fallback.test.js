@@ -41,6 +41,12 @@ const TARGET = 'https://messi.damitv.st/live-hls/channel/nfl-network/playlist.m3
 
 const FORBIDDEN = '<html><head><title>403 Forbidden</title></head></html>';
 
+beforeAll(() => {
+  // Fail before any request if another suite's virtual-module identity caused
+  // this fixture to select a different native implementation.
+  expect(require('../src/impitClient').getImpit()).toBeInstanceOf(impit.Impit);
+});
+
 /** What impit's fetch() resolves to. */
 function impitResponse(status, body) {
   return { status, headers: {}, arrayBuffer: async () => new TextEncoder().encode(body).buffer };

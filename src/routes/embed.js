@@ -6,6 +6,7 @@
  */
 const express = require('express');
 const router = express.Router();
+const { fetchSharedOutbound: guardedFetch } = require('../services/SharedOutboundFetch');
 
 // ─── /api/proxy-embed — CORS-safe embed HTML fetcher (SSRF-protected) ────────
 // Fetches the HTML of a sports embed page on behalf of the client browser.
@@ -61,7 +62,7 @@ router.get('/api/proxy-embed', async (req, res) => {
     };
     if (referer) headers['Referer'] = referer;
 
-    const upstream = await fetch(parsed.toString(), {
+    const upstream = await guardedFetch(parsed.toString(), {
       headers,
       signal: AbortSignal.timeout(12000),
       redirect: 'follow'
@@ -73,6 +74,11 @@ router.get('/api/proxy-embed', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.send(html);
   } catch (err) {
+    if (err.code === 'ERR_OUTBOUND_CAPACITY') {
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(503).json({ error: 'Outbound capacity temporarily exhausted' });
+    }
+    if (err.code === 'ERR_OUTBOUND_BLOCKED') return res.status(403).json({ error: 'Blocked outbound URL', reason: err.reason });
     console.error(`[proxy-embed] Fetch failed for ${parsed.hostname}: ${err.message}`);
     res.status(502).json({ error: 'Failed to fetch embed page', detail: err.message });
   }

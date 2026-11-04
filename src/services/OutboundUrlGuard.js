@@ -312,7 +312,7 @@ async function checkOutboundUrl(rawUrl, options = {}) {
     return { ok: false, reason: 'protocol_not_allowed', detail: parsed.protocol.replace(/:$/, '') };
   }
 
-  let hostname = parsed.hostname.toLowerCase();
+  let hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
   if (hostname.startsWith('[') && hostname.endsWith(']')) hostname = hostname.slice(1, -1);
   if (!hostname) {
     return { ok: false, reason: 'invalid_url', detail: 'missing hostname' };
@@ -349,6 +349,9 @@ async function checkOutboundUrl(rawUrl, options = {}) {
   }
 
   for (const address of addresses) {
+    if (!net.isIP(address)) {
+      return { ok: false, reason: 'invalid_dns_answer', detail: hostname };
+    }
     const label = classifyAddress(address);
     if (label) return { ok: false, reason: 'blocked_address', detail: `${address} (${label})` };
   }

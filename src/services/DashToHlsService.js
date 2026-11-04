@@ -24,7 +24,7 @@
 'use strict';
 
 const { XMLParser } = require('fast-xml-parser');
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('./ProviderOutbound');
 const { buildPolicy, assertAllowed } = require('./DashUpstream');
 
 // Akamai/CloudFront edges 403 Dalvik UAs on manifest paths; always present a

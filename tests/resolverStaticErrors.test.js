@@ -9,8 +9,9 @@ function fixture() {
   res.destroy = jest.fn(() => { res.destroyed = true; res.emit('close'); });
   const createReadStream = jest.fn(() => stream);
   // ESM source adapter replaces import bindings and import.meta only; function logic is unchanged.
-  let source = fs.readFileSync(path.join(__dirname, '../resolver/src/http/static.js'), 'utf8');
-  source = source.replace(/^import .*\n/gm, '').replace(/import\.meta\.url/g, "'file:///fixture/resolver/src/http/static.js'").replace('export function serveStatic', 'function serveStatic');
+  const sourcePath = path.join(__dirname, '../resolver/src/http/static.js');
+  let source = fs.readFileSync(sourcePath, 'utf8');
+  source = source.replace(/^import .*\r?\n/gm, '').replace(/import\.meta\.url/g, () => JSON.stringify(require('url').pathToFileURL(sourcePath).href)).replace('export function serveStatic', 'function serveStatic');
   const context = { createReadStream, dirname: path.dirname, join: path.join, fileURLToPath: require('url').fileURLToPath };
   vm.createContext(context); vm.runInContext(source, context);
   return { res, stream, createReadStream, serveStatic: context.serveStatic };
@@ -57,7 +58,7 @@ test.each([
   ['/player.js', 'player.js', 'application/javascript; charset=utf-8'],
 ])('successful %s keeps its asset and MIME', (route, file, mime) => {
   const f = fixture(); expect(f.serveStatic(route, f.res)).toBe(true); f.stream.emit('open', 17);
-  expect(f.createReadStream).toHaveBeenCalledWith('/fixture/resolver/public/' + file);
+  expect(f.createReadStream).toHaveBeenCalledWith(path.join(__dirname, '../resolver/public', file));
   expect(f.res.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': mime, 'Cache-Control': 'no-store' });
   expect(f.stream.pipe).toHaveBeenCalledWith(f.res);
 });

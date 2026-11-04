@@ -1,7 +1,9 @@
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn() }));
 const LeafProvider = require('../src/providers/LeafProvider');
-const impitClient = require('../src/impitClient');
+const impitClient = require('../src/services/ProviderOutbound');
 const { BASE_URL } = require('../src/config');
 const leafState = require('../src/services/LeafState');
+const originalAppSecret = process.env.APP_SECRET;
 
 const TEST_CONFIG = Buffer.from(JSON.stringify({ freeUserId: 'test-user-id.abcdef' }))
   .toString('base64')
@@ -14,6 +16,7 @@ describe('LeafProvider Unit Tests', () => {
   let safeFetchSpy;
 
   beforeEach(() => {
+    process.env.APP_SECRET = 'fixture-private-leaf-state-key';
     // Leaf reads its per-install config from the environment (never hardcoded),
     // so every test has to provide one before the provider is constructed.
     process.env.LEAF_INSTALL_CONFIG = TEST_CONFIG;
@@ -28,6 +31,8 @@ describe('LeafProvider Unit Tests', () => {
     }
     delete process.env.LEAF_INSTALL_CONFIG;
     delete process.env.LEAF_API_URL;
+    if (originalAppSecret === undefined) delete process.env.APP_SECRET;
+    else process.env.APP_SECRET = originalAppSecret;
   });
 
   describe('buildApiUrl()', () => {
@@ -129,7 +134,7 @@ describe('LeafProvider Unit Tests', () => {
   });
 
   describe('resolveStream()', () => {
-    test('strictly isolates papacito.cfd streams and preserves upstream signed playback token', async () => {
+    test('strictly isolates papacito.cfd streams and publishes only signed application state', async () => {
       const mockStreamsResponse = {
         streams: [
           {
@@ -169,6 +174,8 @@ describe('LeafProvider Unit Tests', () => {
 
       // Must strictly filter out google.com (paywall redirect) and embed.st (streamed.su)
       expect(streams).toHaveLength(2);
+      expect(JSON.stringify(streams)).not.toContain('temporary_jwt_token');
+      expect(JSON.stringify(streams)).not.toContain('another_jwt');
 
       // Stream 1: 1080p FHD
       expect(streams[0].url).toMatch(new RegExp('^' + BASE_URL + '/api/leaf/m3u8/'));

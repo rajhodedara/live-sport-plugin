@@ -20,7 +20,8 @@
 
 const express = require('express');
 const router = express.Router();
-const impitClient = require('../impitClient');
+const providerOutbound = require('../services/ProviderOutbound');
+const { validateLeafManifestUrl: validateTargetUrl } = require('../services/GuardedEgressPolicy');
 const leafState = require('../services/LeafState');
 const leafMint = require('../services/LeafMint');
 
@@ -30,12 +31,23 @@ const leafMint = require('../services/LeafMint');
 // fetch. 2.5s was needlessly expensive upstream.
 const MANIFEST_CACHE_TTL_MS = Math.max(2500, Number(process.env.LEAF_PLAYLIST_TTL_MS) || 6000);
 const FALLBACK_TTL_MS = 60 * 1000; // 60s stale fallback in case upstream has transient timeout
+const MAX_MANIFEST_BYTES = 256 * 1024;
+const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const TRANSIENT_NETWORK_CODES = new Set([
+  'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
+]);
 
 const manifestCache = new Map(); // targetUrl -> { body, expiresAt, staleUntil }
 const inFlightFetches = new Map(); // targetUrl -> Promise<string>
 
 // Retain legacy session cache for backward compatibility / fallback
 const sessionCache = new Map();
+
+function isTransientFetchFailure(error) {
+  return error?.leafTransient === true || error?.name === 'TimeoutError' ||
+    TRANSIENT_NETWORK_CODES.has(error?.code);
+}
 
 /**
  * Sanitize and ensure all segment lines in upstream m3u8 body have absolute CDN URLs.
@@ -46,7 +58,7 @@ function sanitizeManifestBody(body, targetUrl) {
   }
 
   if (/_antipiracy|antipiracy|stream_notice/i.test(body)) {
-    throw new Error('Upstream returned anti-piracy trap');
+    throw Object.assign(new Error('Upstream returned denied media'), { code: 'ERR_LEAF_UPSTREAM_DENIED' });
   }
 
   let defaultCdnBase = 'https://w1.papacito.cfd';
@@ -121,6 +133,7 @@ function sanitizeManifestBody(body, targetUrl) {
  * Fetch live upstream manifest with single-flight request coalescing and micro-caching.
  */
 async function getOrFetchLiveManifest(targetUrl) {
+  validateTargetUrl(targetUrl);
   const now = Date.now();
   const cached = manifestCache.get(targetUrl);
 
@@ -130,24 +143,46 @@ async function getOrFetchLiveManifest(targetUrl) {
 
   let fetchPromise = inFlightFetches.get(targetUrl);
   if (!fetchPromise) {
-    fetchPromise = (async () => {
+    // Install the in-flight entry before a synchronous dependency failure can
+    // clear it, so a failed request cannot leave a permanently rejected entry.
+    fetchPromise = Promise.resolve().then(async () => {
       try {
-        const res = await impitClient.safeFetch(targetUrl, {
+        const res = await providerOutbound.safeFetch(targetUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
             'Referer': 'https://sports.highfly.to/',
             'Origin': 'https://sports.highfly.to',
             'Accept': '*/*'
           },
-          timeoutMs: 6000
+          timeoutMs: 6000,
+          maxBodyBytes: MAX_MANIFEST_BYTES,
+          diagnosticOwner: 'manifest'
         });
 
         if (!res || !res.ok) {
-          throw new Error(`HTTP ${res ? res.status : 'No response'}`);
+          throw Object.assign(new Error(`HTTP ${res ? res.status : 'No response'}`), {
+            code: 'ERR_LEAF_UPSTREAM_STATUS',
+            upstreamStatus: res ? res.status : 0,
+            leafTransient: Boolean(res && TRANSIENT_HTTP_STATUSES.has(res.status))
+          });
+        }
+        // Guarded outbound validates DNS/IP and every redirect before dialing.
+        // Also reject a final redirect outside Leaf's intended host scope.
+        if (res.url) {
+          try { validateTargetUrl(res.url); }
+          catch (_) {
+            throw Object.assign(new Error('Invalid Leaf manifest redirect'), { code: 'ERR_LEAF_MANIFEST_REDIRECT' });
+          }
+        }
+        if (res.bodyTruncated) {
+          throw Object.assign(new Error('Leaf manifest exceeds its body limit'), { code: 'ERR_LEAF_BODY_LIMIT' });
         }
 
         const rawBody = await res.text();
-        const sanitizedBody = sanitizeManifestBody(rawBody, targetUrl);
+        if (typeof rawBody !== 'string' || !/^\uFEFF?#EXTM3U(?:\r?\n|$)/.test(rawBody)) {
+          throw Object.assign(new Error('Upstream returned non-m3u8 body'), { code: 'ERR_LEAF_MANIFEST_BODY' });
+        }
+        const sanitizedBody = sanitizeManifestBody(rawBody, res.url || targetUrl);
 
         // LRU-style map eviction if cache grows beyond 1000 items
         if (manifestCache.size >= 1000) {
@@ -163,17 +198,19 @@ async function getOrFetchLiveManifest(targetUrl) {
 
         return sanitizedBody;
       } catch (err) {
-        // Fall back to stale cached manifest if available within fallback window
-        if (cached && Date.now() < cached.staleUntil) {
+        // Only transient transport/server failures may reuse a short-lived
+        // window. Authorization, guard and malformed-body failures stay errors.
+        if (cached && isTransientFetchFailure(err) && Date.now() < cached.staleUntil) {
           // Extend cache expiration by 2s backoff to avoid immediate retry stampede
           cached.expiresAt = Date.now() + 2000;
           return cached.body;
         }
+        manifestCache.delete(targetUrl);
         throw err;
       } finally {
         inFlightFetches.delete(targetUrl);
       }
-    })();
+    });
 
     inFlightFetches.set(targetUrl, fetchPromise);
   }
@@ -296,9 +333,10 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     return res.status(200).send(playlist);
   } catch (err) {
-    console.error(`[LeafManifest] Failed to resolve Leaf playlist: ${err.message}`);
+    // Fetch errors can contain signed URLs; log only the failure class.
+    console.error('[LeafManifest] Failed to resolve Leaf playlist:', err.code || 'ERR_LEAF_UPSTREAM');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(502).send(`Upstream Leaf Error: ${err.message}`);
+    return res.status(err.code === 'ERR_LEAF_MANIFEST_URL' ? 400 : 502).send('Failed to resolve Leaf playlist');
   }
 });
 
@@ -306,71 +344,48 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
  * Mint-at-fetch path: `/api/leaf/m3u8/<signed-state>/index.m3u8`.
  *
  * The state carries only `{m: matchId, s: slug}`. Nothing upstream-facing is stored, so
- * there is no credential to go stale: we mint immediately before fetching, on this
- * request's connection pool, and drop the result. A honey-pot answer (`stream_notice`)
- * means either a retired install or a minted-for-another-address token, and both are
- * recoverable by re-minting once with a cache-buster before giving up.
+ * upstream credentials are held only in a bounded server-side cache. A denied answer (`stream_notice`)
+ * is rejected and backed off. The route never generates a replacement identity or
+ * retries an upstream denial with a cache buster.
  */
 async function resolveViaState(stateToken) {
   const payload = leafState.verify(stateToken);
   if (!payload) {
-    const err = new Error('Invalid or expired leaf state');
-    err.statusCode = 400;
-    throw err;
+    throw Object.assign(new Error('Invalid or expired leaf state'), {
+      code: 'ERR_LEAF_STATE', statusCode: 400
+    });
   }
 
-  let minted;
-  try {
-    minted = await leafMint.mintUrl(payload.m, payload.s);
-  } catch (err) {
-    const e = new Error(err.message);
-    e.statusCode = 502;
-    e.retryAfterMs = err.retryAfterMs;
-    throw e;
-  }
-
+  const minted = await leafMint.mintUrl(payload.m, payload.s);
   try {
     return { playlist: await getOrFetchLiveManifest(minted), payload };
   } catch (err) {
-    if (!/anti-piracy|antipiracy|stream_notice/i.test(err.message)) throw err;
-    // Honey-pot: the minted token does not match this egress (or the install is
-    // retired). Re-mint at most once - mintUrl honours the backoff window even when
-    // forcing, so a flapping egress cannot turn this into a retry storm - and if the
-    // fresh token still gets the notice reel, record it and back off.
-    leafMint.invalidate(payload.m, payload.s);
-    let fresh;
-    try {
-      fresh = await leafMint.mintUrl(payload.m, payload.s, { force: true });
-    } catch (mintErr) {
-      mintErr.statusCode = 502;
-      throw mintErr;
+    // An upstream denial or invalid body is not permission to bypass it by
+    // re-minting with a cache buster. Discard that credential and back off.
+    if (!isTransientFetchFailure(err)) {
+      leafMint.invalidate(payload.m, payload.s);
+      leafMint.noteFailure(payload.m, payload.s, {
+        reason: err?.code || 'ERR_LEAF_PLAYLIST'
+      });
     }
-    try {
-      return { playlist: await getOrFetchLiveManifest(fresh), payload, reminted: true };
-    } catch (err2) {
-      if (/anti-piracy|antipiracy|stream_notice/i.test(err2.message)) {
-        leafMint.noteFailure(payload.m, payload.s, { reason: 'honeypot after re-mint' });
-      }
-      throw err2;
-    }
+    throw err;
   }
 }
 
 router.get(['/api/leaf/m3u8/:state/index.m3u8', '/api/leaf/m3u8/:state'], async (req, res) => {
   try {
-    const { playlist, payload, reminted } = await resolveViaState(req.params.state);
+    const { playlist } = await resolveViaState(req.params.state);
     if (!playlist) throw new Error('empty playlist');
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    if (reminted) res.setHeader('X-Leaf-Reminted', '1');
     return res.status(200).send(playlist);
   } catch (err) {
     const status = err.statusCode || 502;
-    if (status >= 500) console.warn(`[LeafManifest] state route failed: ${err.message}`);
+    if (status >= 500) console.warn('[LeafManifest] state route failed:', err.code || 'ERR_LEAF_UPSTREAM');
     if (err.retryAfterMs) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))));
     res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(status).send(status === 400 ? 'Invalid leaf state' : `Upstream Leaf Error: ${err.message}`);
+    return res.status(status).send(status === 400 ? 'Invalid leaf state' : 'Failed to resolve Leaf playlist');
   }
 });
 

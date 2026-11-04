@@ -14,7 +14,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { safeFetch } = require('../impitClient');
+const { safeFetch } = require('./ProviderOutbound');
 
 // The committed SEED of curated crests. Read-only at runtime; it is the base
 // every instance starts from.

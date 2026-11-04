@@ -15,7 +15,7 @@
  * No new dependencies: fetches use undici (already in the dependency tree).
  */
 
-const { request } = require('undici');
+const { guardedRequest: request } = require('./GuardedOutbound');
 
 // Disable sharp/libvips's decoded-image operation cache. Measured on the live
 // server: every burst of image work left a permanent 15-22 MB anonymous block
@@ -154,7 +154,7 @@ async function fetchImage(rawUrl, attempts = 2) {
       }
       res.body.destroy();
       if (res.statusCode < 500 && res.statusCode !== 429) return { ok: false, bytes: 0 };
-    } catch (_) { /* retry */ }
+    } catch (err) { if (err && err.isFatal) return { ok: false, bytes: 0 }; }
   }
   return { ok: false, bytes: 0 };
 }

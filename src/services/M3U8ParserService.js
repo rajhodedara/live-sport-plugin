@@ -1,4 +1,4 @@
-const { request } = require('undici');
+const { request } = require('./ProviderOutbound');
 const m3u8Parser = require('m3u8-parser');
 
 class M3U8ParserService {

@@ -13,19 +13,22 @@
  *
  * Instead of the upstream URL we hand out OUR token: `{m: matchId, s: slug, t}` plus an
  * HMAC. The playlist route verifies it and mints a fresh upstream URL at the moment of
- * the request, so the upstream credential never leaves the server and is never reused.
+ * the request, so the initial upstream credential is not stored in a player tile.
  *
- * Secret resolution: LEAF_STATE_SECRET -> APP_SECRET -> a fixed dev fallback. The
- * fallback is deliberate (local dev must work), but production should set one of the
- * first two - a shared default would let anyone mint valid Leaf tiles.
+ * Secret resolution: LEAF_STATE_SECRET -> APP_SECRET. Workers must share the chosen
+ * private key. A missing key disables signed-state emission and resolution.
  */
 
 const crypto = require('crypto');
 
-const DEV_FALLBACK = 'leaf-state-dev-secret';
-
 function secret() {
-  return process.env.LEAF_STATE_SECRET || process.env.APP_SECRET || DEV_FALLBACK;
+  const key = process.env.LEAF_STATE_SECRET || process.env.APP_SECRET;
+  if (!key || typeof key !== 'string' || !key.trim()) {
+    throw Object.assign(new Error('Leaf state signing is not configured'), {
+      code: 'ERR_LEAF_STATE_UNCONFIGURED', statusCode: 503
+    });
+  }
+  return key;
 }
 
 function usingFallbackSecret() {
@@ -41,25 +44,40 @@ function mac(body) {
  * @returns {string} `<base64url(json)>.<hmac>`
  */
 function sign(payload) {
-  const body = Buffer.from(JSON.stringify({ ...payload, t: Date.now() })).toString('base64url');
+  if (!validFields(payload)) {
+    throw Object.assign(new Error('Invalid Leaf state payload'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
+  }
+  const body = Buffer.from(JSON.stringify({ m: payload.m, s: payload.s || '', t: Date.now() })).toString('base64url');
   return `${body}.${mac(body)}`;
 }
 
 /**
  * @param {string} token
- * @returns {{m: string, s?: string, t?: number}|null} payload, or null when the token
+ * @returns {{m: string, s?: string, t: number}|null} payload, or null when the token
  *          is malformed, tampered with, or older than MAX_AGE_MS
  */
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const MAX_TOKEN_LENGTH = 4096;
+
+function validFields(payload) {
+  return payload && typeof payload === 'object' && !Array.isArray(payload) &&
+    typeof payload.m === 'string' && payload.m.trim().length > 0 && Buffer.byteLength(payload.m, 'utf8') <= 1024 &&
+    !/[\u0000-\u001f\u007f]/.test(payload.m) &&
+    (payload.s === undefined || (typeof payload.s === 'string' &&
+      payload.s.length <= 256 && /^[a-z0-9-]*$/i.test(payload.s)));
+}
 
 function verify(token) {
-  if (!token || typeof token !== 'string') return null;
+  // Fail closed with an explicit configuration error even for otherwise valid
+  // tokens signed by another worker; never fall back to a public default key.
+  secret();
+  if (!token || typeof token !== 'string' || token.length > MAX_TOKEN_LENGTH) return null;
   const dot = token.lastIndexOf('.');
   if (dot <= 0) return null;
   const body = token.slice(0, dot);
   const given = token.slice(dot + 1);
+  if (!/^[A-Za-z0-9_-]+$/.test(body) || !/^[A-Za-z0-9_-]{24}$/.test(given)) return null;
   const expected = mac(body);
-  if (given.length !== expected.length) return null;
   if (!crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected))) return null;
   let payload;
   try {
@@ -67,8 +85,9 @@ function verify(token) {
   } catch {
     return null;
   }
-  if (!payload || typeof payload.m !== 'string' || !payload.m) return null;
-  if (payload.t && Date.now() - payload.t > MAX_AGE_MS) return null;
+  if (!validFields(payload) || !Number.isSafeInteger(payload.t) || payload.t <= 0) return null;
+  const age = Date.now() - payload.t;
+  if (age < 0 || age > MAX_AGE_MS) return null;
   return payload;
 }
 

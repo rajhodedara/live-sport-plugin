@@ -1,8 +1,11 @@
 jest.mock('../src/services/OutboundUrlGuard', () => ({ checkOutboundUrl: jest.fn(async () => ({ ok: true })) }));
 jest.mock('../src/container',()=>{const Registry=jest.requireActual('../src/services/IframeDomainRegistry');const registry=new Registry();return {resolve:name=>name==='iframeDomainRegistry'?registry:undefined};});
+jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: (...args) => require('../src/impitClient').safeFetch(...args), streamingFetch: (...args) => global.fetch(...args) }));
 jest.mock('../src/impitClient',()=>({safeFetch:jest.fn(),isImpitAvailable:()=>false,getImpit:()=>null}));
 const {safeFetch}=require('../src/impitClient');
+process.env.ENABLE_SPEED_PROBE = 'true';
 const {verifyStreams}=require('../src/streams');
+delete process.env.ENABLE_SPEED_PROBE;
 const M3U8ParserService=require('../src/services/M3U8ParserService');
 const parser=new M3U8ParserService();
 const good='#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:5,\nsegment.ts\n';

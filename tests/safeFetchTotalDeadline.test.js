@@ -1,5 +1,5 @@
 // Controlled-clock transport models; HTTP socket cancellation is tested separately.
-jest.mock('impit',()=>({Impit:jest.fn()}),{virtual:true});
+jest.mock('impit',()=>({Impit:jest.fn()}));
 jest.mock('undici',()=>({Agent:jest.fn().mockImplementation(()=>({})),request:jest.fn()}));
 let fetch,request,safeFetch;
 const url='https://fixture.example/live';

@@ -146,7 +146,7 @@ class WatchFootyProvider extends BaseProvider {
             } else if (s.url.includes('sportsembed.su') || s.url.includes('watchfooty.st/embed')) {
               let resolvedViaIframe = false;
               try {
-                const { safeFetch } = require('../impitClient');
+                const { safeFetch } = require('../services/ProviderOutbound');
                 const htmlRes = await safeFetch(s.url, {
                   headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',

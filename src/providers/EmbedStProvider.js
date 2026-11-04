@@ -39,15 +39,14 @@ class EmbedStProvider extends BaseProvider {
     const IFRAME_FALLBACK_DOMAINS = ['embedindia.st', 'embedindia.com', 'embedsport.xyz', 'sportsembed.su'];
     if (streams.length === 0 && !embedUrl.includes('sportsembed.su')) {
       try {
-        const { safeFetch } = require('../impitClient');
-        const dispatcher = new (require('undici').Agent)({ keepAliveTimeout: 15000, keepAliveMaxTimeout: 30000, connect: { timeout: 15000 } });
+        const { safeFetch } = require('../services/ProviderOutbound');
         const htmlRes = await safeFetch(embedUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
             'Referer': referer,
             'Accept': 'text/html'
           },
-          dispatcher,
+
           bodyTimeout: 6000,
           headersTimeout: 6000
         });
@@ -91,7 +90,7 @@ class EmbedStProvider extends BaseProvider {
               if (IFRAME_FALLBACK_DOMAINS.includes(iframeHost)) {
                 console.log(`[${this.name}] Detected iframe redirect -> ${iframeSrc} for ${matchTitle}. Resolving via iframe provider.`);
                 const iframeReferer = new URL(iframeSrc).origin + '/';
-                
+
                 if (iframeSrc.includes('embedindia') && this.embedIndiaProvider) {
                   const indiaStreams = await this.embedIndiaProvider.resolveStream(iframeSrc, matchCategory, matchTitle, { referer: iframeReferer });
                   if (indiaStreams.length > 0) {
@@ -103,7 +102,7 @@ class EmbedStProvider extends BaseProvider {
                     break;
                   }
                 }
-                
+
                 streams.push(new StreamEntity({
                   name: 'EmbedSt',
                   title: `${matchTitle} (Live)`,

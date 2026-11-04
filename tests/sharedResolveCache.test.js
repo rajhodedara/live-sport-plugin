@@ -1,7 +1,8 @@
+
 /**
  * Shared resolve cache integration tests.
  *
- * Boots the REAL resolver server (ESM, child process) on an ephemeral port,
+ * Boots the REAL resolver server (ESM, child process) on a fixed test port,
  * then drives two separate StreamResolveCache instances ("worker 0" and
  * "worker 1") against it and verifies the cross-worker behaviors:
  *   - worker 1 inherits worker 0's mint without re-minting
@@ -9,42 +10,30 @@
  *   - claim dedupe: a worker polling during another's mint inherits the result
  *   - graceful fallback: unreachable resolver degrades to local minting
  */
-const { spawn } = require('child_process');
 const path = require('path');
+const { createOwnedResolverFixture } = require('./fixtures/ownedResolverFixture');
 
 const PORT = 7099;
 const BASE = `http://127.0.0.1:${PORT}`;
 
-let resolverChild = null;
-
-async function waitHealthy(timeoutMs = 10000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      const r = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(1000) });
-      if (r.ok) return true;
-    } catch (_) {}
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  throw new Error('resolver did not become healthy');
-}
+const resolver = createOwnedResolverFixture({
+  port: PORT,
+  serverPath: path.join(__dirname, '..', 'resolver', 'src', 'server.js'),
+});
 
 beforeAll(async () => {
-  process.env.RESOLVER_PORT = String(PORT);
-  delete process.env.RESOLVE_CACHE_SHARED; // default: shared enabled
-  resolverChild = spawn(process.execPath, [path.join(__dirname, '..', 'resolver', 'src', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), HOST: '127.0.0.1' },
-    stdio: 'ignore',
-  });
-  await waitHealthy();
-});
+  // Require our child's listener and fresh cache API before exercising L2.
+  // A port collision fails setup with child stdout/stderr and exit diagnostics.
+  await resolver.start();
+}, 15000);
 
-afterAll(() => {
-  if (resolverChild) resolverChild.kill('SIGKILL');
-});
+afterAll(async () => { await resolver.dispose(); });
 
 describe('Shared resolve cache (worker 0 + worker 1 via resolver)', () => {
   const StreamResolveCache = require('../src/services/StreamResolveCache');
+
+  // Include the final outage scenario: its own stop must cause the transition.
+  beforeEach(() => resolver.assertRunning());
 
   test('worker 1 inherits worker 0’s mint without re-minting', async () => {
     const worker0 = new StreamResolveCache();
@@ -203,18 +192,16 @@ describe('Shared resolve cache (worker 0 + worker 1 via resolver)', () => {
   });
 
   test('unreachable resolver falls back to local minting', async () => {
-    process.env.RESOLVER_PORT = '7098'; // nothing listens here
-    try {
-      const worker = new StreamResolveCache();
-      let mints = 0;
-      const r = await worker.getOrCreate('cdnlive:match_fallback:s4', async () => {
-        mints++;
-        return [{ url: 'https://cdn.example/fallback.m3u8' }];
-      });
-      expect(mints).toBe(1);
-      expect(r[0].url).toBe('https://cdn.example/fallback.m3u8');
-    } finally {
-      process.env.RESOLVER_PORT = String(PORT);
-    }
+    // Keep this scenario last: stop and await our own listener's closure instead
+    // of assuming an unrelated port is unused. Teardown is idempotent.
+    await resolver.stop();
+    const worker = new StreamResolveCache();
+    let mints = 0;
+    const r = await worker.getOrCreate('cdnlive:match_fallback:s4', async () => {
+      mints++;
+      return [{ url: 'https://cdn.example/fallback.m3u8' }];
+    });
+    expect(mints).toBe(1);
+    expect(r[0].url).toBe('https://cdn.example/fallback.m3u8');
   });
 });

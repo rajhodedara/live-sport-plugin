@@ -16,6 +16,8 @@ const ROLLING_WINDOW_TOLERANCE_S = 90;
 // item shape (title instead of name, date in ms instead of starts_at in s).
 const MATCHES_ALL_URL = 'https://damitv.st/papi/matches/all';
 const EXTRACT_URL_BASE = 'https://damitv.st/papi/extract-url/';
+// Local pool saturation is not evidence of provider failure.
+const localCapacityFilter = error => error?.code === 'ERR_OUTBOUND_CAPACITY';
 const CHANNEL_ORIGIN = 'https://damitv.st';
 
 // Live fixtures never use the /embed/?id= wrapper: every source on them is a
@@ -63,7 +65,7 @@ class DamiTvProvider extends BaseProvider {
       const res = await this.proxyFetch(this.apiUrl, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    });
+    }, { errorFilter: localCapacityFilter });
 
     // Secondary feed for the 24/7 channels. Non-fatal: a failure here only
     // costs the 24/7 row, not the fixture schedule.
@@ -71,7 +73,7 @@ class DamiTvProvider extends BaseProvider {
       const res = await this.proxyFetch(MATCHES_ALL_URL, { headers: DAMITV_HEADERS, signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
-    });
+    }, { errorFilter: localCapacityFilter });
 
     // Cached hls token ({ tk, e }) shared by every channel resolve.
     this._hlsToken = null;
@@ -472,8 +474,11 @@ class DamiTvProvider extends BaseProvider {
     const streams = [];
     if (!this.isEnabled()) return streams;
 
-    const embedUrl = src.url || src.embedUrl || '';
-    if (!embedUrl || !embedUrl.startsWith('http')) return streams;
+    const embedUrl = src.url || src.embedUrl || sourceId;
+    if (typeof embedUrl !== 'string' || !embedUrl.startsWith('http')) {
+      console.info('[DamiTV] Extraction skipped', JSON.stringify({ reason: 'missing_embed_url' }));
+      return streams;
+    }
 
     // Channel feeds resolve with no HTML at all: mint a token, GET the playlist.
     const channel = this._channelFromEmbed(embedUrl);
@@ -489,24 +494,32 @@ class DamiTvProvider extends BaseProvider {
 
     // Nothing to play: neither a channel path nor a match id. Emitting the
     // web-player fallback here would advertise a stream that cannot exist.
-    if (!channel && !matchId) return streams;
+    if (!channel && !matchId) {
+      console.info('[DamiTV] Extraction skipped', JSON.stringify({ reason: 'missing_match_id' }));
+      return streams;
+    }
 
     // Wrapper pages still go through /papi/extract-url when it has something
     // to say. It currently answers {"success":false,"error":"no sources"} for
     // every id, so this is opportunistic and must not gate the channel path.
     if (streams.length === 0 && matchId) {
+      console.info('[DamiTV] Extraction started');
+      let extractPhase = 'fetch';
       try {
         const extractRes = await this.proxyFetch(`${EXTRACT_URL_BASE}${encodeURIComponent(matchId)}`, {
           headers: {
             'User-Agent': UA_CHROME131,
             'Referer': embedUrl
           },
-          signal: AbortSignal.timeout(8000)
+          timeoutMs: 11000,
+          signal: AbortSignal.timeout(11000)
         });
 
         if (extractRes.ok) {
+          extractPhase = 'parse';
           const extractData = await extractRes.json();
           if (extractData && extractData.success) {
+            console.info('[DamiTV] Extraction response', JSON.stringify({ success: true, hasHls: !!extractData.hlsUrl, hasSd: !!extractData.sdUrl }));
             for (const [field, resolution] of [['hlsUrl', 'HD'], ['sdUrl', 'SD']]) {
               const upstream = extractData[field];
               if (!upstream) continue;
@@ -524,9 +537,13 @@ class DamiTvProvider extends BaseProvider {
               streams.push(s);
             }
           }
+        } else {
+          console.warn(`[${this.name}] API extraction returned a non-success response`, JSON.stringify({ status: extractRes.status }));
         }
       } catch (err) {
-        console.warn(`[${this.name}] API extraction failed for ${matchId}, falling back to embed chain...`);
+        const kind = ['SyntaxError', 'TimeoutError', 'AbortError', 'TypeError'].includes(err?.name) ? err.name : 'Error';
+        const code = typeof err?.code === 'string' && /^(ERR_[A-Z0-9_]{1,64}|ETIMEDOUT|ECONNRESET|ABORT_ERR)$/.test(err.code) ? err.code : undefined;
+        console.warn(`[${this.name}] API extraction failed`, JSON.stringify({ phase: extractPhase, kind, ...(code ? { code } : {}) }));
       }
     }
 

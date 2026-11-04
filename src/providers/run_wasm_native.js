@@ -94,7 +94,8 @@ global.WebAssembly.instantiateStreaming = async (resp, importObject) => {
   return global.WebAssembly.instantiate(buffer, importObject);
 };
 
-const originalFetch = global.fetch;
+const { fetch: guardedFetch } = require(fs.existsSync(path.join(__dirname, 'services', 'ProviderOutbound.js'))
+  ? './services/ProviderOutbound' : '../services/ProviderOutbound');
 
 global.fetch = async (url, opts) => {
   const urlStr = typeof url === 'string' ? url : (url.url || url.href);
@@ -120,8 +121,6 @@ global.fetch = async (url, opts) => {
     const proxyUrl = targetOrigin + '/fetch';
     
     try {
-      const { Agent } = require('undici');
-      const keepAliveAgent = new Agent({ connect: { timeout: 30000 }, keepAliveTimeout: 15000, keepAliveMaxTimeout: 30000 });
       
       const fetchOpts = opts || (url.headers ? url : {});
       const reqHeaders = new Headers(fetchOpts.headers || {});
@@ -131,34 +130,19 @@ global.fetch = async (url, opts) => {
       reqHeaders.set('Content-Type', 'application/octet-stream');
       
       let response;
-      let impit = null;
-      try {
-        const { Impit } = require('impit');
-        impit = new Impit();
-      } catch (e) {
-        console.warn("[WASM] impit native addon not found, using originalFetch.");
-      }
       const headersObj = {};
       reqHeaders.forEach((v, k) => { headersObj[k] = v; });
 
       for (let attempt = 1; attempt <= 5; attempt++) {
         try {
-          if (impit) {
-            response = await impit.fetch(proxyUrl, {
-                method: fetchOpts.method || 'POST',
-                headers: headersObj,
-                body: reqBody ? Buffer.from(reqBody) : undefined
-            });
-          } else {
-            response = await originalFetch(proxyUrl, {
-                method: fetchOpts.method || 'POST',
-                headers: reqHeaders,
-                body: reqBody ? Buffer.from(reqBody) : undefined
-            });
-          }
+          response = await guardedFetch(proxyUrl, {
+            method: fetchOpts.method || 'POST', headers: headersObj,
+            body: reqBody ? Buffer.from(reqBody) : undefined,
+            profile: 'vanilla', attempts: 1
+          });
           break;
         } catch (e) {
-          if (attempt === 5) throw e;
+          if (e.isFatal || e.code === 'ERR_OUTBOUND_BLOCKED' || attempt === 5) throw e;
           await new Promise(r => setTimeout(r, 800 * attempt));
         }
       }

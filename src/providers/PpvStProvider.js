@@ -17,14 +17,25 @@ class PpvStProvider extends BaseProvider {
   async getMatches() {
     const matches = [];
     try {
-      const res = await this.proxyFetch('https://api.ppv.st/api/streams', {
+      const signal = AbortSignal.timeout(15000);
+      const requestOptions = {
         headers: {
           'User-Agent': UA,
           'Referer': 'https://ppv.st/',
           'Origin': 'https://ppv.st'
         },
-        signal: AbortSignal.timeout(10000)
-      });
+        signal,
+        diagnosticOwner: 'catalog'
+      };
+      let res;
+      try {
+        res = await this.proxyFetch('https://api.ppv.st/api/streams', requestOptions);
+      } catch (error) {
+        if (error?.code !== 'ERR_OUTBOUND_CAPACITY' || signal.aborted) throw error;
+        await new Promise(resolve => setTimeout(resolve, 250));
+        signal.throwIfAborted();
+        res = await this.proxyFetch('https://api.ppv.st/api/streams', requestOptions);
+      }
       if (!res.ok) return matches;
       const data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
       if (!data.success || !data.streams) return matches;

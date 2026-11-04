@@ -1,36 +1,25 @@
 'use strict';
 
-const http = require('http');
-const express = require('express');
+jest.mock('express', () => ({ Router: () => ({ get: jest.fn(), use: jest.fn(), options: jest.fn(), all: jest.fn() }), json: () => () => {}, urlencoded: () => () => {} }));
+jest.mock('../src/container', () => ({ resolve: jest.fn() }));
+jest.mock('../src/impitClient', () => ({ safeFetch: jest.fn() }));
+const { safeFetch: upstreamFetch } = require('../src/impitClient');
 const SkTechCrypto = require('../src/resolver/sktech/SkTechCrypto');
 const SkTechEmbedExtractor = require('../src/resolver/sktech/SkTechEmbedExtractor');
 const manifestRouter = require('../src/routes/manifest');
 
 describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
-  let server;
-  let serverPort;
-  let baseUrl;
-
-  beforeAll((done) => {
-    const app = express();
-    app.use(express.json());
-    app.use(manifestRouter);
-
-    server = http.createServer(app);
-    server.listen(0, '127.0.0.1', () => {
-      serverPort = server.address().port;
-      baseUrl = `http://127.0.0.1:${serverPort}`;
-      done();
-    });
-  });
-
-  afterAll((done) => {
-    if (server) {
-      server.close(done);
-    } else {
-      done();
-    }
-  });
+  const baseUrl = 'https://addon.example.test';
+  async function requestFixture(rawUrl, options = {}) {
+    const url = new URL(rawUrl);
+    const method = options.method || 'GET';
+    const calls = method === 'OPTIONS' ? manifestRouter.options.mock.calls : [...manifestRouter.get.mock.calls, ...manifestRouter.all.mock.calls];
+    const handler = calls.find(([paths]) => (Array.isArray(paths) ? paths : [paths]).includes(url.pathname))[1];
+    const result = { status: 200, headers: {}, body: null };
+    const res = { setHeader(k,v) { result.headers[k]=v; }, status(code) { result.status=code;return this; }, send(body) { result.body=body;return this; }, json(body) { result.body=JSON.stringify(body);return this; }, end() { return this; } };
+    await handler({query:Object.fromEntries(url.searchParams),body:options.body?JSON.parse(options.body):undefined,headers:{host:url.host},protocol:url.protocol.slice(0,-1),url:url.pathname+url.search,originalUrl:url.pathname+url.search},res);
+    return new Response(result.status === 204 ? null : result.body,{status:result.status,headers:result.headers});
+  }
 
   describe('SkTechCrypto.formatClearKey()', () => {
     test('normalizes comma-separated multi-keys (audio + video) into base64url', () => {
@@ -90,7 +79,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       };
       const token = Buffer.from(JSON.stringify(keyObj)).toString('base64url');
 
-      const res = await fetch(`${baseUrl}/api/clearkey/license?token=${encodeURIComponent(token)}`);
+      const res = await requestFixture(`${baseUrl}/api/clearkey/license?token=${encodeURIComponent(token)}`);
       expect(res.status).toBe(200);
       expect(res.headers.get('content-type')).toContain('application/json');
 
@@ -106,7 +95,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
     });
 
     test('supports OPTIONS preflight with 204 status', async () => {
-      const res = await fetch(`${baseUrl}/api/clearkey/license`, { method: 'OPTIONS' });
+      const res = await requestFixture(`${baseUrl}/api/clearkey/license`, { method: 'OPTIONS' });
       expect(res.status).toBe(204);
       expect(res.headers.get('access-control-allow-origin')).toBe('*');
     });
@@ -120,7 +109,7 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       };
       const token = Buffer.from(JSON.stringify(multiKeyObj)).toString('base64url');
 
-      const res = await fetch(`${baseUrl}/api/clearkey/license?token=${encodeURIComponent(token)}`, {
+      const res = await requestFixture(`${baseUrl}/api/clearkey/license?token=${encodeURIComponent(token)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ kids: ['keyId1', 'keyId2'], type: 'temporary' })
@@ -262,14 +251,13 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
   });
 
   describe('DASH Manifest Proxy Endpoint (/api/manifest.mpd)', () => {
-    let mockUpstreamServer;
-    let mockUpstreamPort;
-    let mockUpstreamUrl;
+    const mockUpstreamUrl = 'https://cdn.example.test/live/stream.mpd';
+    let mpdBody;
 
-    beforeAll((done) => {
-      const mockApp = express();
-      mockApp.get('/live/stream.mpd', (req, res) => {
-        const mpdBody = `<?xml version="1.0" encoding="UTF-8"?>
+    afterEach(() => jest.restoreAllMocks());
+
+    beforeAll(() => {
+        mpdBody = `<?xml version="1.0" encoding="UTF-8"?>
 <MPD xmlns="urn:mpeg:dash:schema:mpd:2011">
   <BaseURL>dash/</BaseURL>
   <Period id="0">
@@ -285,27 +273,12 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
     </AdaptationSet>
   </Period>
 </MPD>`;
-        res.setHeader('Content-Type', 'application/dash+xml');
-        res.send(mpdBody);
-      });
-
-      mockUpstreamServer = http.createServer(mockApp);
-      mockUpstreamServer.listen(0, '127.0.0.1', () => {
-        mockUpstreamPort = mockUpstreamServer.address().port;
-        mockUpstreamUrl = `http://127.0.0.1:${mockUpstreamPort}/live/stream.mpd`;
-        done();
-      });
-    });
-
-    afterAll((done) => {
-      if (mockUpstreamServer) {
-        mockUpstreamServer.close(done);
-      } else {
-        done();
-      }
     });
 
     test('rewrites relative BaseURL, strips Widevine/PlayReady, overwrites cenc Widevine PSSH, and injects ExoPlayer af78d30e UUID + cenc:default_KID', async () => {
+      // Formatting is tested with a synthetic public target and a mocked I/O
+      // seam. Private destinations remain rejected in guard boundary tests.
+      upstreamFetch.mockResolvedValue({ok:true,status:200,text:async()=>mpdBody});
       const keyObj = {
         keyId: 'a71918fcc2f12066f70b7c39b0e0dcf3',
         key: 'a5e35121d4f6f16694bea15334f14814'
@@ -313,13 +286,13 @@ describe('SK Tech DASH Manifest & ClearKey DRM Proxy System', () => {
       const token = Buffer.from(JSON.stringify(keyObj)).toString('base64url');
 
       const proxyUrl = `${baseUrl}/api/manifest.mpd?url=${encodeURIComponent(mockUpstreamUrl)}&token=${encodeURIComponent(token)}`;
-      const res = await fetch(proxyUrl);
+      const res = await requestFixture(proxyUrl);
       expect(res.status).toBe(200);
 
       const mpdText = await res.text();
 
       // 1. BaseURL resolved against upstream base
-      expect(mpdText).toContain(`<BaseURL>http://127.0.0.1:${mockUpstreamPort}/live/dash/</BaseURL>`);
+      expect(mpdText).toContain('<BaseURL>https://cdn.example.test/live/dash/</BaseURL>');
       expect(mpdText).not.toContain('<BaseURL>dash/</BaseURL>');
 
       // 2. Widevine & PlayReady stripped, and upstream Widevine PSSH inside cenc overwritten

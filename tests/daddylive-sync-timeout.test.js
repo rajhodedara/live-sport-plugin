@@ -116,6 +116,12 @@ describe('ceiling is coupled to the circuit breaker, never above it', () => {
     expect(loadHelper({ env: { DADDYLIVE_SYNC_TIMEOUT_MS: '9999' }, load: 900 })()).toBe(9999);
   });
 
+  test('fixed and scaled budgets cannot exceed the guarded transport limit', () => {
+    expect(loadHelper({ env: { DADDYLIVE_SYNC_TIMEOUT_MS: '60000' } })()).toBe(30000);
+    expect(loadHelper({ env: { SYNC_TIMEOUT_BASE_MS: '60000' }, load: 0 })()).toBe(30000);
+    expect(loadHelper({ env: { SYNC_TIMEOUT_BASE_MS: '-5' }, load: 0 })()).toBeGreaterThan(0);
+  });
+
   test('the breaker timeout is exported so this coupling cannot drift silently', () => {
     expect(typeof BREAKER_TIMEOUT_MS).toBe('number');
     expect(BREAKER_TIMEOUT_MS).toBeGreaterThan(0);

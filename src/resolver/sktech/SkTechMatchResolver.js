@@ -1,4 +1,5 @@
 'use strict';
+const { fetchUndici: fetch } = require('../../services/ProviderOutbound');
 
 const SkTechCrypto = require('./SkTechCrypto');
 const SkTechEmbedExtractor = require('./SkTechEmbedExtractor');
