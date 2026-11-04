@@ -41,6 +41,7 @@ const LeafProvider = require('./providers/LeafProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
+const HlsQualityProbe = require('./services/HlsQualityProbe');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -52,6 +53,11 @@ container.register({
   cacheService: asClass(CacheService).singleton(),
   circuitBreaker: asClass(CircuitBreakerService).singleton(),
   m3u8Parser: asClass(M3U8ParserService).singleton(),
+  // Measured quality for single-rendition HLS (TimStreams). Shared so its
+  // slug-keyed cache and 4-probe concurrency cap are process-wide.
+  // asValue, not asClass: the probe takes constructor options, not injected
+  // dependencies (same pattern as streamResolveCache above).
+  hlsQualityProbe: asValue(new HlsQualityProbe()),
   cronService: asClass(CronService).singleton(),
   matchAggregator: asClass(MatchAggregator).singleton(),
   streamScorer: asClass(StreamScoringService).singleton(),

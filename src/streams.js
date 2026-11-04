@@ -223,7 +223,10 @@ async function dispatchToProvider(sourceName, src, match) {
 
   if (sourceName === 'timstreams') {
     const provider = container.resolve('timStreamsProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title);
+    // `src` carries the upstream broadcaster label and the embed URL. Without it
+    // the row had no channel, and the provider re-fetched the whole schedule to
+    // recover the URL it was already given.
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'damitv') {
     const startedAt = Date.now();
     console.info('[DamiTV] Dispatch started');
@@ -589,6 +592,27 @@ function getBitrateLabel(bitrate) {
 }
 
 
+/**
+ * Fold a parsed playlist's declared quality onto a stream row.
+ *
+ * Master playlists declare RESOLUTION/BANDWIDTH, so they still win. Media
+ * playlists (single rendition) always parse to the generic 'HD' tag, which is
+ * not new information and must not erase a tier the provider declared or
+ * measured — TimStreams reads the real 2160p from the segment SPS.
+ *
+ * Exported for direct unit testing.
+ */
+function applyParsedPlaylistQuality(stream, parsedQuality) {
+  if (!stream || !parsedQuality) return;
+  if (parsedQuality.resolution) {
+    stream.resolution = parsedQuality.resolution;
+    if (parsedQuality.qualityTag) stream.quality = parsedQuality.qualityTag;
+  } else if (!stream.quality && !stream.resolution) {
+    stream.quality = parsedQuality.qualityTag || 'HD';
+  }
+  if (parsedQuality.bitrateTag) stream.bitrate = parsedQuality.bitrateTag;
+}
+
 // --- Stream Health Verification ---
 // Pings each direct stream once and drops dead ones (404/403/5xx, or 200 bodies
 // that are not M3U8). Web player links (no url or '/watch?') pass through
@@ -903,9 +927,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       if (!isMpd && !isMp4 && m3u8Parser && typeof m3u8Parser.parseManifestText === 'function') {
         const parsedQuality = m3u8Parser.parseManifestText(bodySample);
         if (parsedQuality) {
-          if (parsedQuality.qualityTag) s.quality = parsedQuality.qualityTag;
-          if (parsedQuality.resolution) s.resolution = parsedQuality.resolution;
-          if (parsedQuality.bitrateTag) s.bitrate = parsedQuality.bitrateTag;
+          // A media playlist (single rendition, no #EXT-X-STREAM-INF) always
+          // parses to the generic 'HD' tag. That is not new information: letting
+          // it win erased every provider-declared or measured tier — TimStreams
+          // reads the real 2160p/1080p from the segment SPS — so a 4K feed could
+          // never be labelled. A master playlist's declared RESOLUTION/BANDWIDTH
+          // still overrides everything, exactly as before.
+          applyParsedPlaylistQuality(s, parsedQuality);
         }
 
         if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe && !bodyTruncated) {
@@ -1859,6 +1887,7 @@ module.exports = {
   // Exported for direct unit testing of the resolution deduplication algorithm
   // without requiring a live container / IoC / match-cache setup.
   deduplicateResolutions,
+  applyParsedPlaylistQuality,
   formatChannelStreamTitle,
   KNOWN_LIVE_SOURCES,
   KNOWN_REPLAY_SOURCES

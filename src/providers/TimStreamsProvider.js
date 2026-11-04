@@ -4,10 +4,16 @@ const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+
 class TimStreamsProvider extends BaseProvider {
   constructor(opts) {
-    super(opts);
+    super(opts || {});
     this.name = 'TimStreams';
+    // Measured quality for single-rendition playlists (see HlsQualityProbe).
+    // Injected from the container; absent in unit tests, where the probe is
+    // skipped and rows keep the previous 'HD' fallback.
+    this.hlsQualityProbe = (opts && opts.hlsQualityProbe) || null;
     // Upstream moved to a new host: timst.top no longer resolves. The API
     // path and payload shape are unchanged, so only the host changes here.
     this.apiUrl = 'https://tim-streams.com/api/live-upcoming';
@@ -85,7 +91,11 @@ class TimStreamsProvider extends BaseProvider {
             return {
               source: 'timstreams',
               id: id,
+              // Upstream already names the broadcaster ("TNT Sports 1",
+              // "Sky Sports+", "Board 1"). Keep it on the source so the stream
+              // row can label the feed instead of showing only the event name.
               name: st.name || 'Stream',
+              channelName: st.name || 'Stream',
               url: st.url
             };
           });
@@ -208,84 +218,158 @@ class TimStreamsProvider extends BaseProvider {
     }
   }
 
-  async resolveStream(sourceId, matchCategory, matchTitle, streamNoParam = null, sourceName = 'timstreams') {
+  /**
+   * Resolve one TimStreams source into player rows.
+   *
+   * `src` is the catalog source object ({ id, name, url }) and carries the upstream
+   * broadcaster label ("TNT Sports 1", "Sky Sports+", "Board 3") that getMatches()
+   * stored from streams[].name. Without it the row had no channel at all — and the
+   * provider re-downloaded the entire 40-event schedule just to recover the embed URL.
+   */
+  async resolveStream(sourceId, matchCategory, matchTitle, src = null, sourceName = 'timstreams') {
     const streams = [];
-    const StreamEntity = require('../domain/StreamEntity');
+    const srcObj = src && typeof src === 'object' ? src : {};
+    const rowTitle = matchTitle || 'Live Event';
 
     try {
-      let embedUrls = [];
-      try {
-        const decoded = Buffer.from(sourceId, 'hex').toString('utf-8');
-        if (decoded.startsWith('http')) {
-           embedUrls = [{ name: 'Stream', url: decoded }];
-        }
-      } catch(e) {}
+      let embeds = [];
+      const srcChannel = this.formatChannelLabel(srcObj.name);
+      const srcUrl = typeof srcObj.url === 'string' ? srcObj.url
+        : (typeof srcObj.embedUrl === 'string' ? srcObj.embedUrl : '');
+      if (/^https?:\/\//i.test(srcUrl)) {
+        embeds = [{ name: srcChannel || 'Stream', channel: srcChannel, url: srcUrl }];
+      }
 
-      if (embedUrls.length === 0) {
+      if (embeds.length === 0) {
+        try {
+          const decoded = Buffer.from(sourceId, 'hex').toString('utf-8');
+          if (decoded.startsWith('http')) {
+            embeds = [{ name: 'Stream', channel: srcChannel, url: decoded }];
+          }
+        } catch (e) {}
+      }
+
+      if (embeds.length === 0) {
         const matches = await this.getMatches();
         const match = matches.find(m => m.id === `ts_${sourceId}` || m.sources.some(s => s.id === sourceId));
 
         if (match) {
           const specific = match.sources.find(s => s.id === sourceId && s.url);
-          if (specific) {
-            embedUrls = [{ name: specific.name || specific.id, url: specific.url }];
-          } else {
-            embedUrls = match.sources
-              .filter(s => s.url)
-              .map(s => ({ name: s.name || s.id, url: s.url }));
-          }
-        }
-      }
-
-      if (embedUrls.length === 0) {
-        embedUrls = [{ name: sourceId, url: `https://logic.icelanders.st/embed/${sourceId}` }];
-      }
-
-      for (const embed of embedUrls) {
-        let m3u8Url = null;
-        let referer = new URL(embed.url).origin;
-        
-        // 1. Try native decryption
-        const nativeResult = await this.extractM3u8(embed.url);
-        if (nativeResult) {
-            m3u8Url = nativeResult.m3u8;
-            referer = nativeResult.referer;
-        }
-
-        if (m3u8Url) {
-          console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${m3u8Url}`);
-          const { BASE_URL } = require('../config');
-          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(new URL(referer).origin)}`;
-            
-          streams.push(new StreamEntity({
-            name: 'TimStreams',
-            title: `TimStreams ${matchTitle}`,
-            url: proxyUrl,
-            behaviorHints: { 
-              notWebReady: true,
-              proxyHeaders: {
-                request: {
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
-                  'Referer': referer,
-                  'Origin': new URL(referer).origin
-                }
-              }
-            },
-            resolution: 'HD'
+          const list = specific ? [specific] : match.sources.filter(s => s.url);
+          embeds = list.map(s => ({
+            name: s.name || s.id,
+            channel: this.formatChannelLabel(s.channelName || s.name),
+            url: s.url
           }));
         }
-        
-        // Always add web fallback
-        streams.push(new StreamEntity({
-          name: `Nuvio Web Player`,
-          title: `TimStreams (${embed.name}) (Web)`,
-          externalUrl: `/watch?url=${encodeURIComponent(embed.url)}&title=${encodeURIComponent(matchTitle || 'Live Event')}`
-        }));
       }
+
+      if (embeds.length === 0) {
+        embeds = [{ name: sourceId, channel: srcChannel, url: `https://logic.icelanders.st/embed/${sourceId}` }];
+      }
+
+      // Each feed is an independent embed -> m3u8 -> quality chain. Running them
+      // together keeps the added probe cost at one probe, not one per feed.
+      const perEmbed = await Promise.all(embeds.map(embed => this.buildRowsForEmbed(embed, rowTitle)));
+      for (const rows of perEmbed) streams.push(...rows);
     } catch (err) {
       console.error(`[${this.name}] resolveStream failed for ${sourceId}:`, err.message);
     }
     return streams;
+  }
+
+  /**
+   * One embed URL -> the player rows for that feed (direct + web fallback).
+   */
+  async buildRowsForEmbed(embed, matchTitle) {
+    const StreamEntity = require('../domain/StreamEntity');
+    const rows = [];
+    const channel = this.formatChannelLabel(embed.channel || embed.name);
+
+    let referer = '';
+    try { referer = new URL(embed.url).origin; } catch (e) { referer = ''; }
+
+    const nativeResult = await this.extractM3u8(embed.url);
+    const m3u8Url = nativeResult ? nativeResult.m3u8 : null;
+    if (nativeResult && nativeResult.referer) referer = nativeResult.referer;
+
+    if (m3u8Url) {
+      console.log(`[${this.name}] Extracted M3U8 for ${matchTitle}: ${m3u8Url}`);
+      // A media playlist declares no quality, so measure the media itself. A null
+      // result keeps the previous behaviour (HD, no bitrate) instead of guessing.
+      const measured = await this.probeQuality(m3u8Url, referer);
+      const origin = referer ? new URL(referer).origin : '';
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`;
+
+      rows.push(new StreamEntity({
+        name: 'TimStreams',
+        // The parenthesised channel is what streams.js lifts into the row label
+        // (same shape Leaf uses). Without it the row showed no broadcaster at all.
+        title: channel ? `(${channel}) ${matchTitle}` : `TimStreams ${matchTitle}`,
+        url: proxyUrl,
+        channelName: channel || undefined,
+        canonicalChannel: channel || undefined,
+        resolution: measured && measured.resolution ? measured.resolution : 'HD',
+        quality: measured && measured.quality ? measured.quality : undefined,
+        bitrate: measured && measured.bitrate ? measured.bitrate : undefined,
+        behaviorHints: {
+          notWebReady: true,
+          proxyHeaders: {
+            request: {
+              'User-Agent': UA,
+              'Referer': referer,
+              'Origin': origin
+            }
+          }
+        },
+        // Explicit source: the row title no longer contains "TimStreams" once a
+        // channel is present, so the label lookup in streams.js needs this.
+        _source: 'timstreams'
+      }));
+    }
+
+    // Always add web fallback
+    rows.push(new StreamEntity({
+      name: `Nuvio Web Player`,
+      title: `TimStreams (${channel || embed.name}) (Web)`,
+      externalUrl: `/watch?url=${encodeURIComponent(embed.url)}&title=${encodeURIComponent(matchTitle || 'Live Event')}`,
+      channelName: channel || undefined,
+      _source: 'timstreams'
+    }));
+
+    return rows;
+  }
+
+  /**
+   * Measured resolution + bitrate for one media playlist. Never throws.
+   */
+  async probeQuality(manifestUrl, referer) {
+    if (!this.hlsQualityProbe || typeof this.hlsQualityProbe.probe !== 'function') return null;
+    try {
+      let origin;
+      try { origin = referer ? new URL(referer).origin : undefined; } catch (e) { origin = undefined; }
+      return await this.hlsQualityProbe.probe(manifestUrl, {
+        fetch: (url, opts) => this.proxyFetch(url, opts),
+        referer,
+        origin,
+        userAgent: UA
+      });
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Normalise the upstream feed label. Parentheses/brackets are stripped so they
+   * cannot break streams.js' first-parens channel extraction.
+   */
+  formatChannelLabel(raw) {
+    if (typeof raw !== 'string') return '';
+    return raw
+      .replace(/[()\[\]]/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 60);
   }
 }
 
