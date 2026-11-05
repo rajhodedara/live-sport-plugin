@@ -3,7 +3,8 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../services/ProviderOutbound');
 const leafState = require('../services/LeafState');
-const { normalizeConfigBlob } = require('../services/LeafMint');
+const leafMint = require('../services/LeafMint');
+const { normalizeConfigBlob } = leafMint;
 const { BASE_URL } = require('../config');
 const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 
@@ -35,6 +36,8 @@ class LeafProvider extends BaseProvider {
       process.env.LEAF_API_URL || process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID
     );
     this._installNagWarned = false;
+    this._streamCache = new Map();
+    this._inFlight = new Map();
 
     // Tri-state catalog health, same convention as DaddyLiveProvider's
     // lastScheduleOk. getMatches() answers [] for "nothing is live" AND for
@@ -86,11 +89,41 @@ class LeafProvider extends BaseProvider {
    * @param {Array} streamsList
    * @returns {boolean}
    */
+  static isRateLimit(streamsList) {
+    return (streamsList || []).some((st) => st && (
+      /rate limit/i.test(st.name || '') ||
+      /rate limit/i.test(st.title || '') ||
+      /too many stream requests/i.test(st.title || '')
+    ));
+  }
+
   static isInstallNag(streamsList) {
     return (streamsList || []).some((st) => st && (
-      /reinstall/i.test(st.name || '') ||
-      /\/configure\b/.test(st.url || '')
+      (/reinstall/i.test(st.name || '') || /\/configure\b/.test(st.url || '')) &&
+      !/rate limit/i.test(st.name || '') &&
+      !/rate limit/i.test(st.title || '')
     ));
+  }
+
+  static async probeStreamAlive(directUrl) {
+    if (!directUrl || typeof directUrl !== 'string') return false;
+    try {
+      const res = await impitClient.safeFetch(directUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+          'Referer': 'https://sports.highfly.to/',
+          'Accept': '*/*'
+        },
+        timeoutMs: 1500,
+        maxBodyBytes: 16 * 1024
+      });
+      if (res && (res.status === 403 || res.status === 404)) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
   }
 
   _warnInstallNag() {
@@ -226,15 +259,42 @@ class LeafProvider extends BaseProvider {
       return [];
     }
 
-    try {
-      if (this.fetchStreams && typeof this.fetchStreams.fire === 'function') {
-        return await this.fetchStreams.fire(targetId);
-      }
-      return await this._resolveStreamsInternal(targetId);
-    } catch (err) {
-      console.warn(`[${this.name}] Failed to resolve streams: ${err.code || 'ERR_LEAF_STREAMS'}`);
-      return [];
+    const cached = this._streamCache.get(targetId);
+    const ttlMs = Math.min(10 * 60 * 1000, Math.max(30 * 1000, Number(process.env.LEAF_STREAM_CACHE_TTL_MS) || 180 * 1000));
+    if (cached && Date.now() - cached.at < ttlMs) {
+      return cached.streams;
     }
+
+    if (this._inFlight.has(targetId)) {
+      return await this._inFlight.get(targetId);
+    }
+
+    const pending = (async () => {
+      try {
+        if (this.fetchStreams && typeof this.fetchStreams.fire === 'function') {
+          return await this.fetchStreams.fire(targetId);
+        }
+        return await this._resolveStreamsInternal(targetId);
+      } catch (err) {
+        console.warn(`[${this.name}] Failed to resolve streams: ${err.code || 'ERR_LEAF_STREAMS'}`);
+        if (cached && cached.streams && cached.streams.length > 0) {
+          return cached.streams;
+        }
+        return [];
+      } finally {
+        this._inFlight.delete(targetId);
+      }
+    })();
+
+    this._inFlight.set(targetId, pending);
+    const result = await pending;
+    if (result && result.length > 0) {
+      this._streamCache.set(targetId, { streams: result, at: Date.now() });
+      if (this._streamCache.size > 200) {
+        this._streamCache.delete(this._streamCache.keys().next().value);
+      }
+    }
+    return result;
   }
 
   async _resolveStreamsInternal(targetId) {
@@ -258,12 +318,21 @@ class LeafProvider extends BaseProvider {
     const data = await res.json();
     const streamsList = data && Array.isArray(data.streams) ? data.streams : [];
 
+    if (LeafProvider.isRateLimit(streamsList)) {
+      console.warn(`[${this.name}] Upstream stream rate limit hit for ${targetId}; backing off`);
+      const cached = this._streamCache.get(targetId);
+      if (cached && cached.streams && cached.streams.length > 0) {
+        return cached.streams;
+      }
+      return [];
+    }
+
     if (LeafProvider.isInstallNag(streamsList)) {
       this._warnInstallNag();
       return [];
     }
 
-    const resolved = [];
+    const candidates = [];
 
     for (const st of streamsList) {
       if (!st || typeof st.url !== 'string' || !st.url) continue;
@@ -278,11 +347,29 @@ class LeafProvider extends BaseProvider {
       const directUrl = st.url;
       const referer = 'https://sports.highfly.to/';
       const origin = 'https://sports.highfly.to';
-      // Hand out OUR token, never papacito's. The `ft` JWT carries the install uid and
-      // the IP that minted it, so putting it in a player-facing URL is what let a 4 h
-      // resolve cache outlive an 8 h credential (and leaked the credential to client
-      // logs besides). The route uses only a bounded server-side mint cache.
       const slug = (new URL(directUrl).pathname.match(/\/m3u\/([a-z0-9-]+)\/live\.m3u8/i) || [])[1] || '';
+
+      if (slug) {
+        leafMint.seed(targetId, slug, directUrl);
+      }
+
+      candidates.push({ st, directUrl, slug, referer, origin });
+    }
+
+    if (candidates.length === 0) return [];
+
+    // Probe candidate feeds in parallel; drop dead 403/404 feeds
+    const probeResults = await Promise.all(
+      candidates.map(async (c) => {
+        const isAlive = await LeafProvider.probeStreamAlive(c.directUrl);
+        return isAlive ? c : null;
+      })
+    );
+
+    const validCandidates = probeResults.filter(Boolean);
+    const resolved = [];
+
+    for (const { st, slug, referer, origin } of validCandidates) {
       const stateToken = leafState.sign({ m: targetId, s: slug });
       const manifestProxyUrl = `${BASE_URL}/api/leaf/m3u8/${stateToken}/index.m3u8`;
 

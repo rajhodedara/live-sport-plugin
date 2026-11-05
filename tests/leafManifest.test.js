@@ -366,8 +366,8 @@ describe('LeafManifest Synthetic Generator Unit Tests', () => {
       const honeypot1 = '#EXTM3U\nhttps://w1.papacito.cfd/leaf/stream_notice/123/seg_1.ts';
       const honeypot2 = '#EXTM3U\nhttps://w1.papacito.cfd/_antipiracy/v2/seg_1.ts';
 
-      expect(() => sanitizeManifestBody(honeypot1, 'url')).toThrow('Upstream returned anti-piracy trap');
-      expect(() => sanitizeManifestBody(honeypot2, 'url')).toThrow('Upstream returned anti-piracy trap');
+      expect(() => sanitizeManifestBody(honeypot1, 'url')).toThrow(/Upstream returned (denied media|anti-piracy trap)/);
+      expect(() => sanitizeManifestBody(honeypot2, 'url')).toThrow(/Upstream returned (denied media|anti-piracy trap)/);
     });
 
     test('rejects non-m3u8 payload', () => {

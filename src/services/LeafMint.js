@@ -154,6 +154,14 @@ function noteFailure(matchId, slug, opts = {}) {
   return recordFailure(matchId, slug, reason, Math.max(1000, num(opts.baseMs, NEG_BASE_HONEYPOT_MS)));
 }
 
+function seed(matchId, slug, url) {
+  if (!matchId || !url) return;
+  const key = keyOf(matchId, slug);
+  mintCache.set(key, { url, at: Date.now() });
+  fails.delete(key);
+  evictOldest(mintCache);
+}
+
 function invalidate(matchId, slug) {
   if (matchId === undefined) {
     mintCache.clear();
@@ -281,6 +289,6 @@ function stats() {
 }
 
 module.exports = {
-  mintUrl, invalidate, noteFailure, isCoolingDown, cooldownRemaining,
+  mintUrl, seed, invalidate, noteFailure, isCoolingDown, cooldownRemaining,
   isConfigured, stats, apiBase, normalizeConfigBlob, MINT_TTL_MS
 };
