@@ -226,7 +226,7 @@ class DaddyLiveProvider extends BaseProvider {
     // supplier (wideiptv.top -> cdn.hdm1.net), whose segments are served as
     // video/MP2T straight to the player, so it costs the addon no bandwidth.
     // Its other target (ksohls.ru) is dead and is skipped per host below.
-    this.folders = ['player', 'stream', 'watch', 'plus', 'casting', 'cast', 'hub'];
+    this.folders = ['cast', 'player', 'stream', 'watch', 'plus', 'casting', 'hub'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`
@@ -1039,7 +1039,6 @@ class DaddyLiveProvider extends BaseProvider {
                 headers: {
                   'User-Agent': UA,
                   'Referer': playerUrl,
-                  'Origin': base,
                   'Sec-Fetch-Dest': 'iframe',
                   'Sec-Fetch-Mode': 'navigate',
                   'Sec-Fetch-Site': 'cross-site',
