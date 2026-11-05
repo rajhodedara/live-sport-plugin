@@ -88,6 +88,11 @@ jobs:
 
             echo "==> Dependencies unchanged - skipping npm install (nothing kills workers)."
 
+            echo "==> Verifying candidate timezone data before build or cluster changes..."
+            export ICU_TIMEZONE_FILES_DIR="${ICU_TIMEZONE_FILES_DIR:-$PWD/.timezone-data/2026f-le}"
+            node scripts/prepare-timezone-data.cjs --directory "$ICU_TIMEZONE_FILES_DIR"
+            node scripts/check-timezone-runtime.cjs
+
             echo "==> Building distribution bundle (atomic staging to prevent SIGSEGV in live workers)..."
             rm -rf dist.next
             npx @vercel/ncc build src/index.js -o dist.next --minify -e sharp && npx -y copyfiles -f "src/providers/*.wasm" "src/providers/*.js" dist.next && node scripts/copy-guarded-worker-deps.js dist.next && npx -y copyfiles -u 2 "resolver/src/**/*" dist.next/src && node -e "require('fs').writeFileSync('dist.next/src/package.json', JSON.stringify({type:'module'},null,2))" && npx -y copyfiles -u 1 "public/**/*" dist.next/public && npx -y copyfiles -f "src/data/*.json" dist.next/data && npx -y copyfiles -f "src/data/*.json" dist.next/src/data

@@ -5,7 +5,7 @@
 # What it does, in order:
 #   1. Records health + the DaddyLive match count so the outcome is comparable.
 #   2. Pulls main (fast-forward only - never creates a merge commit).
-#   3. Builds into dist/ and ABORTS before touching PM2 if the build fails.
+#   3. Verifies a staged dist.next/ build, then promotes it before PM2 reload.
 #      This is the important part: a failed build must never reach reload,
 #      or you ship a broken addon while people are watching.
 #   4. Reloads with `pm2 reload` (rolling, zero-downtime in cluster mode).
@@ -152,17 +152,39 @@ else
   log "Skipping git pull (--no-pull)"
 fi
 
+# Prepare only the candidate data directory; existing verified files are not rewritten.
+# The application runtime must use this same directory (see ecosystem.config.js).
+log "Verify pinned ICU timezone data"
+export ICU_TIMEZONE_FILES_DIR="${ICU_TIMEZONE_FILES_DIR:-$REPO_DIR/.timezone-data/2026f-le}"
+"$NODE_BIN" scripts/prepare-timezone-data.cjs --directory "$ICU_TIMEZONE_FILES_DIR"
+"$NODE_BIN" scripts/check-timezone-runtime.cjs
+
 # ---- build -----------------------------------------------------------------
 log "npm run build"
-if ! npm run build > /tmp/nuvio-build.log 2>&1; then
+BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/nuvio-build.XXXXXX.log")"
+trap 'rm -f -- "$BUILD_LOG"' EXIT
+rm -rf dist.next
+if ! npm run build > "$BUILD_LOG" 2>&1; then
   warn "BUILD FAILED - the running app was NOT touched."
-  echo "---- last 40 lines of /tmp/nuvio-build.log ----"
-  tail -n 40 /tmp/nuvio-build.log
+  echo "---- last 40 lines of the candidate build log ----"
+  tail -n 40 "$BUILD_LOG"
   die "refusing to reload on a failed build"
 fi
 echo "build   : OK"
 
-[ -s dist/index.js ] || die "dist/index.js is missing or empty after build - not reloading"
+[ -s dist.next/index.js ] || die "dist.next/index.js is missing or empty after build - not reloading"
+"$NODE_BIN" --check dist.next/index.js || die "candidate JavaScript is invalid - not reloading"
+grep -q 'MATCHES_CACHE_PATH' dist.next/index.js || die "candidate has no MATCHES_CACHE_PATH branch - not reloading"
+
+# Rename complete trees only after every candidate check has passed. Existing
+# workers keep their mapped files; npm build must never rewrite their dist/.
+log "Promote verified candidate"
+rm -rf dist.prev
+if [ -e dist ]; then mv -T -- dist dist.prev; fi
+if ! mv -T -- dist.next dist; then
+  if [ -e dist.prev ] && [ ! -e dist ]; then mv -T -- dist.prev dist; fi
+  die "candidate promotion failed - not reloading"
+fi
 
 # ---- reload ----------------------------------------------------------------
 log "pm2 reload $PM2_NAME (rolling / zero-downtime)"
@@ -178,7 +200,7 @@ until health_ok; do
   TRIES=$((TRIES + 1))
   if [ "$TRIES" -ge 15 ]; then
     warn "Health did not recover within ~30s."
-    echo "Rollback: git reset --hard <previous-sha> && npm run build && pm2 reload $PM2_NAME --update-env"
+    echo "Previous bundle is retained at dist.prev; inspect worker health before choosing a rollback."
     echo "Logs    : pm2 logs $PM2_NAME --lines 60 --nostream"
     exit 1
   fi

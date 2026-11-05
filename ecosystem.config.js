@@ -14,6 +14,10 @@ module.exports = {
       node_args: '--expose-gc',
       env: {
         NODE_ENV: 'production',
+        // ICU reads this before a worker starts; prepare and verify this directory
+        // in the candidate checkout before an operator chooses to reload PM2.
+        ICU_TIMEZONE_FILES_DIR: process.env.ICU_TIMEZONE_FILES_DIR ||
+          require('node:path').join(__dirname, '.timezone-data', '2026f-le'),
         // ncc rewrites path.join(process.cwd(), 'data') at build time and drops
         // the "data" segment, so a bundle always resolves its cache to
         // <bundle dir>/matches_cache.json (i.e. dist/) regardless of the source.

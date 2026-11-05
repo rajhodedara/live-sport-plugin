@@ -26,7 +26,12 @@
     "bench:heap": "node --expose-gc tests/load/heap-benchmark.js",
     "bench:compare": "node scripts/run-branch-benchmark.js --multiplier 1.0",
     "bench:compare:full": "node scripts/run-branch-benchmark.js --multiplier 1.0 --scale 50000",
-    "bench:report": "node scripts/generate-bench-report.js"
+    "bench:report": "node scripts/generate-bench-report.js",
+    "timezone:prepare": "node scripts/prepare-timezone-data.cjs",
+    "check:timezone": "node scripts/check-timezone-runtime.cjs",
+    "check:timezone-release": "node scripts/check-timezone-data-release.cjs",
+    "prebuild": "npm run check:timezone",
+    "prebuild:local": "npm run check:timezone"
   },
   "dependencies": {
     "acorn": "^8.18.0",

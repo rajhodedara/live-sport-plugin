@@ -58,3 +58,4 @@ public/*.json
 
 
 .zcode/
+.timezone-data/

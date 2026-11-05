@@ -25,7 +25,7 @@ describe('parseTimezone — DST correctness (regression)', () => {
     expect(iso(parseTimezone('2026-11-01T03:30', 'America/New_York'))).toBe('2026-11-01T08:30:00.000Z');
   });
 
-  test('fall back in the southern hemisphere: 00:30 Australia/Sydney', () => {
+  test('before spring forward in the southern hemisphere: 00:30 Australia/Sydney', () => {
     expect(iso(parseTimezone('2026-10-04T00:30', 'Australia/Sydney'))).toBe('2026-10-03T14:30:00.000Z');
   });
 
@@ -72,7 +72,7 @@ describe('parseTimezone — explicit offsets are honoured verbatim', () => {
     expect(iso(parseTimezone('2026-09-20T17:00+0530', 'UTC'))).toBe('2026-09-20T11:30:00.000Z');
   });
 
-  test('sub-millisecond precision is preserved', () => {
+  test('millisecond precision is preserved', () => {
     expect(iso(parseTimezone('2026-09-20T17:00:00.500Z', 'UTC'))).toBe('2026-09-20T17:00:00.500Z');
   });
 });
@@ -121,4 +121,49 @@ describe('parseTimezone — invalid input returns null', () => {
       expect(() => parseTimezone(v, 'UTC')).not.toThrow();
     }
   });
+});
+
+describe('parseTimezone — independent global seasonal fixtures', () => {
+  // These fixed expectations were resolved from explicitly opened IANA2026f
+  // TZif files. They do not derive expected offsets from the runtime under test.
+  const fixture = require('./fixtures/timezone-seasonal.json');
+
+  test.each(fixture.cases)('$id ($zone)', ({ wall, zone, utc }) => {
+    expect(iso(parseTimezone(wall, zone))).toBe(utc);
+  });
+
+  test.each(fixture.cases.filter(item => item.classification !== 'ordinary'))(
+    'explicit UTC and numeric instants remain unambiguous at $id',
+    ({ zone, utc }) => {
+      const expected = Date.parse(utc);
+      expect(parseTimezone(utc, zone)).toBe(expected);
+      expect(parseTimezone(expected, zone)).toBe(expected);
+      expect(parseTimezone(`${utc.slice(0, -1)}+00:00`, zone)).toBe(expected);
+    }
+  );
+
+  test('fractional explicit offsets retain the supplied instant in a skipped hour', () => {
+    expect(iso(parseTimezone('2026-03-29T01:30:00.123+01:00', 'Europe/London')))
+      .toBe('2026-03-29T00:30:00.123Z');
+    expect(iso(parseTimezone('2026-11-01T01:30:00.999-05:00', 'America/New_York')))
+      .toBe('2026-11-01T06:30:00.999Z');
+  });
+
+  test.each(['UTC', 'America/Los_Angeles', 'Asia/Tokyo'])(
+    'wall-time parsing is independent of the host timezone %s', hostZone => {
+      const path = require('node:path');
+      const { execFileSync } = require('node:child_process');
+      const parserPath = path.resolve(__dirname, '../src/timezone.js');
+      const fixturePath = path.resolve(__dirname, 'fixtures/timezone-seasonal.json');
+      const script = [
+        "const { parseTimezone } = require(process.argv[1]);",
+        "const { cases } = require(process.argv[2]);",
+        'process.stdout.write(JSON.stringify(cases.map(item => parseTimezone(item.wall, item.zone))));'
+      ].join('\n');
+      const actual = JSON.parse(execFileSync(process.execPath, ['-e', script, parserPath, fixturePath], {
+        env: { ...process.env, TZ: hostZone }, encoding: 'utf8', timeout: 10000
+      }));
+      expect(actual).toEqual(fixture.cases.map(item => Date.parse(item.utc)));
+    }
+  );
 });

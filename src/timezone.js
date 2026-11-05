@@ -89,7 +89,10 @@ function _getDateFormatter(timeZone) {
  * solving the intended wall time against it.
  */
 function _zoneOffsetMs(utcMs, timeZone) {
-  const parts = _getFormatter(timeZone).formatToParts(new Date(utcMs));
+  // Intl's fields stop at seconds. Compare them with the same whole-second
+  // instant so a .123 input cannot become an offset ending in -123ms.
+  const utcSecondMs = Math.floor(utcMs / 1000) * 1000;
+  const parts = _getFormatter(timeZone).formatToParts(new Date(utcSecondMs));
 
   const p = {};
   parts.forEach(part => { p[part.type] = part.value; });
@@ -106,7 +109,7 @@ function _zoneOffsetMs(utcMs, timeZone) {
     parseInt(p.second, 10)
   );
 
-  return asUtc - utcMs;
+  return asUtc - utcSecondMs;
 }
 
 /**
@@ -129,6 +132,8 @@ function _zoneOffsetMs(utcMs, timeZone) {
 function _wallTimeToUtc(wallMs, timeZone) {
   const candidates = [];
   const seenOffsets = new Set();
+  let forwardInstant = null;
+  let forwardShift = Infinity;
 
   for (const probe of [wallMs - 86400000, wallMs, wallMs + 86400000]) {
     const offset = _zoneOffsetMs(probe, timeZone);
@@ -136,7 +141,20 @@ function _wallTimeToUtc(wallMs, timeZone) {
     seenOffsets.add(offset);
 
     const instant = wallMs - offset;
-    if (_zoneOffsetMs(instant, timeZone) === offset) candidates.push(instant);
+    const actualOffset = _zoneOffsetMs(instant, timeZone);
+    if (actualOffset === offset) {
+      candidates.push(instant);
+    } else {
+      // In a gap, using the earlier offset renders a wall clock later than
+      // requested by exactly the gap. This works for positive offsets and
+      // half-hour changes too; the naive instant's offset may already be the
+      // post-transition one and would shift the wall clock backward.
+      const shift = actualOffset - offset;
+      if (shift > 0 && shift < forwardShift) {
+        forwardInstant = instant;
+        forwardShift = shift;
+      }
+    }
   }
 
   if (candidates.length > 0) {
@@ -144,8 +162,9 @@ function _wallTimeToUtc(wallMs, timeZone) {
     return candidates[0]; // earliest wins for the ambiguous fall-back hour
   }
 
-  // Nonexistent wall time: keep the pre-transition offset (shifts forward).
-  return wallMs - _zoneOffsetMs(wallMs, timeZone);
+  // Nonexistent wall time: use the projection that shifts forward through the
+  // gap. null is retained if no supported projection could be resolved.
+  return forwardInstant;
 }
 
 // Memo for resolved parses: "<zone>\u0000<raw value>" -> result (number | null).

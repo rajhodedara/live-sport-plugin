@@ -1,0 +1,62 @@
+name: Timezone rules
+
+on:
+  pull_request:
+    paths:
+      - 'src/timezone.js'
+      - 'src/catalog.js'
+      - 'src/services/MinimalistPosterService.js'
+      - 'public/configure.html'
+      - 'config/timezone-data.json'
+      - 'scripts/*timezone*'
+      - 'tests/*Timezone*'
+      - 'tests/*timezone*'
+      - 'tests/fixtures/*timezone*'
+      - 'package*.json'
+      - 'Dockerfile'
+      - 'ecosystem.config.js'
+      - '.github/workflows/timezone-rules.yml'
+      - '.github/workflows/deploy.yml'
+      - 'scripts/deploy.sh'
+      - 'tests/deployTimezoneCandidate.test.js'
+  workflow_dispatch:
+  schedule:
+    - cron: '23 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  seasonal-regressions:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts --include=dev
+      - name: Prepare pinned official ICU timezone data
+        run: npm run timezone:prepare
+      - name: Check actual runtime and regional transitions
+        env:
+          ICU_TIMEZONE_FILES_DIR: ${{ github.workspace }}/.timezone-data/2026f-le
+          NODE_OPTIONS: --require=${{ github.workspace }}/tests/fixtures/pr59-offline-boundary.cjs
+        run: |
+          npm run check:timezone
+          node node_modules/jest/bin/jest.js --runInBand --runTestsByPath tests/timezone.test.js tests/timezoneRuntime.test.js tests/timezoneDataPreparation.test.js tests/timezoneCalendarPresentation.test.js tests/configureTimezoneSelection.test.js tests/configurePageWiring.test.js tests/deployTimezoneCandidate.test.js
+
+  official-release-monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts --include=dev
+      - name: Detect an official rule update for review
+        run: npm run check:timezone-release

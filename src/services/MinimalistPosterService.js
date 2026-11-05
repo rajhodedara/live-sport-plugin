@@ -423,7 +423,7 @@ function generateDateSvg(displayDate, count = 0, sportKey = null, shape = 'poste
 
   const dateObj = new Date(displayDate.includes('T') ? displayDate : `${displayDate}T00:00:00Z`);
   if (!isNaN(dateObj.getTime())) {
-    monthStr = dateObj.toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+    monthStr = dateObj.toLocaleDateString('en-US', { month: 'short', timeZone: 'UTC' }).toUpperCase();
     dayStr = String(dateObj.getUTCDate());
     yearStr = String(dateObj.getUTCFullYear());
   } else {
