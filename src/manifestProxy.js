@@ -93,7 +93,7 @@ async function fetchUpstreamManifest(targetUrl, referer, origin, { withResponseU
   );
   const userAgent = requestedUserAgent || (isVavoo
     ? 'MediaHubMX/2'
-    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36');
+    : 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36');
 
   const headers = {
     'Referer': referer || (isVavoo ? 'https://vavoo.to/' : 'https://embed.st/'),

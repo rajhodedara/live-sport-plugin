@@ -29,6 +29,14 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
       sources: [
         { source: 'daddylive', id: 'dlv_2', name: 'DaddyLive 2' }
       ]
+    },
+    {
+      id: 'test_manifest_event_ppvst',
+      title: 'Man City vs Liverpool',
+      category: 'football',
+      sources: [
+        { source: 'ppvst', id: 'ppv_1', name: 'PPV 1' }
+      ]
     }
   ];
 
@@ -41,8 +49,10 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
     });
 
     const resolveCache = container.resolve('streamResolveCache');
-    if (resolveCache && resolveCache._cache && typeof resolveCache._cache.clear === 'function') {
-      resolveCache._cache.clear();
+    if (resolveCache) {
+      if (resolveCache.entries && typeof resolveCache.entries.clear === 'function') resolveCache.entries.clear();
+      if (resolveCache.inFlight && typeof resolveCache.inFlight.clear === 'function') resolveCache.inFlight.clear();
+      if (resolveCache._cache && typeof resolveCache._cache.clear === 'function') resolveCache._cache.clear();
     }
 
     container.resolve('matchAggregator').syncMatches = async () => [];
@@ -50,7 +60,7 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
     container.resolve('cacheService').setMatches(testMatches);
   });
 
-  test('enforces notWebReady: false and removes proxyHeaders for /api/manifest streams', async () => {
+  test('enforces notWebReady: false and preserves bounded proxyHeaders for DaddyLive /api/manifest streams', async () => {
     jest.spyOn(container.resolve('daddyLiveProvider'), 'resolveStream').mockResolvedValue([
       {
         name: 'DaddyLive',
@@ -61,7 +71,8 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
           proxyHeaders: {
             request: {
               'Referer': 'https://wideiptv.top/',
-              'Origin': 'https://wideiptv.top'
+              'Origin': 'https://wideiptv.top',
+              'Cookie': 'secret=123'
             }
           }
         },
@@ -76,7 +87,39 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
     const dlv = res.streams.find(s => s.url && s.url.includes('/api/manifest'));
     expect(dlv).toBeDefined();
     expect(dlv.behaviorHints.notWebReady).toBe(false);
-    expect(dlv.behaviorHints.proxyHeaders).toBeUndefined();
+    expect(dlv.behaviorHints.proxyHeaders).toEqual({
+      request: {
+        'Referer': 'https://wideiptv.top/',
+        'Origin': 'https://wideiptv.top'
+      }
+    });
+  });
+
+  test('removes proxyHeaders for non-whitelisted /api/manifest streams', async () => {
+    jest.spyOn(container.resolve('ppvStProvider'), 'resolveStream').mockResolvedValue([
+      {
+        name: 'PPV.st',
+        title: 'PPV Stream 1',
+        url: 'https://nuviosports.xyz/api/manifest?url=https%3A%2F%2Fcdn.example.com%2Findex.m3u8',
+        behaviorHints: {
+          notWebReady: true,
+          proxyHeaders: {
+            request: {
+              'Referer': 'https://example.com/',
+              'Origin': 'https://example.com'
+            }
+          }
+        },
+        _source: 'ppvst'
+      }
+    ]);
+
+    const res = await handleStream('tv', 'nuvio_sport_test_manifest_event_ppvst', {});
+    expect(res).toBeDefined();
+    const st = res.streams.find(s => s.url && s.url.includes('/api/manifest'));
+    expect(st).toBeDefined();
+    expect(st.behaviorHints.notWebReady).toBe(false);
+    expect(st.behaviorHints.proxyHeaders).toBeUndefined();
   });
 
   test('enforces notWebReady: false and sets proxyHeaders for direct unproxied m3u8 streams', async () => {

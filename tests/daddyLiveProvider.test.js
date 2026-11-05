@@ -335,7 +335,13 @@ describe('DaddyLiveProvider', () => {
       expect(stream.title).toContain('A&E USA');
       expect(stream.url).toContain('/api/manifest?url=' + encodeURIComponent(mockStreamUrl));
       expect(stream.behaviorHints.notWebReady).toBe(false);
-      expect(stream.behaviorHints.proxyHeaders).toBeUndefined();
+      expect(stream.behaviorHints.proxyHeaders).toEqual({
+        request: {
+          'Origin': 'https://tiestep.top',
+          'Referer': 'https://tiestep.top/',
+          'User-Agent': expect.stringContaining('Chrome/132')
+        }
+      });
     });
 
     test('falls back to EmbedExtractorChain if _econfig is not present', async () => {

@@ -1,144 +1,129 @@
-# Project Guidelines & Agent Instructions
+# GEMINI.md - Nuvio Live Sports Plugin
 
-## Git Commit & GitHub Push Standards
-
-Whenever staging, committing, or pushing changes to Git/GitHub in this workspace, follow these standards:
-
-### 1. Mandatory Problem-Solution Commit Message
-Never create vague, one-line commit messages (e.g., "fix bug", "update code").
-Every commit message must be structured, descriptive, and follow the Conventional Commits format (`feat(...)`, `fix(...)`, `perf(...)`, `refactor(...)`).
-
-Every commit message **MUST** explicitly summarize:
-- **Problem:** The specific issue, bug, limitation, or requirement being addressed.
-- **Solution:** How the implementation resolves the problem.
-
-### 2. "Before & After" Section (When Applicable)
-Include an explicit **Before & After** breakdown **only when necessary** (e.g., performance optimizations, algorithmic overhauls, heavy refactoring, or benchmark-driven changes):
-- **Before:** Previous state, complexity, or bottleneck.
-- **After:** New state, improved complexity, or architectural design.
-- **Measured Impact:** Concrete benchmark/test metrics (latency, memory, throughput, pass counts).
-
-### Example Formats:
-
-#### Standard Commit (Feature / Fix):
-```text
-fix(stream): prevent websocket reconnect storm on network timeout
-
-Summary:
-- Problem: Dropped network connections triggered immediate unthrottled reconnect attempts, overwhelming the stream server and exhausting client sockets.
-- Solution: Implemented exponential backoff with jitter (500ms initial delay, 2x multiplier, capped at 10s) and a maximum retry threshold.
-
-Verification:
-- Added reconnection simulation unit tests (tests/streamReconnect.test.js)
-- All 14 tests green
-```
-
-#### Performance / Optimization Commit (With Before & After):
-```text
-perf(catalog): implement Schwartzian transform and O(1) cache indexing
-
-Summary:
-- Problem: Large catalogs (3,000+ items) suffered multi-second UI lag during sorting and provider lookups due to redundant regex evaluations and linear scans.
-- Solution: Precomputed sort keys via Schwartzian transform and indexed provider lookups in O(1) hash maps.
-
-Before & After:
-• Catalog Sorting:
-  - Before: O(N log N * K_regex) evaluates 80+ regexes (690 ms on 3,000 items)
-  - After:  O(N * K + N log N) Schwartzian transform (75 ms on 3,000 items)
-  - Impact: 89.1% faster CPU response
-
-• Stream Match Resolution:
-  - Before: Up to 4 consecutive linear scans through all matches (2,798 ms per 3,000 lookups)
-  - After:  O(1) Hash Map index lookups (_byId, _byAlias, _bySourceId) (152 ms per 3,000 lookups)
-  - Impact: 18.4x faster lookup throughput
-
-Verification:
-- Tested under 10,000 concurrent user mutations (tests/concurrencyStressAndIsolation.test.js)
-- 40 test suites, 592 tests passing (100% green)
-```
+Stremio/Nuvio live-sports addon. Node >= 22, **CommonJS**, Express 4 + stremio-addon-sdk, awilix
+DI. Prod: PM2 cluster (2x) + 7 Cloudflare Workers for byte traffic. **No database** - JSON files
+and in-process maps.
 
 ---
 
-## Behavioral Guidelines
+## 0. Zero-Exploration Directives
 
-Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
+Do **not** explore this repo to "get oriented". Read the index, then go straight to the file.
 
-**Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
+1. **First read, every session:** `.agents/context/ARCHITECTURE.md` - topology, request lifecycle,
+   entry points, state map, gotchas.
+2. **Before starting work:** `.agents/tracks/current_task.md` - what the last session left open.
+3. **Before changing deliberate behaviour:** `.agents/context/DECISIONS.md` - settled decisions.
+4. **Then** open only the files your task names; the per-directory `GEMINI.md` (section 2) carries
+   local conventions.
 
-### 1. Think Before Coding
+**Forbidden:** recursive grep / whole-tree file hunting; reading `dist*`, `node_modules/`,
+`review-checkouts/`, `scratch/`, `*.tar.gz`, `classes.dex`.
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+**Narrow search only:** one targeted `rg -n "symbol" src/` for a specific definition. If you
+cannot name the symbol, you are exploring - return to step 1.
 
-Before implementing:
-- State your assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### 2. Simplicity First
-
-**Minimum code that solves the problem. Nothing speculative.**
-
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-
-Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### 3. Surgical Changes
-
-**Touch only what you must. Clean up only your own mess.**
-
-When editing existing code:
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- If you notice unrelated dead code, mention it - don't delete it.
-
-When your changes create orphans:
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-The test: Every changed line should trace directly to the user's request.
-
-### 4. Goal-Driven Execution
-
-**Define success criteria. Loop until verified.**
-
-Transform tasks into verifiable goals:
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then make it pass"
-- "Refactor X" → "Ensure tests pass before and after"
-
-For multi-step tasks, state a brief plan:
-```text
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
-
-Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-**These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
-
+**Conflict rule:** code beats docs - if `ARCHITECTURE.md` is wrong, fix it in the same change.
 
 ---
 
-## Provider Architecture & Stream Implementation Standards
+## 1. Verified CLI Commands
 
-Whenever implementing, refactoring, or integrating a new streaming provider or resolver, the following rules are strictly enforced:
+| Purpose | Command |
+|---|---|
+| Build (staged, deploy shape) | `npm run build` -> `dist.next/` |
+| Build (in place, Docker) | `npm run build:local` -> `dist/` |
+| Run production | `npm start` (`node dist/index.js`) |
+| Run from source | `npm run dev` |
+| Full suite | `npm test` (284 files) |
+| **One test file** | `npm test -- tests/localRequest.test.js` |
+| Syntax-check a file | `node --check src/index.js` |
 
-### 1. Apply DSA Where Necessary (Algorithmic Rigor)
-Never write naive, brute-force algorithms on match or channel collections:
-- **$O(1)$ Hash Indexing:** Always index incoming provider channels and fixtures into `Map` or `Set` structures by normalized IDs, aliases, and source IDs. Never perform $O(N)$ linear scans or repeated `.find()` loops per request.
-- **Aggregator Integration:** New providers must integrate with `MatchAggregator`'s category bucketing and inverted token index (`tokenIndex`). Never introduce unbucketed $O(N^2)$ cross-provider pairwise comparisons.
-- **Precomputed Normalization (Schwartzian Principle):** Precompute text folding, diacritic removal, and regex classification ONCE at ingest. Never evaluate regexes or string normalizations inside comparators or inner loops.
-- **Single-Flight & LRU Caching:** Stream resolvers must hook into `StreamResolveCache` to enable single-flight request coalescing (preventing duplicate simultaneous scrapes) and LRU eviction.
+**Do not invent commands.** No `lint`, `format`, or `typecheck` script exists, and there is no
+ESLint/Prettier config; `tsconfig.json` is never invoked. `npx jest` does not resolve here - use
+`npm test -- <path>`. CI runs no tests: it builds on the VPS and gates on `node --check`.
+Resolver-backed `/api` routes return **503** unless a resolver transport is configured (D9).
 
-### 2. Zero Server Bandwidth Bleed Policy
-The Node.js server is a metadata and stream resolver, NOT a video CDN:
-- **Never Route Through `/api/hlschunk` or Byte Proxies:** New providers and streams must NEVER rewrite segment URLs to route through `/api/hlschunk`, `/api/fastmp4`, or `/api/mp4proxy`. These endpoints stream raw video bytes through the server, saturating network interfaces and burning outbound server bandwidth.
-- **Direct Client Playback:** Always emit direct stream URLs to the client with `behaviorHints.proxyHeaders` (e.g., `Referer`, `Origin`, `User-Agent`) so the user's video player fetches video directly from upstream CDNs.
-- **302 Redirects Over Byte Relaying:** If URL obfuscation, dynamic token rotation, or signing is required, issue an HTTP 302 redirect to the resolved CDN URL or pre-sign the token. Only proxy lightweight text manifests (`.m3u8` rewrites) if header injection by the player is completely impossible, but all segments inside must resolve directly to upstream CDNs.
+---
+
+## 2. Subsystem Routing Table
+
+| Directory | Purpose | Local rules |
+|---|---|---|
+| `src/` (root) | Entry, DI, manifest, catalog, streams, config | `.agents/context/ARCHITECTURE.md` |
+| `src/providers/` | Scrapers + `BaseProvider` contract + WASM decryptors | `src/providers/GEMINI.md` |
+| `src/services/` | Guarded egress, aggregation, caching, rewriting, artwork | `src/services/GEMINI.md` |
+| `src/routes/` | HTTP proxy/rewrite layer (byte vs text) | `src/routes/GEMINI.md` |
+| `src/domain/`, `src/data/` | Entities; tracked seed/asset JSON | `src/services/GEMINI.md` |
+| `tests/` | 284 Jest suites | `tests/GEMINI.md` |
+| `scripts/` | Ops, benchmarks, probes, build copy helper | `scripts/GEMINI.md` |
+| `resolver/` | ESM subprocess: handshake + WASM + curl | `resolver/GEMINI.md` |
+| `cloudflare-worker/` | Single-file Worker, deployed 7x | `cloudflare-worker/GEMINI.md` |
+
+---
+
+## 3. Inviolable Invariants
+
+**I1 - No bulk video bytes through this server.** Providers emit direct CDN URLs with
+`behaviorHints.proxyHeaders`, or a *text* manifest URL, or a 307 (`/api/hls/resource`). Never
+route media through `/api/hlschunk`, `/api/fastmp4`, `/api/mp4proxy`, `/api/dash/segment.mp4`.
+
+**I2 - Never hand-concatenate base URLs.** `BASE_URL` / `STREAM_BASE_URL` are frozen at module
+load in `src/config.js`. Use `BASE_URL` or `getRequestBaseUrl(req)`. SVG and `.m3u8` text bypass
+the JSON rewriter.
+
+**I3 - Providers are leaf nodes.** A provider returns entities; it must not read the cache, mutate
+global state, or mount routes. Side effects belong in `src/services/`.
+
+**I4 - Register it or it does not exist.** A new provider needs **all three**: a line in
+`src/container.js`, a slot in the aggregator, and a dispatch branch in `src/streams.js`.
+YAML providers load from `src/providers/yaml/`.
+
+**I5 - Identity is verified, never assumed.** An id or index hit is a *candidate*.
+`MatchAggregator._sameEventPre` decides; ids and aliases cannot override a date/session or
+squad contradiction. `aliasIds` has no length cap - do not grow it blindly.
+
+**I6 - O(1) per request.** Index matches/channels by normalized id and alias at ingest. Precompute
+normalization once (`_precompute`); never regex inside comparators or request loops. No O(N)
+`.find()` scans.
+
+**I7 - `dist/` is generated.** Never hand-edit it, never commit it. Edit `src/` and rebuild.
+
+**I8 - Relayed DASH stays off.** `StreamPolicy.isBlockedDashStream` drops ClearKey/relayed DASH by
+design, including nested `/api/manifest?url=…` forms (D2). Do not re-enable without an owner
+decision.
+
+**I9 - Filter order is load-bearing.** `/api` gates sit after the routers but before the SDK router
+in `src/index.js`; a route mounted past them silently 404s.
+
+**I10 - All external HTTP goes through the guarded egress stack.** Use `BaseProvider.proxyFetch` or
+`ProviderOutbound`; never `fetch`/`undici`/`impit` directly - that skips connect-time DNS
+validation and egress-proxy selection.
+
+---
+
+## 4. Work Rules
+
+- **Read before you write.** No edits inferred from filenames or memory.
+- **Baseline first.** Run the relevant tests before changing code; label pre-existing failures with
+  evidence.
+- **Surgical diffs only.** No opportunistic refactors, reformatting, or dead-code deletion. Every
+  changed line must trace to the request.
+- **Same-layer verification.** Changed `src/services/x.js`? Run its test file. A green new test does
+  not prove the suite is green.
+- **Report honestly.** State which commands ran and their output. Never write "should pass" as
+  "passed"; never delete, skip, or weaken a test to reach green.
+
+---
+
+## 5. Commits
+
+Follow `.agents/rules/git-commits.md` - Conventional Commits title, **Problem** / **Solution**,
+**Before & After** for performance or architecture changes, and a **Verification** line.
+
+---
+
+## 6. Handoff
+
+End every non-trivial session by writing `.agents/tracks/current_task.md` from
+`.agents/tracks/TEMPLATE_CHECKPOINT.md`; the next agent reads it as step 2.

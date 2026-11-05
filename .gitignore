@@ -58,3 +58,18 @@ public/*.json
 
 
 .zcode/
+
+# ─── Antigravity agent environment — VERSIONED ON PURPOSE ────────────────────
+# GEMINI.md routing, .agents/context/ (architecture map + decisions),
+# .agents/tracks/ (cross-chat handoff) and .agents/hooks.json are shared state:
+# every future agent and reviewer depends on them, so they belong in git.
+# Re-included explicitly so a future broad ignore rule cannot silently drop them.
+!.agents/
+!.agents/**
+
+# Transient local state inside .agents/ — never commit these.
+.agents/**/tmp/
+.agents/**/.cache/
+.agents/**/*.local.*
+.agents/**/*.log
+.agents/**/node_modules/

@@ -592,9 +592,16 @@ class DaddyLiveProvider extends BaseProvider {
     return new StreamEntity({
       name: 'DaddyLive',
       title: channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`,
-      url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`,
+      url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}&hlsua=${encodeURIComponent(UA)}`,
       behaviorHints: {
-        notWebReady: false
+        notWebReady: false,
+        proxyHeaders: {
+          request: {
+            'Referer': referer,
+            'Origin': origin,
+            'User-Agent': UA
+          }
+        }
       },
       resolution: 'HD'
     });

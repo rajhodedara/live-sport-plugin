@@ -768,7 +768,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
       const reqHeaders = {
         ...providerHeaders,
-        'User-Agent': customUa || providerHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'User-Agent': customUa || providerHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
         'Referer': referer,
       };
       if (origin) reqHeaders['Origin'] = origin;
@@ -1689,7 +1689,7 @@ async function handleStream(type, id, config) {
         // bounded playback context for those player requests; arbitrary cookies,
         // authorization and custom token headers must not reach the addon URL.
         const request = {};
-        if (s._source === 'ak47live') {
+        if (s._source === 'ak47live' || s._source === 'daddylive' || providerName === 'DaddyLive') {
           const headers = verificationHeaders(s);
           const userAgent = manifestUserAgent(headers['User-Agent']);
           if (userAgent) request['User-Agent'] = userAgent;
