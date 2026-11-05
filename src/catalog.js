@@ -1082,7 +1082,7 @@ async function buildReplayHubMeta(id, config = {}) {
 
     const dateObj = new Date(targetDate + 'T00:00:00Z');
     const displayDate = !isNaN(dateObj.getTime())
-      ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
       : targetDate;
 
     const titleName = sportDef ? `${sportDef.name} — 📅 ${displayDate}` : `📅 ${displayDate} Replays`;
@@ -1190,7 +1190,7 @@ async function buildReplayHubMeta(id, config = {}) {
     const seasonNum = sIdx + 1;
     const dateObj = new Date(dStr + 'T00:00:00Z');
     const displayDate = !isNaN(dateObj.getTime())
-      ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+      ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
       : dStr;
 
     seasons.push({
@@ -1246,7 +1246,7 @@ async function buildReplayHubMeta(id, config = {}) {
   const dateGuide = sortedDates.slice(0, 5).map((d, i) => {
     const dobj = new Date(d + 'T00:00:00Z');
     const dname = !isNaN(dobj.getTime())
-      ? dobj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      ? dobj.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
       : d;
     return `• Season ${i + 1}: ${dname} (${dateGroups.get(d).length} matches)`;
   }).join('\n');
@@ -1578,7 +1578,7 @@ async function handleCatalogUncached(type, id, extra, config) {
       const count = dateMap.get(dStr);
       const dateObj = new Date(dStr + 'T00:00:00Z');
       const displayDate = !isNaN(dateObj.getTime())
-        ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+        ? dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
         : dStr;
       
       const isSportSpecific = selectedSport && selectedSport !== 'all';

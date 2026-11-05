@@ -58,6 +58,7 @@ public/*.json
 
 
 .zcode/
+.timezone-data/
 
 # ─── Antigravity agent environment — VERSIONED ON PURPOSE ────────────────────
 # GEMINI.md routing, .agents/context/ (architecture map + decisions),

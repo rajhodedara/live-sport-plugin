@@ -999,34 +999,35 @@
       console.warn("Could not parse existing config from URL", e);
     }
 
-    // Populate timezones
+    // Store IANA zones so each event uses its own seasonal rules. Labels avoid
+    // fixed offsets, which can differ by event date or browser timezone.
     try {
       const popularTimezones = [
-        { value: 'Pacific/Midway', label: 'Midway Island (GMT-11:00)' },
-        { value: 'Pacific/Honolulu', label: 'Hawaii (GMT-10:00)' },
-        { value: 'America/Anchorage', label: 'Alaska (GMT-09:00)' },
-        { value: 'America/Los_Angeles', label: 'Pacific Time (GMT-08:00)' },
-        { value: 'America/Denver', label: 'Mountain Time (GMT-07:00)' },
-        { value: 'America/Chicago', label: 'Central Time (GMT-06:00)' },
-        { value: 'America/New_York', label: 'Eastern Time (GMT-05:00)' },
-        { value: 'America/Halifax', label: 'Atlantic Time (GMT-04:00)' },
-        { value: 'America/Sao_Paulo', label: 'Brazil (GMT-03:00)' },
-        { value: 'Atlantic/South_Georgia', label: 'Mid-Atlantic (GMT-02:00)' },
-        { value: 'Atlantic/Azores', label: 'Azores (GMT-01:00)' },
-        { value: 'Europe/London', label: 'UK & Ireland (GMT+00:00)' },
-        { value: 'Europe/Paris', label: 'Western Europe (GMT+01:00)' },
-        { value: 'Europe/Athens', label: 'Eastern Europe (GMT+02:00)' },
-        { value: 'Europe/Moscow', label: 'Russia - Moscow (GMT+03:00)' },
-        { value: 'Asia/Dubai', label: 'UAE (GMT+04:00)' },
-        { value: 'Asia/Karachi', label: 'Pakistan (GMT+05:00)' },
-        { value: 'Asia/Kolkata', label: 'India (GMT+05:30)' },
-        { value: 'Asia/Dhaka', label: 'Bangladesh (GMT+06:00)' },
-        { value: 'Asia/Bangkok', label: 'Thailand & Vietnam (GMT+07:00)' },
-        { value: 'Asia/Singapore', label: 'Singapore & Malaysia (GMT+08:00)' },
-        { value: 'Asia/Tokyo', label: 'Japan (GMT+09:00)' },
-        { value: 'Australia/Sydney', label: 'Eastern Australia (GMT+10:00)' },
-        { value: 'Pacific/Noumea', label: 'New Caledonia (GMT+11:00)' },
-        { value: 'Pacific/Auckland', label: 'New Zealand (GMT+12:00)' }
+        { value: 'Pacific/Midway', label: 'Midway Island (Pacific/Midway)' },
+        { value: 'Pacific/Honolulu', label: 'Hawaii (Pacific/Honolulu)' },
+        { value: 'America/Anchorage', label: 'Alaska (America/Anchorage)' },
+        { value: 'America/Los_Angeles', label: 'Pacific Time (America/Los_Angeles)' },
+        { value: 'America/Denver', label: 'Mountain Time (America/Denver)' },
+        { value: 'America/Chicago', label: 'Central Time (America/Chicago)' },
+        { value: 'America/New_York', label: 'Eastern Time (America/New_York)' },
+        { value: 'America/Halifax', label: 'Atlantic Time (America/Halifax)' },
+        { value: 'America/Sao_Paulo', label: 'Brazil (America/Sao_Paulo)' },
+        { value: 'Atlantic/South_Georgia', label: 'Mid-Atlantic (Atlantic/South_Georgia)' },
+        { value: 'Atlantic/Azores', label: 'Azores (Atlantic/Azores)' },
+        { value: 'Europe/London', label: 'UK & Ireland (Europe/London)' },
+        { value: 'Europe/Paris', label: 'Western Europe (Europe/Paris)' },
+        { value: 'Europe/Athens', label: 'Eastern Europe (Europe/Athens)' },
+        { value: 'Europe/Moscow', label: 'Russia - Moscow (Europe/Moscow)' },
+        { value: 'Asia/Dubai', label: 'UAE (Asia/Dubai)' },
+        { value: 'Asia/Karachi', label: 'Pakistan (Asia/Karachi)' },
+        { value: 'Asia/Kolkata', label: 'India (Asia/Kolkata)' },
+        { value: 'Asia/Dhaka', label: 'Bangladesh (Asia/Dhaka)' },
+        { value: 'Asia/Bangkok', label: 'Thailand & Vietnam (Asia/Bangkok)' },
+        { value: 'Asia/Singapore', label: 'Singapore & Malaysia (Asia/Singapore)' },
+        { value: 'Asia/Tokyo', label: 'Japan (Asia/Tokyo)' },
+        { value: 'Australia/Sydney', label: 'Eastern Australia (Australia/Sydney)' },
+        { value: 'Pacific/Noumea', label: 'New Caledonia (Pacific/Noumea)' },
+        { value: 'Pacific/Auckland', label: 'New Zealand (Pacific/Auckland)' }
       ];
 
       const localTz = existingConfig.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1046,13 +1047,8 @@
       if (!matchedLocal && localTz) {
         const option = document.createElement('option');
         option.value = localTz;
-        const date = new Date();
-        const offset = -date.getTimezoneOffset();
-        const sign = offset >= 0 ? '+' : '-';
-        const hours = Math.floor(Math.abs(offset) / 60).toString().padStart(2, '0');
-        const mins = (Math.abs(offset) % 60).toString().padStart(2, '0');
         const loc = localTz.split('/').pop().replace(/_/g, ' ');
-        option.textContent = `${loc} (GMT${sign}${hours}:${mins})`;
+        option.textContent = `${loc} (${localTz})`;
         option.selected = true;
         timezoneSelect.insertBefore(option, timezoneSelect.firstChild);
       }

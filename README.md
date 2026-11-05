@@ -70,6 +70,8 @@ The addon is immediately available at `http://localhost:7000` (or `http://YOUR_S
    git clone https://github.com/rajhodedara/live-sport-plugin.git
    cd live-sport-plugin
    npm install
+   npm run timezone:prepare
+   export ICU_TIMEZONE_FILES_DIR="$PWD/.timezone-data/2026f-le"
    npm run build
    npm start
    ```
@@ -107,6 +109,8 @@ For high concurrency on production servers, use the pre-configured [ecosystem.co
 git clone https://github.com/rajhodedara/live-sport-plugin.git
 cd live-sport-plugin
 npm install
+npm run timezone:prepare
+export ICU_TIMEZONE_FILES_DIR="$PWD/.timezone-data/2026f-le"
 npm run build
 
 # Start using the production PM2 cluster configuration
@@ -116,6 +120,10 @@ npx pm2 startup
 ```
 
 ---
+
+## Automatic daylight saving time
+
+Match times use UTC instants and the selected IANA timezone, with the rules for each event date. The build checks timezone behavior before producing a candidate. Docker prepares pinned official ICU data during image construction; local and PM2 setup requires the preparation step above. See [timezone setup and maintenance](docs/TIMEZONE_MAINTENANCE.md) for Windows commands, runtime verification, regional rule updates and cache handling.
 
 ## ⏪ Full Match Replays & Catch-Up Hubs
 

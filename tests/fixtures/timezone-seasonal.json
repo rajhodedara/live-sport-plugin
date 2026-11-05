@@ -1,0 +1,631 @@
+{
+  "reference": {
+    "release": "2026f",
+    "source": "https://data.iana.org/time-zones/releases/tzdata2026f.tar.gz",
+    "sha256": "01b4a91cec5167ed48c11e8ab78f2048cead78ce94b0cafcad0ae8c5a3044d3d",
+    "compilation": "zic -b fat",
+    "calculation": "Python ZoneInfo.from_file explicitly opens compiled2026f TZif; no host timezone lookup, Node Intl, locale formatting or network"
+  },
+  "policy": {
+    "fold": "earlier UTC instant",
+    "gap": "shift forward by actual gap; preserve milliseconds"
+  },
+  "cases": [
+    {
+      "id": "new-york-wall-gap",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T02:30:00",
+      "classification": "gap",
+      "utc": "2026-03-08T07:30:00.000Z"
+    },
+    {
+      "id": "new-york-wall-gap-milliseconds",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T02:30:00.123",
+      "classification": "gap",
+      "utc": "2026-03-08T07:30:00.123Z"
+    },
+    {
+      "id": "new-york-wall-fold",
+      "zone": "America/New_York",
+      "wall": "2026-11-01T01:30:00",
+      "classification": "fold",
+      "utc": "2026-11-01T05:30:00.000Z"
+    },
+    {
+      "id": "new-york-wall-fold-milliseconds",
+      "zone": "America/New_York",
+      "wall": "2026-11-01T01:30:00.123",
+      "classification": "fold",
+      "utc": "2026-11-01T05:30:00.123Z"
+    },
+    {
+      "id": "new-york-wall-post-gap",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T03:30:00",
+      "classification": "ordinary",
+      "utc": "2026-03-08T07:30:00.000Z"
+    },
+    {
+      "id": "new-york-wall-post-gap-milliseconds",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T03:30:00.123",
+      "classification": "ordinary",
+      "utc": "2026-03-08T07:30:00.123Z"
+    },
+    {
+      "id": "denver-wall-gap",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T02:30:00",
+      "classification": "gap",
+      "utc": "2026-03-08T09:30:00.000Z"
+    },
+    {
+      "id": "denver-wall-gap-milliseconds",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T02:30:00.123",
+      "classification": "gap",
+      "utc": "2026-03-08T09:30:00.123Z"
+    },
+    {
+      "id": "denver-wall-fold",
+      "zone": "America/Denver",
+      "wall": "2026-11-01T01:30:00",
+      "classification": "fold",
+      "utc": "2026-11-01T07:30:00.000Z"
+    },
+    {
+      "id": "denver-wall-fold-milliseconds",
+      "zone": "America/Denver",
+      "wall": "2026-11-01T01:30:00.123",
+      "classification": "fold",
+      "utc": "2026-11-01T07:30:00.123Z"
+    },
+    {
+      "id": "denver-wall-post-gap",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T03:30:00",
+      "classification": "ordinary",
+      "utc": "2026-03-08T09:30:00.000Z"
+    },
+    {
+      "id": "denver-wall-post-gap-milliseconds",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T03:30:00.123",
+      "classification": "ordinary",
+      "utc": "2026-03-08T09:30:00.123Z"
+    },
+    {
+      "id": "london-wall-gap",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T01:30:00",
+      "classification": "gap",
+      "utc": "2026-03-29T01:30:00.000Z"
+    },
+    {
+      "id": "london-wall-gap-milliseconds",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T01:30:00.123",
+      "classification": "gap",
+      "utc": "2026-03-29T01:30:00.123Z"
+    },
+    {
+      "id": "london-wall-fold",
+      "zone": "Europe/London",
+      "wall": "2026-10-25T01:30:00",
+      "classification": "fold",
+      "utc": "2026-10-25T00:30:00.000Z"
+    },
+    {
+      "id": "london-wall-fold-milliseconds",
+      "zone": "Europe/London",
+      "wall": "2026-10-25T01:30:00.123",
+      "classification": "fold",
+      "utc": "2026-10-25T00:30:00.123Z"
+    },
+    {
+      "id": "london-wall-post-gap",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T02:30:00",
+      "classification": "ordinary",
+      "utc": "2026-03-29T01:30:00.000Z"
+    },
+    {
+      "id": "london-wall-post-gap-milliseconds",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T02:30:00.123",
+      "classification": "ordinary",
+      "utc": "2026-03-29T01:30:00.123Z"
+    },
+    {
+      "id": "paris-wall-gap",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T02:30:00",
+      "classification": "gap",
+      "utc": "2026-03-29T01:30:00.000Z"
+    },
+    {
+      "id": "paris-wall-gap-milliseconds",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T02:30:00.123",
+      "classification": "gap",
+      "utc": "2026-03-29T01:30:00.123Z"
+    },
+    {
+      "id": "paris-wall-fold",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-25T02:30:00",
+      "classification": "fold",
+      "utc": "2026-10-25T00:30:00.000Z"
+    },
+    {
+      "id": "paris-wall-fold-milliseconds",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-25T02:30:00.123",
+      "classification": "fold",
+      "utc": "2026-10-25T00:30:00.123Z"
+    },
+    {
+      "id": "paris-wall-post-gap",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T03:30:00",
+      "classification": "ordinary",
+      "utc": "2026-03-29T01:30:00.000Z"
+    },
+    {
+      "id": "paris-wall-post-gap-milliseconds",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T03:30:00.123",
+      "classification": "ordinary",
+      "utc": "2026-03-29T01:30:00.123Z"
+    },
+    {
+      "id": "sydney-wall-gap",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T02:30:00",
+      "classification": "gap",
+      "utc": "2026-10-03T16:30:00.000Z"
+    },
+    {
+      "id": "sydney-wall-gap-milliseconds",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T02:30:00.123",
+      "classification": "gap",
+      "utc": "2026-10-03T16:30:00.123Z"
+    },
+    {
+      "id": "sydney-wall-fold",
+      "zone": "Australia/Sydney",
+      "wall": "2026-04-05T02:30:00",
+      "classification": "fold",
+      "utc": "2026-04-04T15:30:00.000Z"
+    },
+    {
+      "id": "sydney-wall-fold-milliseconds",
+      "zone": "Australia/Sydney",
+      "wall": "2026-04-05T02:30:00.123",
+      "classification": "fold",
+      "utc": "2026-04-04T15:30:00.123Z"
+    },
+    {
+      "id": "sydney-wall-post-gap",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T03:30:00",
+      "classification": "ordinary",
+      "utc": "2026-10-03T16:30:00.000Z"
+    },
+    {
+      "id": "sydney-wall-post-gap-milliseconds",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T03:30:00.123",
+      "classification": "ordinary",
+      "utc": "2026-10-03T16:30:00.123Z"
+    },
+    {
+      "id": "lord-howe-wall-gap",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:15:00",
+      "classification": "gap",
+      "utc": "2026-10-03T15:45:00.000Z"
+    },
+    {
+      "id": "lord-howe-wall-gap-milliseconds",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:15:00.123",
+      "classification": "gap",
+      "utc": "2026-10-03T15:45:00.123Z"
+    },
+    {
+      "id": "lord-howe-wall-fold",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-04-05T01:45:00",
+      "classification": "fold",
+      "utc": "2026-04-04T14:45:00.000Z"
+    },
+    {
+      "id": "lord-howe-wall-fold-milliseconds",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-04-05T01:45:00.123",
+      "classification": "fold",
+      "utc": "2026-04-04T14:45:00.123Z"
+    },
+    {
+      "id": "lord-howe-wall-post-gap",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:45:00",
+      "classification": "ordinary",
+      "utc": "2026-10-03T15:45:00.000Z"
+    },
+    {
+      "id": "lord-howe-wall-post-gap-milliseconds",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:45:00.123",
+      "classification": "ordinary",
+      "utc": "2026-10-03T15:45:00.123Z"
+    },
+    {
+      "id": "kathmandu-wall-normal",
+      "zone": "Asia/Kathmandu",
+      "wall": "2026-07-16T01:45:00",
+      "classification": "ordinary",
+      "utc": "2026-07-15T20:00:00.000Z"
+    },
+    {
+      "id": "kathmandu-wall-normal-milliseconds",
+      "zone": "Asia/Kathmandu",
+      "wall": "2026-07-16T01:45:00.123",
+      "classification": "ordinary",
+      "utc": "2026-07-15T20:00:00.123Z"
+    },
+    {
+      "id": "apia-skipped-date",
+      "zone": "Pacific/Apia",
+      "wall": "2011-12-30T12:34:56",
+      "classification": "gap",
+      "utc": "2011-12-30T22:34:56.000Z"
+    },
+    {
+      "id": "apia-skipped-date-milliseconds",
+      "zone": "Pacific/Apia",
+      "wall": "2011-12-30T12:34:56.123",
+      "classification": "gap",
+      "utc": "2011-12-30T22:34:56.123Z"
+    },
+    {
+      "id": "new-york-before-gap",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T01:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-03-08T06:59:59.999Z"
+    },
+    {
+      "id": "new-york-gap-start",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T02:00:00.000",
+      "classification": "gap",
+      "utc": "2026-03-08T07:00:00.000Z"
+    },
+    {
+      "id": "new-york-gap-end-minus-ms",
+      "zone": "America/New_York",
+      "wall": "2026-03-08T02:59:59.999",
+      "classification": "gap",
+      "utc": "2026-03-08T07:59:59.999Z"
+    },
+    {
+      "id": "new-york-fold-start",
+      "zone": "America/New_York",
+      "wall": "2026-11-01T01:00:00.000",
+      "classification": "fold",
+      "utc": "2026-11-01T05:00:00.000Z"
+    },
+    {
+      "id": "new-york-fold-end-minus-ms",
+      "zone": "America/New_York",
+      "wall": "2026-11-01T01:59:59.999",
+      "classification": "fold",
+      "utc": "2026-11-01T05:59:59.999Z"
+    },
+    {
+      "id": "new-york-after-fold",
+      "zone": "America/New_York",
+      "wall": "2026-11-01T02:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-11-01T07:00:00.000Z"
+    },
+    {
+      "id": "denver-before-gap",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T01:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-03-08T08:59:59.999Z"
+    },
+    {
+      "id": "denver-gap-start",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T02:00:00.000",
+      "classification": "gap",
+      "utc": "2026-03-08T09:00:00.000Z"
+    },
+    {
+      "id": "denver-gap-end-minus-ms",
+      "zone": "America/Denver",
+      "wall": "2026-03-08T02:59:59.999",
+      "classification": "gap",
+      "utc": "2026-03-08T09:59:59.999Z"
+    },
+    {
+      "id": "denver-fold-start",
+      "zone": "America/Denver",
+      "wall": "2026-11-01T01:00:00.000",
+      "classification": "fold",
+      "utc": "2026-11-01T07:00:00.000Z"
+    },
+    {
+      "id": "denver-fold-end-minus-ms",
+      "zone": "America/Denver",
+      "wall": "2026-11-01T01:59:59.999",
+      "classification": "fold",
+      "utc": "2026-11-01T07:59:59.999Z"
+    },
+    {
+      "id": "denver-after-fold",
+      "zone": "America/Denver",
+      "wall": "2026-11-01T02:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-11-01T09:00:00.000Z"
+    },
+    {
+      "id": "london-before-gap",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T00:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-03-29T00:59:59.999Z"
+    },
+    {
+      "id": "london-gap-start",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T01:00:00.000",
+      "classification": "gap",
+      "utc": "2026-03-29T01:00:00.000Z"
+    },
+    {
+      "id": "london-gap-end-minus-ms",
+      "zone": "Europe/London",
+      "wall": "2026-03-29T01:59:59.999",
+      "classification": "gap",
+      "utc": "2026-03-29T01:59:59.999Z"
+    },
+    {
+      "id": "london-fold-start",
+      "zone": "Europe/London",
+      "wall": "2026-10-25T01:00:00.000",
+      "classification": "fold",
+      "utc": "2026-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "london-fold-end-minus-ms",
+      "zone": "Europe/London",
+      "wall": "2026-10-25T01:59:59.999",
+      "classification": "fold",
+      "utc": "2026-10-25T00:59:59.999Z"
+    },
+    {
+      "id": "london-after-fold",
+      "zone": "Europe/London",
+      "wall": "2026-10-25T02:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-10-25T02:00:00.000Z"
+    },
+    {
+      "id": "paris-before-gap",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T01:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-03-29T00:59:59.999Z"
+    },
+    {
+      "id": "paris-gap-start",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T02:00:00.000",
+      "classification": "gap",
+      "utc": "2026-03-29T01:00:00.000Z"
+    },
+    {
+      "id": "paris-gap-end-minus-ms",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-29T02:59:59.999",
+      "classification": "gap",
+      "utc": "2026-03-29T01:59:59.999Z"
+    },
+    {
+      "id": "paris-fold-start",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-25T02:00:00.000",
+      "classification": "fold",
+      "utc": "2026-10-25T00:00:00.000Z"
+    },
+    {
+      "id": "paris-fold-end-minus-ms",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-25T02:59:59.999",
+      "classification": "fold",
+      "utc": "2026-10-25T00:59:59.999Z"
+    },
+    {
+      "id": "paris-after-fold",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-25T03:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-10-25T02:00:00.000Z"
+    },
+    {
+      "id": "sydney-before-gap",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T01:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-10-03T15:59:59.999Z"
+    },
+    {
+      "id": "sydney-gap-start",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T02:00:00.000",
+      "classification": "gap",
+      "utc": "2026-10-03T16:00:00.000Z"
+    },
+    {
+      "id": "sydney-gap-end-minus-ms",
+      "zone": "Australia/Sydney",
+      "wall": "2026-10-04T02:59:59.999",
+      "classification": "gap",
+      "utc": "2026-10-03T16:59:59.999Z"
+    },
+    {
+      "id": "sydney-fold-start",
+      "zone": "Australia/Sydney",
+      "wall": "2026-04-05T02:00:00.000",
+      "classification": "fold",
+      "utc": "2026-04-04T15:00:00.000Z"
+    },
+    {
+      "id": "sydney-fold-end-minus-ms",
+      "zone": "Australia/Sydney",
+      "wall": "2026-04-05T02:59:59.999",
+      "classification": "fold",
+      "utc": "2026-04-04T15:59:59.999Z"
+    },
+    {
+      "id": "sydney-after-fold",
+      "zone": "Australia/Sydney",
+      "wall": "2026-04-05T03:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-04-04T17:00:00.000Z"
+    },
+    {
+      "id": "lord-howe-before-gap",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T01:59:59.999",
+      "classification": "ordinary",
+      "utc": "2026-10-03T15:29:59.999Z"
+    },
+    {
+      "id": "lord-howe-gap-start",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:00:00.000",
+      "classification": "gap",
+      "utc": "2026-10-03T15:30:00.000Z"
+    },
+    {
+      "id": "lord-howe-gap-end-minus-ms",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-10-04T02:29:59.999",
+      "classification": "gap",
+      "utc": "2026-10-03T15:59:59.999Z"
+    },
+    {
+      "id": "lord-howe-fold-start",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-04-05T01:30:00.000",
+      "classification": "fold",
+      "utc": "2026-04-04T14:30:00.000Z"
+    },
+    {
+      "id": "lord-howe-fold-end-minus-ms",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-04-05T01:59:59.999",
+      "classification": "fold",
+      "utc": "2026-04-04T14:59:59.999Z"
+    },
+    {
+      "id": "lord-howe-after-fold",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-04-05T02:00:00.000",
+      "classification": "ordinary",
+      "utc": "2026-04-04T15:30:00.000Z"
+    },
+    {
+      "id": "new-york-us-changed-europe-not-yet",
+      "zone": "America/New_York",
+      "wall": "2026-03-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-03-15T18:00:00.000Z"
+    },
+    {
+      "id": "london-europe-not-yet-changed",
+      "zone": "Europe/London",
+      "wall": "2026-03-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-03-15T14:00:00.000Z"
+    },
+    {
+      "id": "paris-europe-not-yet-changed",
+      "zone": "Europe/Paris",
+      "wall": "2026-03-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-03-15T13:00:00.000Z"
+    },
+    {
+      "id": "new-york-us-not-yet-fallen-back",
+      "zone": "America/New_York",
+      "wall": "2026-10-28T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-10-28T18:00:00.000Z"
+    },
+    {
+      "id": "london-europe-already-fallen-back",
+      "zone": "Europe/London",
+      "wall": "2026-10-28T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-10-28T14:00:00.000Z"
+    },
+    {
+      "id": "paris-europe-already-fallen-back",
+      "zone": "Europe/Paris",
+      "wall": "2026-10-28T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-10-28T13:00:00.000Z"
+    },
+    {
+      "id": "sydney-southern-summer",
+      "zone": "Australia/Sydney",
+      "wall": "2026-01-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-01-15T03:00:00.000Z"
+    },
+    {
+      "id": "sydney-southern-winter",
+      "zone": "Australia/Sydney",
+      "wall": "2026-07-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-07-15T04:00:00.000Z"
+    },
+    {
+      "id": "lord-howe-southern-summer",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-01-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-01-15T03:00:00.000Z"
+    },
+    {
+      "id": "lord-howe-southern-winter",
+      "zone": "Australia/Lord_Howe",
+      "wall": "2026-07-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-07-15T03:30:00.000Z"
+    },
+    {
+      "id": "kathmandu-quarter-hour-winter",
+      "zone": "Asia/Kathmandu",
+      "wall": "2026-01-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-01-15T08:15:00.000Z"
+    },
+    {
+      "id": "kathmandu-quarter-hour-summer",
+      "zone": "Asia/Kathmandu",
+      "wall": "2026-07-15T14:00:00",
+      "classification": "ordinary",
+      "utc": "2026-07-15T08:15:00.000Z"
+    }
+  ]
+}

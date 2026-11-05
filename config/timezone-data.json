@@ -1,0 +1,45 @@
+{
+  "sourceRepository": "unicode-org/icu-data",
+  "commit": "6eac2f4d349d9f4a0825103bb41845d8e5ab7add",
+  "reference": "IANA2026f",
+  "endianness": "le",
+  "path": "tzdata/icunew/2026f/44/le",
+  "guide": "https://unicode-org.github.io/icu/userguide/datetime/timezone/#icu4c-tz-update-with-drop-in-res-files-icu-54-and-newer",
+  "files": [
+    {
+      "name": "metaZones.res",
+      "bytes": 41312,
+      "gitBlobSha": "c7074b48884efd3695297118057cac2383f14ae3",
+      "sha256": "cc9d283bb2797813a17c00d80c2a86d27bc80da5e1cd24da846e8b4af6dbd860",
+      "url": "https://raw.githubusercontent.com/unicode-org/icu-data/6eac2f4d349d9f4a0825103bb41845d8e5ab7add/tzdata/icunew/2026f/44/le/metaZones.res"
+    },
+    {
+      "name": "timezoneTypes.res",
+      "bytes": 21264,
+      "gitBlobSha": "8cc23114c5d29b03b01bf2359940e94d00e14d5c",
+      "sha256": "5e77ce5afb7374a36cbe3be197d0a6deaa919e6f672c2a372f7a9d91b7f8534f",
+      "url": "https://raw.githubusercontent.com/unicode-org/icu-data/6eac2f4d349d9f4a0825103bb41845d8e5ab7add/tzdata/icunew/2026f/44/le/timezoneTypes.res"
+    },
+    {
+      "name": "windowsZones.res",
+      "bytes": 22208,
+      "gitBlobSha": "0097124c32001b7b95ee615fdf06a30b4e30a878",
+      "sha256": "377691d021bbdd7012806d8188412d13e587a76b64ecc7b79fec4dc36a419deb",
+      "url": "https://raw.githubusercontent.com/unicode-org/icu-data/6eac2f4d349d9f4a0825103bb41845d8e5ab7add/tzdata/icunew/2026f/44/le/windowsZones.res"
+    },
+    {
+      "name": "zoneinfo64.res",
+      "bytes": 149696,
+      "gitBlobSha": "23acbdb2e67f34c4f96afd60212e46744208251f",
+      "sha256": "d9382726ee8a499514310e63a9e97f1dbdd7fc2db328e1a785dde05f2afbb7e6",
+      "url": "https://raw.githubusercontent.com/unicode-org/icu-data/6eac2f4d349d9f4a0825103bb41845d8e5ab7add/tzdata/icunew/2026f/44/le/zoneinfo64.res"
+    }
+  ],
+  "version": "2026f",
+  "license": {
+    "name": "LICENSE",
+    "url": "https://raw.githubusercontent.com/unicode-org/icu-data/6eac2f4d349d9f4a0825103bb41845d8e5ab7add/LICENSE",
+    "sha256": "f72db45707e93c90c4bf400edfa5d38ce44fe692789e385548e627459c1bf6c9",
+    "text": "UNICODE LICENSE V3\n\nCOPYRIGHT AND PERMISSION NOTICE\n\nCopyright \u00a9 2016-2024 Unicode, Inc.\n\nNOTICE TO USER: Carefully read the following legal agreement. BY\nDOWNLOADING, INSTALLING, COPYING OR OTHERWISE USING DATA FILES, AND/OR\nSOFTWARE, YOU UNEQUIVOCALLY ACCEPT, AND AGREE TO BE BOUND BY, ALL OF THE\nTERMS AND CONDITIONS OF THIS AGREEMENT. IF YOU DO NOT AGREE, DO NOT\nDOWNLOAD, INSTALL, COPY, DISTRIBUTE OR USE THE DATA FILES OR SOFTWARE.\n\nPermission is hereby granted, free of charge, to any person obtaining a\ncopy of data files and any associated documentation (the \"Data Files\") or\nsoftware and any associated documentation (the \"Software\") to deal in the\nData Files or Software without restriction, including without limitation\nthe rights to use, copy, modify, merge, publish, distribute, and/or sell\ncopies of the Data Files or Software, and to permit persons to whom the\nData Files or Software are furnished to do so, provided that either (a)\nthis copyright and permission notice appear with all copies of the Data\nFiles or Software, or (b) this copyright and permission notice appear in\nassociated Documentation.\n\nTHE DATA FILES AND SOFTWARE ARE PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY\nKIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF\nTHIRD PARTY RIGHTS.\n\nIN NO EVENT SHALL THE COPYRIGHT HOLDER OR HOLDERS INCLUDED IN THIS NOTICE\nBE LIABLE FOR ANY CLAIM, OR ANY SPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES,\nOR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS,\nWHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION,\nARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THE DATA\nFILES OR SOFTWARE.\n\nExcept as contained in this notice, the name of a copyright holder shall\nnot be used in advertising or otherwise to promote the sale, use or other\ndealings in these Data Files or Software without prior written\nauthorization of the copyright holder.\n\nSPDX-License-Identifier: Unicode-3.0\n\n---------------------\n\nThird-Party Software Licenses\n\nThis section contains third-party software notices and/or additional\nterms for licensed third-party software components included within ICU\nlibraries.\n\n1. ICU License - ICU 1.8.1 to ICU 57.1\n\nCOPYRIGHT AND PERMISSION NOTICE\n\nCopyright (c) 1995-2016 International Business Machines Corporation and others\nAll rights reserved.\n\nPermission is hereby granted, free of charge, to any person obtaining\na copy of this software and associated documentation files (the\n\"Software\"), to deal in the Software without restriction, including\nwithout limitation the rights to use, copy, modify, merge, publish,\ndistribute, and/or sell copies of the Software, and to permit persons\nto whom the Software is furnished to do so, provided that the above\ncopyright notice(s) and this permission notice appear in all copies of\nthe Software and that both the above copyright notice(s) and this\npermission notice appear in supporting documentation.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\nEXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\nMERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT\nOF THIRD PARTY RIGHTS. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR\nHOLDERS INCLUDED IN THIS NOTICE BE LIABLE FOR ANY CLAIM, OR ANY\nSPECIAL INDIRECT OR CONSEQUENTIAL DAMAGES, OR ANY DAMAGES WHATSOEVER\nRESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF\nCONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN\nCONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.\n\nExcept as contained in this notice, the name of a copyright holder\nshall not be used in advertising or otherwise to promote the sale, use\nor other dealings in this Software without prior written authorization\nof the copyright holder.\n\nAll trademarks and registered trademarks mentioned herein are the\nproperty of their respective owners.\n\n2. Time Zone Database\n\n  ICU uses the public domain data and code derived from Time Zone\nDatabase for its time zone support. The ownership of the TZ database\nis explained in BCP 175: Procedure for Maintaining the Time Zone\nDatabase section 7.\n\n # 7.  Database Ownership\n #\n #    The TZ database itself is not an IETF Contribution or an IETF\n #    document.  Rather it is a pre-existing and regularly updated work\n #    that is in the public domain, and is intended to remain in the\n #    public domain.  Therefore, BCPs 78 [RFC5378] and 79 [RFC3979] do\n #    not apply to the TZ Database or contributions that individuals make\n #    to it.  Should any claims be made and substantiated against the TZ\n #    Database, the organization that is providing the IANA\n #    Considerations defined in this RFC, under the memorandum of\n #    understanding with the IETF, currently ICANN, may act in accordance\n #    with all competent court orders.  No ownership claims will be made\n #    by ICANN or the IETF Trust on the database or the code.  Any person\n #    making a contribution to the database or code waives all rights to\n #    future claims in that contribution or in the TZ Database.\n"
+  }
+}
