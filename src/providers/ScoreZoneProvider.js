@@ -6,6 +6,8 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
 const { tokenCache, setTokenCache } = require('../routes/scoreZoneStream');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
+const ChannelCountryService = require('../services/ChannelCountryService');
 
 const SCOREZONE_API_BASE = 'https://testscore.pxxl.pro';
 const SCOREZONE_HEADERS = {
@@ -13,7 +15,26 @@ const SCOREZONE_HEADERS = {
   'Referer': 'https://scorezonetv.live/'
 };
 
+const SCOREZONE_IPTV_ENDPOINT = 'https://scorezone-live.scorezone.workers.dev/api/iptv/channels';
+const SCOREZONE_IPTV_HEADERS = {
+  'Origin': 'https://scorezonetv.live',
+  'Referer': 'https://scorezonetv.live/',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+};
+
+const IPTV_CACHE_TTL = 20 * 60 * 1000; // 20 minutes
 const MAX_CHANNEL_CACHE_ENTRIES = 500;
+
+function getCountryFlag(country) {
+  if (!country || typeof country !== 'string') return '';
+  const trimmed = country.trim();
+  const info = ChannelCountryService.getCountryInfo(trimmed);
+  if (info && info.flag) return info.flag;
+  if (trimmed.length === 2) {
+    return trimmed.toUpperCase().replace(/./g, ch => String.fromCodePoint(ch.charCodeAt(0) + 127397));
+  }
+  return '';
+}
 
 const SPORT_API_MAP = {
   football: 'soccer',
@@ -125,6 +146,9 @@ class ScoreZoneProvider extends BaseProvider {
     this._warnedNoSecret = false;
     this._channelCache = new Map();
     this._channelInFlight = new Map();
+    this._cachedIptvChannels = null;
+    this._cachedIptvChannelsTime = 0;
+    this._iptvInFlight = null;
 
     if (this.circuitBreaker) {
       this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
@@ -142,6 +166,52 @@ class ScoreZoneProvider extends BaseProvider {
 
   _getSecret() {
     return this.secret || process.env.APP_SECRET || process.env.SESSION_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'scorezone-dev-default-secret');
+  }
+
+  async _getIptvChannels(force = false) {
+    const now = Date.now();
+    if (!force && this._cachedIptvChannels && Array.isArray(this._cachedIptvChannels) && (now - this._cachedIptvChannelsTime < IPTV_CACHE_TTL)) {
+      return this._cachedIptvChannels;
+    }
+
+    if (this._iptvInFlight) {
+      return await this._iptvInFlight;
+    }
+
+    this._iptvInFlight = (async () => {
+      try {
+        const res = await this.proxyFetch(SCOREZONE_IPTV_ENDPOINT, {
+          headers: SCOREZONE_IPTV_HEADERS,
+          timeoutMs: 8000,
+        });
+
+        if (!res || !res.ok) {
+          throw new Error(`ScoreZone IPTV HTTP ${res ? res.status : 'timeout'}`);
+        }
+
+        const data = typeof res.json === 'function' ? await res.json() : JSON.parse(await res.text());
+        const channels = Array.isArray(data?.channels) ? data.channels : [];
+        if (channels.length > 0) {
+          this._cachedIptvChannels = channels;
+          this._cachedIptvChannelsTime = Date.now();
+          return channels;
+        }
+      } catch (err) {
+        console.warn(`[ScoreZone] IPTV channels fetch failed: ${err.message}`);
+      }
+
+      // Guard against caching empty arrays on transient failures
+      if (this._cachedIptvChannels && Array.isArray(this._cachedIptvChannels) && this._cachedIptvChannels.length > 0) {
+        return this._cachedIptvChannels;
+      }
+      return [];
+    })();
+
+    try {
+      return await this._iptvInFlight;
+    } finally {
+      this._iptvInFlight = null;
+    }
   }
 
   async getMatches() {
@@ -163,6 +233,11 @@ class ScoreZoneProvider extends BaseProvider {
       }
     }
 
+    const iptvPromise = this._getIptvChannels().catch(err => {
+      console.warn(`[ScoreZone] IPTV channels fetch error: ${err.message}`);
+      return [];
+    });
+
     const fetchPromises = tasks.map(async ({ cat, apiSport, dateStr }) => {
       const url = `${SCOREZONE_API_BASE}/api/livescore/${apiSport}/${dateStr}`;
       const res = await this.proxyFetch(url, {
@@ -182,10 +257,14 @@ class ScoreZoneProvider extends BaseProvider {
       return { cat, apiSport, data };
     });
 
-    const results = await Promise.allSettled(fetchPromises);
+    const [results, iptvChannels] = await Promise.all([
+      Promise.allSettled(fetchPromises),
+      iptvPromise
+    ]);
+
     const fulfilled = results.filter(r => r.status === 'fulfilled' && r.value !== null);
 
-    if (fulfilled.length === 0) {
+    if (fulfilled.length === 0 && (!iptvChannels || iptvChannels.length === 0)) {
       throw new Error('ScoreZone livescore sync failed across all sports');
     }
 
@@ -259,6 +338,45 @@ class ScoreZoneProvider extends BaseProvider {
       }
     }
 
+    if (Array.isArray(iptvChannels)) {
+      for (const ch of iptvChannels) {
+        if (!ch || !ch.id || !ch.name) continue;
+        const ident = ChannelIdentityService.parseChannel(ch.name, {
+          group: ch.country || 'Live TV',
+          country: ch.country,
+          language: ch.language
+        });
+        const canonicalTitle = ident.canonicalTitle || ch.name;
+
+        const entity = new MatchEntity({
+          id: `scorezone_ch_${ch.id}`,
+          title: ch.name,
+          baseTitle: canonicalTitle,
+          category: 'networks',
+          date: '0',
+          popular: '1',
+          league: Array.isArray(ch.genres) && ch.genres.length > 0 ? ch.genres.join(', ') : (ch.country || 'Live TV'),
+          sources: [{
+            source: 'scorezone',
+            id: `sz_iptv_${ch.id}`,
+            streamUrl: ch.url,
+            name: ch.name,
+            channelName: ch.name,
+            canonicalChannel: canonicalTitle,
+            country: ch.country || ident.country || '',
+            countryCode: ident.countryCode || '',
+            countryFlag: ident.countryFlag || '',
+            language: ch.language || ident.language || ''
+          }]
+        });
+        entity.channelIdentityKey = ident.identityKey;
+        entity.channelNumber = ident.channelNumber;
+        entity.canonicalTitle = canonicalTitle;
+        entity.date = '0';
+        matches.push(entity);
+      }
+    }
+
     return matches;
   }
 
@@ -270,6 +388,62 @@ class ScoreZoneProvider extends BaseProvider {
   }
 
   async _resolveStreamInternal(sourceId, matchCategory, matchTitle, src) {
+    if (!sourceId || typeof sourceId !== 'string') return [];
+
+    if (sourceId.startsWith('sz_iptv_')) {
+      const channelId = sourceId.replace('sz_iptv_', '');
+      let channel = this._cachedIptvChannels?.find(c => c.id === channelId);
+      const now = Date.now();
+      const isExpired = !channel || !channel.expiresAt || (channel.expiresAt <= now + 60000);
+
+      if (isExpired) {
+        const freshChannels = await this._getIptvChannels(true);
+        const refreshed = freshChannels?.find(c => c.id === channelId);
+        if (refreshed) {
+          channel = refreshed;
+        }
+      }
+
+      if (!channel && src && src.streamUrl) {
+        channel = {
+          id: channelId,
+          name: src.name || matchTitle || 'Live TV',
+          url: src.streamUrl,
+          country: src.country
+        };
+      }
+
+      if (!channel || !channel.url) {
+        return [];
+      }
+
+      const flag = getCountryFlag(channel.country);
+      const title = `📺 ScoreZone | ${channel.name}${flag ? ' ' + flag : ''}\n📺 Quality: HD`;
+
+      return [
+        new StreamEntity({
+          name: '⚡ Direct Stream',
+          title,
+          url: channel.url,
+          resolution: 'HD',
+          behaviorHints: {
+            notWebReady: false,
+            proxyHeaders: {
+              request: {
+                Origin: 'https://scorezonetv.live',
+                Referer: 'https://scorezonetv.live/',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36'
+              }
+            }
+          },
+          country: channel.country || '',
+          countryFlag: flag || '',
+          sourceName: 'scorezone',
+          _source: 'scorezone'
+        })
+      ];
+    }
+
     const secret = this._getSecret();
     if (!secret) {
       if (!this._warnedNoSecret) {
@@ -279,7 +453,6 @@ class ScoreZoneProvider extends BaseProvider {
       return [];
     }
 
-    if (!sourceId || typeof sourceId !== 'string') return [];
     const lastDot = sourceId.lastIndexOf('.');
     if (lastDot === -1) return [];
 
@@ -390,3 +563,6 @@ module.exports = ScoreZoneProvider;
 module.exports.Tt = Tt;
 module.exports.isWhitelistedStage = isWhitelistedStage;
 module.exports.SPORT_API_MAP = SPORT_API_MAP;
+module.exports.SCOREZONE_IPTV_ENDPOINT = SCOREZONE_IPTV_ENDPOINT;
+module.exports.SCOREZONE_IPTV_HEADERS = SCOREZONE_IPTV_HEADERS;
+

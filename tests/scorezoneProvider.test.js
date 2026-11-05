@@ -672,4 +672,203 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
     expect(channelsFetched).toBe(true);
     expect(playbackKeyUsed).toBe('fresh_key_456');
   });
+
+  // 24. 24/7 IPTV channels ingestion and MatchEntity mapping
+  test('24. 24/7 IPTV channels ingestion and MatchEntity mapping', async () => {
+    const iptvSampleChannels = [
+      {
+        id: 'us-abc',
+        name: 'ABC',
+        country: 'US',
+        language: 'English',
+        url: 'https://scorezone-live.scorezone.workers.dev/live/us-abc/media.ts',
+        expiresAt: Date.now() + 3600000,
+        genres: ['General', 'News']
+      },
+      {
+        id: 'uk-sky-sports-main-event',
+        name: 'Sky Sports Main Event',
+        country: 'UK',
+        language: 'English',
+        url: 'https://scorezone-live.scorezone.workers.dev/live/uk-sky/media.ts',
+        expiresAt: Date.now() + 3600000,
+        genres: ['Sports']
+      }
+    ];
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url, opts) => {
+      if (url.includes('/api/iptv/channels')) {
+        expect(opts.headers.Origin).toBe('https://scorezonetv.live');
+        expect(opts.headers.Referer).toBe('https://scorezonetv.live/');
+        expect(opts.headers['User-Agent']).toContain('Mozilla/5.0');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ channels: iptvSampleChannels })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ Stages: [] })
+      };
+    });
+
+    const matches = await provider.getMatches();
+    const abc = matches.find(m => m.id === 'scorezone_ch_us-abc');
+    expect(abc).toBeDefined();
+    expect(abc.title).toBe('ABC');
+    expect(abc.category).toBe('networks');
+    expect(abc.date).toBe('0');
+    expect(abc.channelIdentityKey).toBeDefined();
+    expect(abc.sources).toHaveLength(1);
+    expect(abc.sources[0].source).toBe('scorezone');
+    expect(abc.sources[0].id).toBe('sz_iptv_us-abc');
+    expect(abc.sources[0].streamUrl).toBe('https://scorezone-live.scorezone.workers.dev/live/us-abc/media.ts');
+    expect(abc.sources[0].country).toBe('US');
+  });
+
+  // 25. IPTV channels caching and stale-on-error behavior
+  test('25. IPTV channels caching and stale-on-error behavior', async () => {
+    let iptvFetchCount = 0;
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+      if (url.includes('/api/iptv/channels')) {
+        iptvFetchCount++;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            channels: [{
+              id: 'us-cbs',
+              name: 'CBS',
+              country: 'US',
+              url: 'https://scorezone-live.scorezone.workers.dev/live/us-cbs/media.ts',
+              expiresAt: Date.now() + 3600000
+            }]
+          })
+        };
+      }
+      return { ok: true, status: 200, json: async () => ({ Stages: [] }) };
+    });
+
+    // First call populates cache
+    const firstMatches = await provider.getMatches();
+    expect(firstMatches.some(m => m.id === 'scorezone_ch_us-cbs')).toBe(true);
+    expect(iptvFetchCount).toBe(1);
+
+    // Second call within TTL should hit cache
+    const secondMatches = await provider.getMatches();
+    expect(secondMatches.some(m => m.id === 'scorezone_ch_us-cbs')).toBe(true);
+    expect(iptvFetchCount).toBe(1);
+
+    // Now simulate upstream 500 failure; provider should serve stale valid channels
+    provider._cachedIptvChannelsTime = 0; // force TTL expiration
+    safeFetchSpy.mockImplementation(async (url) => {
+      if (url.includes('/api/iptv/channels')) {
+        iptvFetchCount++;
+        return { ok: false, status: 500, text: async () => 'Internal Error' };
+      }
+      return { ok: true, status: 200, json: async () => ({ Stages: [] }) };
+    });
+
+    const staleMatches = await provider.getMatches();
+    expect(staleMatches.some(m => m.id === 'scorezone_ch_us-cbs')).toBe(true);
+    expect(iptvFetchCount).toBe(2);
+  });
+
+  // 26. resolveStream resolves sz_iptv_ to direct StreamEntity with zero byte transit
+  test('26. resolveStream resolves sz_iptv_ to direct StreamEntity with zero byte transit', async () => {
+    provider._cachedIptvChannels = [
+      {
+        id: 'us-nbc',
+        name: 'NBC',
+        country: 'US',
+        url: 'https://scorezone-live.scorezone.workers.dev/live/us-nbc/media.ts',
+        expiresAt: Date.now() + 3600000
+      }
+    ];
+    provider._cachedIptvChannelsTime = Date.now();
+
+    const streams = await provider.resolveStream('sz_iptv_us-nbc', 'networks', 'NBC');
+    expect(streams).toHaveLength(1);
+    const s = streams[0];
+    expect(s.name).toBe('⚡ Direct Stream');
+    expect(s.title).toContain('ScoreZone | NBC');
+    expect(s.title).toContain('🇺🇸');
+    expect(s.title).toContain('Quality: HD');
+    expect(s.url).toBe('https://scorezone-live.scorezone.workers.dev/live/us-nbc/media.ts');
+    expect(s.resolution).toBe('HD');
+    expect(s.behaviorHints.notWebReady).toBe(false);
+    expect(s.behaviorHints.proxyHeaders.request.Origin).toBe('https://scorezonetv.live');
+    expect(s.behaviorHints.proxyHeaders.request.Referer).toBe('https://scorezonetv.live/');
+    expect(s.behaviorHints.proxyHeaders.request['User-Agent']).toContain('Mozilla/5.0');
+    expect(s.sourceName).toBe('scorezone');
+  });
+
+  // 27. expired channel triggers refresh during resolveStream
+  test('27. expired channel triggers refresh during resolveStream', async () => {
+    provider._cachedIptvChannels = [
+      {
+        id: 'us-fox',
+        name: 'FOX',
+        country: 'US',
+        url: 'https://scorezone-live.scorezone.workers.dev/live/us-fox/stale.ts',
+        expiresAt: Date.now() - 1000 // expired
+      }
+    ];
+    provider._cachedIptvChannelsTime = Date.now();
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+      if (url.includes('/api/iptv/channels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            channels: [{
+              id: 'us-fox',
+              name: 'FOX',
+              country: 'US',
+              url: 'https://scorezone-live.scorezone.workers.dev/live/us-fox/fresh.ts',
+              expiresAt: Date.now() + 3600000
+            }]
+          })
+        };
+      }
+      return { ok: false, status: 404 };
+    });
+
+    const streams = await provider.resolveStream('sz_iptv_us-fox', 'networks', 'FOX');
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toBe('https://scorezone-live.scorezone.workers.dev/live/us-fox/fresh.ts');
+  });
+
+  // 28. MatchAggregator recognizes scorezone_ch_ as 24/7 channel and merges with same identity key
+  test('28. MatchAggregator recognizes scorezone_ch_ as 24/7 channel and merges with same identity key', () => {
+    const agg = new MatchAggregator();
+    const szMatch = {
+      id: 'scorezone_ch_us-abc',
+      title: 'ABC',
+      category: 'networks',
+      date: '0',
+      channelIdentityKey: 'abc',
+      channelNumber: null,
+      canonicalTitle: 'ABC'
+    };
+    const dlvMatch = {
+      id: 'dlv_ch_123_abc',
+      title: 'ABC (US)',
+      category: 'networks',
+      date: '0',
+      channelIdentityKey: 'abc',
+      channelNumber: null,
+      canonicalTitle: 'ABC'
+    };
+
+    const p1 = agg._precompute(szMatch);
+    const p2 = agg._precompute(dlvMatch);
+
+    expect(p1.isChannel).toBe(true);
+    expect(p2.isChannel).toBe(true);
+    expect(agg._sameEventPre(p1, p2)).toBe(true);
+  });
 });

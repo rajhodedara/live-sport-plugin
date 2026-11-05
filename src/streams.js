@@ -1779,6 +1779,7 @@ async function handleStream(type, id, config) {
         else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
         else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
         else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
+        else if (providerName === 'ScoreZone') referer = 'https://scorezonetv.live/';
         
         if (referer) {
           if (!s.behaviorHints.proxyHeaders) {
