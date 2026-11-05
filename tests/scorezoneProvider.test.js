@@ -518,4 +518,158 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
     expect(routeSource).toContain("require('../services/ProviderOutbound')");
     expect(routeSource).not.toMatch(/impitClient\.safeFetch/);
   });
+
+  // 20. circuit breaker wrapping is invoked for getMatches and resolveStream
+  test('20. circuit breaker wrapping is invoked for getMatches and resolveStream', async () => {
+    let matchesWrapped = false;
+    let streamsWrapped = false;
+    const fakeBreaker = {
+      wrapSync: jest.fn((name, fn) => {
+        return {
+          fire: async (...args) => {
+            matchesWrapped = true;
+            return fn(...args);
+          }
+        };
+      }),
+      wrap: jest.fn((name, fn) => {
+        return {
+          fire: async (...args) => {
+            streamsWrapped = true;
+            return fn(...args);
+          }
+        };
+      })
+    };
+
+    const breakerProvider = new ScoreZoneProvider({ circuitBreaker: fakeBreaker });
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+      if (url.includes('/api/livescore/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ Stages: [] })
+        };
+      }
+      if (url.includes('/api/matches/channels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ key: 'k20', channels: [{ id: 'c20', name: 'Feed' }] })
+        };
+      }
+      return { ok: false, status: 404 };
+    });
+
+    await breakerProvider.getMatches();
+    expect(matchesWrapped).toBe(true);
+
+    const meta = { h: 'A', a: 'B', s: 'football', e: '2001' };
+    const sourceId = mintSourceId(meta);
+    await breakerProvider.resolveStream(sourceId, 'football', 'Match');
+    expect(streamsWrapped).toBe(true);
+  });
+
+  // 21. single-sport missing stages does not fail catalog when other sports succeed
+  test('21. single-sport missing stages does not fail catalog when other sports succeed', async () => {
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+      if (url.includes('/api/livescore/soccer/')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            Stages: [
+              {
+                CompN: 'Premier League',
+                Cnm: 'England',
+                Events: [
+                  {
+                    Eid: '991122',
+                    Esd: '20261102200000',
+                    T1: [{ Nm: 'Liverpool' }],
+                    T2: [{ Nm: 'Man City' }]
+                  }
+                ]
+              }
+            ]
+          })
+        };
+      }
+      // Other sports return missing Stages (e.g. golf or unsupported sport)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ Stages: null, unsupported: true })
+      };
+    });
+
+    const matches = await provider.getMatches();
+    expect(matches.length).toBeGreaterThan(0);
+    expect(matches[0].title).toBe('Liverpool vs Man City');
+  });
+
+  // 22. extractMasterPlaylistVariants handles iframe and image stream tags
+  test('22. extractMasterPlaylistVariants handles iframe and image stream tags', () => {
+    const { extractMasterPlaylistVariants } = scoreZoneRoute;
+    const masterWithIframe = [
+      '#EXTM3U',
+      '#EXT-X-STREAM-INF:BANDWIDTH=800000',
+      'https://testscore.pxxl.pro/hls/t1/360p.m3u8',
+      '#EXT-X-I-FRAME-STREAM-INF:BANDWIDTH=86000,URI="https://testscore.pxxl.pro/hls/t1/iframe.m3u8"',
+      '#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",URI="https://testscore.pxxl.pro/hls/t1/audio.m3u8"'
+    ].join('\n');
+
+    const variants = extractMasterPlaylistVariants(masterWithIframe, 'https://testscore.pxxl.pro/hls/t1/master.m3u8');
+    expect(variants).toHaveLength(3);
+    expect(variants[0]).toBe('https://testscore.pxxl.pro/hls/t1/360p.m3u8');
+    expect(variants[1]).toBe('https://testscore.pxxl.pro/hls/t1/iframe.m3u8');
+    expect(variants[2]).toBe('https://testscore.pxxl.pro/hls/t1/audio.m3u8');
+  });
+
+  // 23. expired tokenCache entry remints matchKey
+  test('23. expired tokenCache entry remints matchKey', async () => {
+    const meta = { h: 'A', a: 'B', s: 'football', e: '2301' };
+    const sourceId = mintSourceId(meta);
+
+    // Seed stale tokenCache entry (15 minutes old)
+    tokenCache.set(`2301:c1`, {
+      matchKey: 'stale_key_123',
+      meta,
+      createdAt: Date.now() - 15 * 60 * 1000
+    });
+
+    let channelsFetched = false;
+    let playbackKeyUsed = null;
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url, opts) => {
+      if (url.includes('/api/matches/channels')) {
+        channelsFetched = true;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ key: 'fresh_key_456', channels: [{ id: 'c1', name: 'Feed' }] })
+        };
+      }
+      if (url.includes('/api/matches/playback')) {
+        const parsed = JSON.parse(opts.body);
+        playbackKeyUsed = parsed.matchKey;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ url: 'https://testscore.pxxl.pro/hls/t1/stream.m3u8' })
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        text: async () => '#EXTM3U\n#EXTINF:6.0,\nseg1.ts'
+      };
+    });
+
+    const res = await request('GET', `/api/scorezone/manifest/${encodeURIComponent(sourceId)}/c1.m3u8`);
+    expect(res.status).toBe(200);
+    expect(channelsFetched).toBe(true);
+    expect(playbackKeyUsed).toBe('fresh_key_456');
+  });
 });

@@ -76,7 +76,7 @@ function extractMasterPlaylistVariants(masterBody, masterUrl) {
           break;
         }
       }
-    } else if (line.startsWith('#EXT-X-MEDIA:')) {
+    } else if (line.startsWith('#EXT-X-MEDIA:') || line.startsWith('#EXT-X-I-FRAME-STREAM-INF:') || line.startsWith('#EXT-X-IMAGE-STREAM-INF:')) {
       const uriMatch = line.match(/URI="([^"]+)"/);
       if (uriMatch) {
         try {
@@ -93,15 +93,14 @@ async function getOrRemintPlaybackUrl(meta, channelId, forceFresh = false) {
   const tokenKey = `${meta.e}:${channelId}`;
   const now = Date.now();
 
-  if (!forceFresh) {
-    const entry = tokenCache.get(tokenKey);
-    if (entry && entry.playbackUrl && (now - entry.createdAt < 12 * 60 * 1000)) {
-      return entry.playbackUrl;
-    }
+  const entry = tokenCache.get(tokenKey);
+  const isStale = !entry || (now - entry.createdAt >= 12 * 60 * 1000);
+
+  if (!forceFresh && !isStale && entry.playbackUrl) {
+    return entry.playbackUrl;
   }
 
-  let entry = tokenCache.get(tokenKey);
-  let matchKey = entry ? entry.matchKey : null;
+  let matchKey = !isStale && entry ? entry.matchKey : null;
 
   if (forceFresh || !matchKey) {
     const qs = new URLSearchParams({
@@ -360,4 +359,6 @@ router.get('/api/scorezone/manifest/:sourceId/:channelId.m3u8', async (req, res)
 module.exports = router;
 module.exports.tokenCache = tokenCache;
 module.exports.playlistCache = playlistCache;
+module.exports.setTokenCache = setTokenCache;
+module.exports.setPlaylistCache = setPlaylistCache;
 module.exports.extractMasterPlaylistVariants = extractMasterPlaylistVariants;

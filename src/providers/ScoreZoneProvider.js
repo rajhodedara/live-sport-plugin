@@ -5,7 +5,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
-const { tokenCache } = require('../routes/scoreZoneStream');
+const { tokenCache, setTokenCache } = require('../routes/scoreZoneStream');
 
 const SCOREZONE_API_BASE = 'https://testscore.pxxl.pro';
 const SCOREZONE_HEADERS = {
@@ -128,10 +128,10 @@ class ScoreZoneProvider extends BaseProvider {
 
     if (this.circuitBreaker) {
       this.fetchMatches = this.circuitBreaker.wrapSync(`${this.name}_fetchMatches`, async () => {
-        return this.getMatches();
+        return this._getMatchesInternal();
       });
       this.fetchStreams = this.circuitBreaker.wrap(`${this.name}_fetchStreams`, async (sourceId, category, title, src) => {
-        return this.resolveStream(sourceId, category, title, src);
+        return this._resolveStreamInternal(sourceId, category, title, src);
       });
     }
   }
@@ -145,6 +145,13 @@ class ScoreZoneProvider extends BaseProvider {
   }
 
   async getMatches() {
+    if (this.fetchMatches && typeof this.fetchMatches.fire === 'function') {
+      return await this.fetchMatches.fire();
+    }
+    return await this._getMatchesInternal();
+  }
+
+  async _getMatchesInternal() {
     const dates = getUtcDateStrings();
     const allLeagues = process.env.SCOREZONE_ALL_LEAGUES === 'true';
     const secret = this._getSecret();
@@ -169,17 +176,16 @@ class ScoreZoneProvider extends BaseProvider {
 
       const data = typeof res.json === 'function' ? await res.json() : JSON.parse(await res.text());
       if (!data || !Array.isArray(data.Stages)) {
-        throw new Error(`ScoreZone malformed payload (missing Stages) for ${apiSport}/${dateStr}`);
+        return null;
       }
 
       return { cat, apiSport, data };
     });
 
     const results = await Promise.allSettled(fetchPromises);
-    const hasMalformedSchema = results.some(r => r.status === 'rejected' && r.reason?.message?.includes('missing Stages'));
-    const fulfilled = results.filter(r => r.status === 'fulfilled');
+    const fulfilled = results.filter(r => r.status === 'fulfilled' && r.value !== null);
 
-    if (hasMalformedSchema || fulfilled.length === 0) {
+    if (fulfilled.length === 0) {
       throw new Error('ScoreZone livescore sync failed across all sports');
     }
 
@@ -257,6 +263,13 @@ class ScoreZoneProvider extends BaseProvider {
   }
 
   async resolveStream(sourceId, matchCategory, matchTitle, src) {
+    if (this.fetchStreams && typeof this.fetchStreams.fire === 'function') {
+      return await this.fetchStreams.fire(sourceId, matchCategory, matchTitle, src);
+    }
+    return await this._resolveStreamInternal(sourceId, matchCategory, matchTitle, src);
+  }
+
+  async _resolveStreamInternal(sourceId, matchCategory, matchTitle, src) {
     const secret = this._getSecret();
     if (!secret) {
       if (!this._warnedNoSecret) {
@@ -342,11 +355,7 @@ class ScoreZoneProvider extends BaseProvider {
 
     if (channelsData.key && Array.isArray(channelsData.channels)) {
       for (const ch of channelsData.channels) {
-        const tokenKey = `${meta.e}:${ch.id}`;
-        if (tokenCache.size >= 1000 && !tokenCache.has(tokenKey)) {
-          tokenCache.delete(tokenCache.keys().next().value);
-        }
-        tokenCache.set(tokenKey, {
+        setTokenCache(`${meta.e}:${ch.id}`, {
           matchKey: channelsData.key,
           meta,
           createdAt: Date.now()
