@@ -10,7 +10,7 @@ const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
-const { isBlockedDashStream } = require('./services/StreamPolicy');
+const { isBlockedDashStream, isBlockedStream } = require('./services/StreamPolicy');
 
 let _liveOverlayRef;
 /**
@@ -905,6 +905,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
       // Publish only an accepted repair after HLS validation and slate
       // filtering. Keep nested upstream tokens, recovery keys and fragments.
+      // Reject PNG-cloaked streams (HLS playlists pointing to fake .png segments)
+      if (/(?:^|\n)[^#\n\r]+\.png(?:\?[^\n\r]*)?(?:\r?\n|$)/i.test(bodySample)) {
+        console.log(`[Filter] Dropped PNG-cloaked stream: ${targetUrl}`);
+        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        return null;
+      }
+
       if (repairedHeaders) {
         if (parseManifestProxyUrl(s.url)) {
           const parsed = new URL(s.url, 'http://localhost');
@@ -1480,7 +1487,7 @@ async function handleStream(type, id, config) {
   // of DASH — only its target is — so StreamPolicy resolves the wrapped URL
   // before deciding, and leaves proxied live HLS alone.
   const beforeDashPolicy = streams.length;
-  const policyAllowed = streams.filter((s) => !isBlockedDashStream(s));
+  const policyAllowed = streams.filter((s) => !isBlockedStream(s));
   if (policyAllowed.length !== beforeDashPolicy) {
     streams.length = 0;
     streams.push(...policyAllowed);

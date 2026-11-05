@@ -134,6 +134,16 @@ describe('verifyStreams retry policy', () => {
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
+  it('drops a 200 response whose playlist points to .png cloaked segments', async () => {
+    safeFetch.mockResolvedValue(ok('#EXTM3U\n#EXTINF:4.000,\nchunk-001.png?token=xyz\n#EXTINF:4.000,\nchunk-002.png?token=xyz'));
+
+    const cache = makeCache();
+    const out = await verifyStreams([stream()], 'daddylive:m1:s1', parser, cache);
+
+    expect(out).toHaveLength(0);
+    expect(cache.failures).toBe(1);
+  });
+
   it('drops a 200 response whose body is not a playlist', async () => {
     // Some CDNs answer 200 with "Not found" once the token expires.
     safeFetch.mockResolvedValue(ok('Not found'));

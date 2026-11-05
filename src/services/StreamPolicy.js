@@ -25,9 +25,11 @@ const DASH_RELAY_PATH = /(?:^|\/)api\/dash(?:\/|$)/i;
 const MPD_TARGET = /\.mpd$/i;
 const MANIFEST_PROXY_PATH = /(?:^|\/)api\/manifest(?:\.m3u8|\.mpd)?$/i;
 const MAX_PROXY_DEPTH = 8;
+const CLOAKED_HOST = /(?:^|\.)(?:cowedd\d*[a-z0-9]*|wedd\d+[a-z0-9]*|tiktokcdn|tiktokx-origin)\.[a-z]+$/i;
+const PNG_SEGMENT_PATH = /\.png$/i;
 
 function inspectStreamTarget(stream) {
-  const result = { relay: false, dash: false };
+  const result = { relay: false, dash: false, cloaked: false };
   if (!stream || typeof stream !== 'object') return result;
   let target = String(stream.url || stream.streamUrl || stream._rawMpdUrl || '');
   let base = 'https://stream-policy.invalid/';
@@ -40,6 +42,7 @@ function inspectStreamTarget(stream) {
     seen.add(parsed.href);
     if (DASH_RELAY_PATH.test(parsed.pathname)) result.relay = true;
     if (MPD_TARGET.test(parsed.pathname)) result.dash = true;
+    if (CLOAKED_HOST.test(parsed.hostname) || PNG_SEGMENT_PATH.test(parsed.pathname)) result.cloaked = true;
     if (!MANIFEST_PROXY_PATH.test(parsed.pathname)) break;
     // URLSearchParams performs exactly the normal outer query decoding; CDN
     // signatures are never decoded again or reconstructed by this classifier.
@@ -65,6 +68,14 @@ function isDashStream(stream) {
 }
 
 /** The single gate used by the stream assembler. */
+function isPngCloakedStream(stream) {
+  return inspectStreamTarget(stream).cloaked;
+}
+
+function isBlockedStream(stream) {
+  return isBlockedDashStream(stream) || isPngCloakedStream(stream);
+}
+
 function isBlockedDashStream(stream) {
   return isRelayedDashStream(stream) || isDashStream(stream);
 }
@@ -73,6 +84,10 @@ module.exports = {
   isRelayedDashStream,
   isDashStream,
   isBlockedDashStream,
+  isPngCloakedStream,
+  isBlockedStream,
+  CLOAKED_HOST,
+  PNG_SEGMENT_PATH,
   DASH_RELAY_PATH,
   MPD_TARGET
 };

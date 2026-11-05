@@ -99,9 +99,16 @@ function _cleanManifestUrl(url) {
     .replace(/[\\"']+$/, '');     // trailing JSON/quote leftovers
 }
 
+const CLOAKED_STREAM_PATTERN = /(?:cowedd\d*[a-z0-9]*|wedd\d+[a-z0-9]*|tiktokcdn|tiktokx-origin|\.png(?:$|\?))/i;
+
+function isCloakedStream(url) {
+  if (!url || typeof url !== 'string') return false;
+  return CLOAKED_STREAM_PATTERN.test(url);
+}
+
 function isTikTokCloakedStream(url) {
   if (!url || typeof url !== 'string') return false;
-  return /cowedd4855ws|tiktokcdn|tiktokx-origin/i.test(url);
+  return isCloakedStream(url);
 }
 
 /**
@@ -196,6 +203,10 @@ class DaddyLiveProvider extends BaseProvider {
     return /^event\s*[-_]?\s*(sd\s*[-_]?\s*)?stream/i.test(clean) ||
            /^event\s*[-_]?\s*sd\b/i.test(clean) ||
            /\bevent\s*(sd\s*)?stream\b/i.test(clean);
+  }
+
+  static isCloakedStream(url) {
+    return isCloakedStream(url);
   }
 
   constructor(opts = {}) {
