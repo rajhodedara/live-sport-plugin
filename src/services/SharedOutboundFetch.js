@@ -72,7 +72,8 @@ function createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay = abortab
         } catch (failure) {
           if (signal.aborted) throw signal.reason;
           const isCapacity = failure?.code === 'ERR_OUTBOUND_CAPACITY' ||
-            /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(failure?.code || '');
+            /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(failure?.code || '') ||
+            /capacity|native pool/i.test(String(failure?.message || ''));
           if (isCapacity) {
             console.warn('[GuardedOutbound] Native capacity', JSON.stringify(failure.capacityDiagnostic || { reason: failure.code }));
             if (proxyUrl) {
