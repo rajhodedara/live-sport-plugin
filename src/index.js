@@ -845,6 +845,7 @@ app.get('/img', async (req, res) => {
 app.use(require('./routes/streamProxy'));
 app.use(require('./routes/manifest'));
 app.use(require('./routes/leafManifest'));
+app.use(require('./routes/scoreZoneStream'));
 app.use(require('./routes/hlsResource'));
 app.use(require('./routes/embed'));
 // Zero-bandwidth DASH→HLS converter (must stay above the /api resolver proxy)
@@ -889,6 +890,7 @@ const STREAM_PREFIXES = [
   '/api/leaf',
   '/api/mp4proxy',
   '/api/fastmp4',
+  '/api/scorezone',
   '/api/hlschunk'
 ];
 
@@ -966,7 +968,7 @@ app.use((req, res, next) => {
           }
           // Absolute URLs matching known addon stream endpoints. Keep generic
           // CDN /hls/ paths untouched; only /hls/resource belongs to the addon.
-          const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+          const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf|api\/scorezone)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
           if (streamMatch) {
             modified = true;
             return `${effectiveStreamBaseUrl}${streamMatch[1]}`;
