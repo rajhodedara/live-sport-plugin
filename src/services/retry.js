@@ -25,6 +25,16 @@
 const DEFAULT_ATTEMPTS = 3;
 const DEFAULT_BASE_DELAY_MS = 250;
 const DEFAULT_MAX_DELAY_MS = 2000;
+const ATTEMPT_TIMEOUT = Symbol('verification attempt timeout');
+
+/** A deadline owned by one verification attempt, not a caller cancellation. */
+function createAttemptTimeoutError() {
+  const error = Object.assign(new Error('Verification attempt timed out'), {
+    name: 'TimeoutError', code: 'ETIMEDOUT'
+  });
+  Object.defineProperty(error, ATTEMPT_TIMEOUT, { value: true });
+  return error;
+}
 
 // Node/undici network failures worth a second look. Anything else (bad URL,
 // TypeError in our own code) is a bug, not a blip, and must surface fast.
@@ -33,10 +43,9 @@ const TRANSIENT_ERROR_CODES = new Set([
   'EHOSTUNREACH', 'ENETUNREACH', 'ENETRESET', 'EAI_AGAIN', 'EBUSY',
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
   'UND_ERR_SOCKET', 'UND_ERR_RESPONSE_STATUS_CODE',
-  'ERR_OUTBOUND_CAPACITY', 'ERR_NATIVE_POOL_BUSY',
 ]);
 
-const TRANSIENT_MESSAGE_RE = /timeout|timed out|socket hang up|network|reset by peer|aborted|temporarily|too many requests|EAI_AGAIN|capacity|native pool/i;
+const TRANSIENT_MESSAGE_RE = /timeout|timed out|socket hang up|network|reset by peer|aborted|temporarily|too many requests|EAI_AGAIN/i;
 
 /** True when an HTTP status is worth retrying rather than believing. */
 function isTransientStatus(status) {
@@ -47,12 +56,24 @@ function isTransientStatus(status) {
 
 /** True when a thrown error looks like a blip rather than a verdict. */
 function isTransientError(err) {
-  if (!err) return false;
-  // An explicit abort is the caller giving up on purpose — never retry it.
-  if (err.name === 'AbortError' && err.deadlineExceeded !== true) return false;
-  const code = err.code || (err.cause && err.cause.code) || err.transportCode;
-  if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
-  return TRANSIENT_MESSAGE_RE.test(String(err.message || ''));
+  if (!err || typeof err !== 'object') return false;
+  try {
+    const causes = [], seen = new Set();
+    for (let current = err; current && typeof current === 'object'; current = current.cause) {
+      if (seen.has(current) || causes.length >= 8) return false;
+      seen.add(current);
+      causes.push(current);
+    }
+    // A local resource limit or guard refusal must not become another request
+    // merely because a wrapper resembles a network timeout.
+    if (causes.some(item => item.isFatal || item.code === 'ERR_OUTBOUND_BLOCKED' ||
+        item.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(item.code || ''))) return false;
+    // A public deadlineExceeded flag is not authority to retry a cancellation.
+    if (causes.some(item => item.name === 'AbortError')) return false;
+    if (causes.some(item => item[ATTEMPT_TIMEOUT] === true || item.name === 'TimeoutError')) return true;
+    if (causes.some(item => TRANSIENT_ERROR_CODES.has(item.code))) return true;
+    return TRANSIENT_MESSAGE_RE.test(String(err.message || ''));
+  } catch (_) { return false; }
 }
 
 /** Full-jitter exponential backoff, capped. */
@@ -66,7 +87,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Run `fn` with bounded retries.
  *
- * `fn` receives { attempt, signal } and may either throw or return a value.
+ * `fn` receives { attempt } and may either throw or return a value. The caller
+ * must bound each attempt by its remaining deadline; this helper bounds retry
+ * admission and backoff, not arbitrary work performed inside `fn`.
  * Returning a value that `shouldRetryResult` accepts (e.g. a response carrying
  * a 503) also triggers a retry; the last result is returned once attempts run
  * out, so callers still get the real status to act on rather than an exception.
@@ -133,4 +156,5 @@ module.exports = {
   isTransientStatus,
   backoffDelay,
   TRANSIENT_ERROR_CODES,
+  createAttemptTimeoutError,
 };

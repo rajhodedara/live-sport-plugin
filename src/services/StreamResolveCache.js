@@ -22,6 +22,7 @@ const sharedRevision = value => typeof value === 'string' && /^[a-f0-9-]{36}$/i.
 const { withTimingWork } = require('./TimingContext');
 const resolverConflictState = require('./ResolverConflictState');
 const { allowsLegacyResolverTcp } = require('./ResolverTrustPolicy');
+const { createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError } = require('./StreamResolutionOutcome');
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
 // generic structuredClone serializer by 5-15x on these shapes, and cloneStream
@@ -129,7 +130,7 @@ class StreamResolveCache {
     this.inFlight = new Map();  // key -> Promise (mint in progress)
     this.pendingOperations = new Map(); // key -> locally prunable operation
     this.ttl = new Map();       // sourceName -> learned TTL ms
-    this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, evictions: 0 };
+    this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, deferredHits: 0, deferrals: 0, evictions: 0 };
   }
 
   _extractTokenRemainingMs(url) {
@@ -219,9 +220,20 @@ class StreamResolveCache {
     return e.status === 'ok';
   }
 
+  /** Local inconclusive cooldown only; never treats a negative result as one. */
+  isDeferred(key) {
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    if (Date.now() >= entry.expiresAt) {
+      this.entries.delete(key);
+      return false;
+    }
+    return entry.status === 'deferred';
+  }
+
   /**
-   * O(1) check if a key is currently resolved (positive 'ok' OR negative 'failed')
-   * and unexpired — prevents duplicate prewarm re-minting of processed sources.
+   * O(1) check if a key has an unexpired positive, negative or short local
+   * deferred result — prevents duplicate prewarm work during its cooldown.
    */
   isResolved(key, minRemainingMs = 0) {
     const e = this.entries.get(key);
@@ -332,7 +344,8 @@ class StreamResolveCache {
       this.entries.delete(key);
       this.entries.set(key, existing);
       if (existing.status !== 'ok') {
-        this.statsCounters.negativeHits++;
+        if (existing.status === 'deferred') this.statsCounters.deferredHits++;
+        else this.statsCounters.negativeHits++;
         return [];
       }
       this.statsCounters.hits++;
@@ -445,6 +458,20 @@ class StreamResolveCache {
     const parts = key.split(':');
     const sourceName = parts[0];
     const matchId = parts[1];
+    const releaseOwnedClaim = async () => {
+      if (!claimed || typeof ownerToken !== 'string' || !ownerToken || !this._sharedAvailable()) return;
+      // A stale token is rejected atomically by the resolver. Never send an
+      // unfenced DELETE or replace a newer owner's result on a deferral.
+      try {
+        await this._sharedJson(`${_sharedKey(key)}?ownerToken=${encodeURIComponent(ownerToken)}`, { method: 'DELETE' }, 1000);
+      } catch (_) { /* retain local cooldown; the fenced claim self-expires */ }
+    };
+    const storeDeferred = outcome => {
+      const entry = this._set(key, sourceName, matchId, [], 'deferred', outcome.retryAfterMs);
+      entry.reason = outcome.reason;
+      this.statsCounters.deferrals++;
+    };
+    let deferred = null;
     const p = (async () => {
       try {
         const streams = await (operation.timingWork
@@ -452,7 +479,18 @@ class StreamResolveCache {
           : withTimingWork(null, mintFn));
         // Pruning can run while the provider is resolving. Discard both
         // positive and negative late answers before touching either cache.
-        if (operation.pruned) return;
+        if (operation.pruned) {
+          if (isDeferredResolution(streams)) await releaseOwnedClaim();
+          return;
+        }
+        if (isDeferredResolution(streams)) {
+          deferred = streams;
+          storeDeferred(streams);
+          // The resolver protocol remains ok/failed/minting only. A short
+          // local cooldown must not become a shared 30-second dead verdict.
+          await releaseOwnedClaim();
+          return;
+        }
         let status = 'failed';
         let ttl = this.negativeTtlMs;
         let localEntry;
@@ -508,8 +546,27 @@ class StreamResolveCache {
             }
           }
         }
-      } catch (_) {
-        if (operation.pruned) return;
+      } catch (error) {
+        if (operation.pruned) {
+          if (isDeferredResolution(error) || isInconclusiveResolutionError(error)) await releaseOwnedClaim();
+          return;
+        }
+        if (deferred || isDeferredResolution(error) || isInconclusiveResolutionError(error)) {
+          if (!deferred) {
+            let reason = 'timeout';
+            // The predicate has already validated this finite cause chain.
+            // Keep the local reason accurate even when a wrapper has its own
+            // unrelated code instead of masking the underlying capacity error.
+            for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
+              if (current.name === 'AbortError') { reason = 'cancelled'; break; }
+              if (current.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(current.code || '')) reason = 'capacity';
+            }
+            deferred = isDeferredResolution(error) ? error : createDeferredResolution(reason);
+            storeDeferred(deferred);
+          }
+          await releaseOwnedClaim();
+          return;
+        }
         this._set(key, sourceName, matchId, [], 'failed', this.negativeTtlMs);
         // Release the shared mint claim so other workers don't stall up to
         // SHARED_POLL_MAX_MS waiting for a result we failed to produce.
@@ -615,6 +672,8 @@ class StreamResolveCache {
       hits: this.statsCounters.hits,
       misses: this.statsCounters.misses,
       negativeHits: this.statsCounters.negativeHits,
+      deferredHits: this.statsCounters.deferredHits,
+      deferrals: this.statsCounters.deferrals,
       evictions: this.statsCounters.evictions,
       learnedTtls: Object.fromEntries(this.ttl)
     };

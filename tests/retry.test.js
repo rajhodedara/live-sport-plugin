@@ -5,6 +5,7 @@ const {
   isTransientError,
   isTransientStatus,
   backoffDelay,
+  createAttemptTimeoutError,
 } = require('../src/services/retry');
 
 // Keep the suite fast: the policy is about *which* failures are retried and
@@ -17,15 +18,30 @@ describe('transient classification', () => {
     expect(isTransientError(Object.assign(new Error('boom'), { code: 'UND_ERR_HEADERS_TIMEOUT' }))).toBe(true);
     expect(isTransientError(new Error('socket hang up'))).toBe(true);
     expect(isTransientError(new Error('impit timeout 5000ms'))).toBe(true);
-    expect(isTransientError(Object.assign(new Error('pool busy'), { code: 'ERR_NATIVE_POOL_BUSY' }))).toBe(true);
-    expect(isTransientError(Object.assign(new Error('outbound capacity'), { code: 'ERR_OUTBOUND_CAPACITY' }))).toBe(true);
-    expect(isTransientError(new Error('Native pool capacity reached'))).toBe(true);
+  });
+
+  it('does not retry local capacity after the shared transport has handled fallback', () => {
+    expect(isTransientError(Object.assign(new Error('pool busy'), { code: 'ERR_NATIVE_POOL_BUSY' }))).toBe(false);
+    expect(isTransientError(Object.assign(new Error('outbound capacity'), { code: 'ERR_OUTBOUND_CAPACITY' }))).toBe(false);
+    expect(isTransientError(new Error('Native pool capacity reached'))).toBe(false);
   });
 
   it('treats a nested undici cause as transient', () => {
     const err = new Error('fetch failed');
     err.cause = Object.assign(new Error('inner'), { code: 'ECONNREFUSED' });
     expect(isTransientError(err)).toBe(true);
+  });
+
+  it('does not let an unrelated wrapper code mask a typed timeout cause', () => {
+    const cause = Object.assign(new Error('inner'), { code: 'ETIMEDOUT' });
+    const error = Object.assign(new Error('wrapped fetch failed'), { code: 'ERR_FETCH_FAILED', cause });
+    expect(isTransientError(error)).toBe(true);
+  });
+
+  it('does not retry a wrapped caller cancellation even under a timeout wrapper', () => {
+    const cause = new DOMException('caller stopped', 'AbortError');
+    const error = Object.assign(new Error('wrapped'), { name: 'TimeoutError', code: 'ETIMEDOUT', cause });
+    expect(isTransientError(error)).toBe(false);
   });
 
   it('does not retry our own bugs', () => {
@@ -38,6 +54,49 @@ describe('transient classification', () => {
     const err = new Error('The operation was aborted');
     err.name = 'AbortError';
     expect(isTransientError(err)).toBe(false);
+    err.deadlineExceeded = true;
+    err.code = 'ETIMEDOUT';
+    expect(isTransientError(err)).toBe(false);
+  });
+
+  it('recognizes typed attempt and transport deadlines without message matching', () => {
+    expect(isTransientError(createAttemptTimeoutError())).toBe(true);
+    expect(isTransientError(new DOMException('Shared outbound deadline', 'TimeoutError'))).toBe(true);
+    expect(isTransientError(new DOMException('Native fetch deadline', 'TimeoutError'))).toBe(true);
+  });
+
+  it.each(['ERR_OUTBOUND_BLOCKED', 'ERR_OUTBOUND_CAPACITY', 'ERR_NATIVE_POOL_BUSY', 'ERR_NATIVE_SLOT_CAPACITY'])(
+    'does not retry local refusal %s even when it looks like a timeout', code => {
+      const error = Object.assign(new Error('network timeout temporarily'), { code, name: 'TimeoutError' });
+      expect(isTransientError(error)).toBe(false);
+    }
+  );
+
+  it('does not retry a fatal error or nested guard refusal', () => {
+    expect(isTransientError(Object.assign(createAttemptTimeoutError(), { isFatal: true }))).toBe(false);
+    const cause = Object.assign(new Error('blocked'), { code: 'ERR_OUTBOUND_BLOCKED' });
+    expect(isTransientError(Object.assign(createAttemptTimeoutError(), { cause }))).toBe(false);
+  });
+
+  it.each([
+    { code: 'ERR_OUTBOUND_BLOCKED' },
+    { code: 'ERR_OUTBOUND_CAPACITY' },
+    { name: 'AbortError' }
+  ])('does not retry a deeply wrapped refusal or cancellation: %o', terminal => {
+    const inner = Object.assign(new Error('terminal'), terminal);
+    const middle = Object.assign(new Error('middle'), { code: 'ERR_FETCH_FAILED', cause: inner });
+    const outer = Object.assign(createAttemptTimeoutError(), { cause: middle });
+    expect(isTransientError(outer)).toBe(false);
+  });
+
+  it('fails closed for cyclic, overdeep or throwing cause chains', () => {
+    const cyclic = createAttemptTimeoutError(); cyclic.cause = cyclic;
+    expect(isTransientError(cyclic)).toBe(false);
+    let deep = createAttemptTimeoutError();
+    for (let i = 0; i < 8; i++) deep = Object.assign(new Error('wrapped'), { cause: deep });
+    expect(isTransientError(deep)).toBe(false);
+    const throwing = Object.defineProperty(createAttemptTimeoutError(), 'cause', { get() { throw Error('broken cause'); } });
+    expect(isTransientError(throwing)).toBe(false);
   });
 
   it('retries overload statuses but believes refusals', () => {

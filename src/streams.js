@@ -1,21 +1,8 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
-const { withRetry, isTransientStatus, isTransientError: retryIsTransientError } = require('./services/retry');
-
-function isCapacityError(err) {
-  if (!err) return false;
-  const code = err.code || (err.cause && err.cause.code) || err.transportCode;
-  if (code === 'ERR_OUTBOUND_CAPACITY' || code === 'ERR_NATIVE_POOL_BUSY') return true;
-  const msg = String(err.message || '');
-  return /capacity|native pool/i.test(msg);
-}
-
-function isTransientError(err) {
-  if (!err) return false;
-  if (isCapacityError(err)) return true;
-  return retryIsTransientError(err);
-}
+const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutError } = require('./services/retry');
+const { createDeferredResolution, isInconclusiveResolutionError } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
@@ -342,8 +329,8 @@ async function dispatchToProvider(sourceName, src, match) {
 const RESOLVE_ATTEMPTS = Number(process.env.RESOLVE_ATTEMPTS || 2);
 const RESOLVE_TOTAL_BUDGET_MS = Number(process.env.RESOLVE_TOTAL_BUDGET_MS || 12000);
 
-// Resolve a single source (extracted from handleStream, logic unchanged)
-async function resolveSource(src, match, config) {
+// Resolve one source, retaining inconclusive local failures for the mint/cache layer.
+async function resolveSource(src, match, config, opts = {}) {
   if (isEventStreamSource(src)) {
     return [];
   }
@@ -353,11 +340,15 @@ async function resolveSource(src, match, config) {
 
   try {
     const deadlineAt = Date.now() + RESOLVE_TOTAL_BUDGET_MS;
-    resStreams = await withRetry(() => dispatchToProvider(sourceName, src, match), {
+    resStreams = await withRetry(() => {
+      opts?.signal?.throwIfAborted();
+      return dispatchToProvider(sourceName, src, match);
+    }, {
       attempts: RESOLVE_ATTEMPTS,
       baseDelayMs: 300,
       maxDelayMs: 1200,
       deadlineAt,
+      shouldRetryError: error => !opts?.signal?.aborted && isTransientError(error),
       label: `resolve:${sourceName}`,
       // An empty result is a real answer ("nothing on offer"), not a failure —
       // retrying it would spend the budget to be told the same thing twice.
@@ -370,6 +361,7 @@ async function resolveSource(src, match, config) {
       s._source = sourceName;
     }
   } catch (e) {
+    reportInconclusiveResolution(e, opts);
     // Distinguish "the network flaked and kept flaking" from "this provider is
     // broken": the first is expected noise, the second wants a stack trace.
     if (isTransientError(e)) {
@@ -726,6 +718,62 @@ function verificationHeaders(stream) {
     .map(([name, value]) => [canonical.get(name.toLowerCase()) || name, value]));
 }
 
+function reportInconclusiveResolution(error, options) {
+  if (!options?.signal?.aborted && !isInconclusiveResolutionError(error)) return false;
+  let reason = 'cancelled';
+  if (!options?.signal?.aborted) {
+    const chain = [], seen = new Set();
+    try {
+      for (let current = error; current && typeof current === 'object'; current = current.cause) {
+        if (seen.has(current) || chain.length >= 8) return false;
+        seen.add(current); chain.push(current);
+      }
+      reason = chain.some(item => item.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(item.code || ''))
+        ? 'capacity' : chain.some(item => item.name === 'AbortError') ? 'cancelled' : 'timeout';
+    } catch (_) { return false; }
+  }
+  try {
+    const reported = options?.onInconclusive?.(reason);
+    if (reported && typeof reported.catch === 'function') reported.catch(() => {});
+  } catch (_) { /* diagnostics must not change verification outcomes */ }
+  return true;
+}
+
+async function runVerificationAttempt(targetUrl, headers, deadlineAt, options) {
+  options?.signal?.throwIfAborted();
+  const remainingMs = deadlineAt - Date.now();
+  const timeoutMs = Math.min(VERIFY_TIMEOUT_MS, remainingMs);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw createAttemptTimeoutError();
+  const timeout = new AbortController();
+  const signal = AbortSignal.any([timeout.signal, ...(options?.signal ? [options.signal] : [])]);
+  const timer = setTimeout(() => timeout.abort(createAttemptTimeoutError()), timeoutMs);
+  let abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try {
+    // Bound both fetch and body consumption, even if a transport/mock neglects
+    // cancellation. The guarded transport independently owns its native lease.
+    const work = Promise.resolve().then(async () => {
+      signal.throwIfAborted();
+      const response = await _safeFetch(targetUrl, {
+        method: 'GET', headers, signal, timeoutMs, attempts: 1,
+        maxBodyBytes: VERIFY_BODY_MAX_BYTES
+      });
+      signal.throwIfAborted();
+      const body = await response.text();
+      signal.throwIfAborted();
+      return { status: response.status, body, bodyTruncated: response.bodyTruncated === true };
+    });
+    return await Promise.race([work, cancelled]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
@@ -803,33 +851,12 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
       try {
         const result = await withRetry(
-          async () => {
-            // A fresh controller per attempt: a controller that already fired
-            // aborts the retry the moment it starts.
-            const attemptController = new AbortController();
-            const attemptTimer = setTimeout(() => attemptController.abort(), VERIFY_TIMEOUT_MS);
-            try {
-              // _safeFetch handles impit -> undici fallback automatically on all platforms.
-              // attempts:1 — retrying is this layer's job, so the two do not compound
-              // into a multi-minute stall.
-              const r = await _safeFetch(targetUrl, {
-                method: 'GET',
-                headers: reqHeaders,
-                signal: attemptController.signal,
-                timeoutMs: VERIFY_TIMEOUT_MS,
-                attempts: 1,
-                // Verification only needs a manifest prefix, not an arbitrarily large body.
-                maxBodyBytes: VERIFY_BODY_MAX_BYTES,
-              });
-              return { status: r.status, body: await r.text(), bodyTruncated: r.bodyTruncated === true };
-            } finally {
-              clearTimeout(attemptTimer);
-            }
-          },
+          () => runVerificationAttempt(targetUrl, reqHeaders, verifyDeadlineAt, opts),
           {
             attempts: VERIFY_ATTEMPTS,
             deadlineAt: verifyDeadlineAt,
             label: 'verify',
+            shouldRetryError: error => !opts?.signal?.aborted && isTransientError(error),
             shouldRetryResult: (r) => isTransientStatus(r.status),
             onRetry: ({ attempt, delay, result, error }) => {
               const why = error ? error.message : `HTTP ${result.status}`;
@@ -841,9 +868,10 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         bodySample = result.body;
         bodyTruncated = result.bodyTruncated === true;
       } catch (fetchErr) {
-        const kind = isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
+        const inconclusive = reportInconclusiveResolution(fetchErr, opts);
+        const kind = inconclusive ? 'temporarily unavailable' : isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
-        if (cacheKey && !isCapacityError(fetchErr)) resolveCache.noteFailure(cacheKey);
+        if (cacheKey && !inconclusive) resolveCache.noteFailure(cacheKey);
         return null;
       }
 
@@ -872,15 +900,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
               'Referer': guess,
               'Origin': new URL(guess).origin,
             };
-            const r2 = await _safeFetch(targetUrl, {
-              method: 'GET',
-              headers: retryHeaders,
-              timeoutMs: VERIFY_TIMEOUT_MS,
-              attempts: 1,
-              maxBodyBytes: VERIFY_BODY_MAX_BYTES,
-            });
+            const r2 = await runVerificationAttempt(targetUrl, retryHeaders, verifyDeadlineAt, opts);
             res = { status: r2.status };
-            bodySample = await r2.text();
+            bodySample = r2.body;
             bodyTruncated = r2.bodyTruncated === true;
             if (res.status === 200) {
               referer = guess;
@@ -888,7 +910,10 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
               repairedHeaders = retryHeaders;
             }
           }
-        } catch (_) { /* fall through to the dead-stream handling below */ }
+        } catch (repairError) {
+          if (reportInconclusiveResolution(repairError, opts)) return null;
+          /* otherwise retain the upstream refusal below */
+        }
       }
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
@@ -989,6 +1014,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
+      reportInconclusiveResolution(err, opts);
       console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${err.message}`);
       return null;
     }
@@ -1000,11 +1026,20 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 // Mint streams for a single source and health-verify them before they enter the
 // cache, so verification runs once per mint instead of on every request.
 async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
-  const options = opts || {};
+  let inconclusiveReason = null;
+  const options = { ...(opts || {}), onInconclusive(reason) {
+    if (!inconclusiveReason) inconclusiveReason = reason;
+    try {
+      const reported = opts?.onInconclusive?.(reason);
+      if (reported && typeof reported.catch === 'function') reported.catch(() => {});
+    } catch (_) { /* caller diagnostics must not poison the mint */ }
+  } };
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
-  const minted = await resolveSource(src, match, config);
-  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
+  const minted = await resolveSource(src, match, config, options);
+  const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
+  return verified.length === 0 && inconclusiveReason
+    ? createDeferredResolution(inconclusiveReason) : verified;
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -1389,10 +1424,14 @@ async function handleStream(type, id, config) {
     // findMatch accepts aliases; prewarm and remint identify the stored row.
     const key = resolveKey(src, match.id);
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
-    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
+    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [],
+      inconclusive: Boolean(resolveCache.isDeferred?.(key)) };
     const promise = resolveCache
-      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key), timingStream)
+      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+        onInconclusive() { state.inconclusive = true; }
+      }), timingStream)
       .then((minted) => {
+        state.inconclusive = state.inconclusive || Boolean(resolveCache.isDeferred?.(key));
         state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
         state.settled = true;
         return state.value;
@@ -1849,14 +1888,15 @@ async function handleStream(type, id, config) {
   }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
-  // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
+  // Positive and definite results retain the existing client cache windows.
+  // An empty inconclusive response must not pin a temporary miss for 30 seconds.
 
-
+  const inconclusiveEmpty = streams.length === 0 && inFlight.some(state => state.inconclusive || !state.settled);
   return {
     streams,
-    cacheMaxAge: 30,
-    staleRevalidate: 30,
-    staleError: 60
+    cacheMaxAge: inconclusiveEmpty ? 2 : 30,
+    staleRevalidate: inconclusiveEmpty ? 0 : 30,
+    staleError: inconclusiveEmpty ? 0 : 60
   };
 }
 
@@ -1952,6 +1992,7 @@ module.exports = {
   // Exported for tests: the retry/keep/drop policy is the part worth pinning
   // down, and driving it through handleStream would need the whole match cache.
   verifyStreams,
+  mintVerifiedSources,
   guardedProbeFetch,
   buildProbeSegmentUrl,
   readProbeBytes,
