@@ -35,6 +35,8 @@
 
 'use strict';
 
+require('dotenv').config();
+
 const JSON_OUT = process.argv.includes('--json');
 const QUIET = process.argv.includes('--quiet') || JSON_OUT;
 

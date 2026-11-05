@@ -89,6 +89,22 @@ describe('DaddyLiveProvider', () => {
     });
   });
 
+  describe('isCloakedStream', () => {
+    test('flags cloaked domain signatures and png chunks', () => {
+      expect(DaddyLiveProvider.isCloakedStream('https://edge.wedd48c.top/premium31/index.m3u8')).toBe(true);
+      expect(DaddyLiveProvider.isCloakedStream('https://cowedd4855ws.net/live/index.m3u8')).toBe(true);
+      expect(DaddyLiveProvider.isCloakedStream('https://cdn.tiktokcdn.com/live/stream.m3u8')).toBe(true);
+      expect(DaddyLiveProvider.isCloakedStream('https://stream.example.com/hls/segment.png')).toBe(true);
+      expect(DaddyLiveProvider.isCloakedStream('https://stream.example.com/hls/segment.png?token=abc')).toBe(true);
+    });
+
+    test('preserves legitimate plain-TS and clean stream manifests', () => {
+      expect(DaddyLiveProvider.isCloakedStream('https://cdn.wideiptv.top/TNT1UK/index.m3u8')).toBe(false);
+      expect(DaddyLiveProvider.isCloakedStream('https://643t8a.7odxv0l067ka.net:8443/hls/live.m3u8')).toBe(false);
+      expect(DaddyLiveProvider.isCloakedStream('https://cdn.example.com/live/master.m3u8')).toBe(false);
+    });
+  });
+
   describe('getMatches and schedule parsing', () => {
     test('parses UK GMT schedule headers, extracts teams, leagues, and dates', async () => {
       const mockSchedule = {
@@ -319,7 +335,13 @@ describe('DaddyLiveProvider', () => {
       expect(stream.title).toContain('A&E USA');
       expect(stream.url).toContain('/api/manifest?url=' + encodeURIComponent(mockStreamUrl));
       expect(stream.behaviorHints.notWebReady).toBe(false);
-      expect(stream.behaviorHints.proxyHeaders).toBeUndefined();
+      expect(stream.behaviorHints.proxyHeaders).toEqual({
+        request: {
+          'Origin': 'https://tiestep.top',
+          'Referer': 'https://tiestep.top/',
+          'User-Agent': expect.stringContaining('Chrome/132')
+        }
+      });
     });
 
     test('falls back to EmbedExtractorChain if _econfig is not present', async () => {

@@ -9,6 +9,25 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// These errors describe local admission pressure, not an answer from a mirror.
+// Preserve their identity so the stream pipeline can defer this source without
+// rotating mirrors, refreshing auth, or recording an empty provider verdict.
+const LOCAL_CAPACITY_CODES = new Set([
+  'ERR_OUTBOUND_CAPACITY', 'ERR_NATIVE_POOL_BUSY', 'ERR_NATIVE_POOL_CAPACITY'
+]);
+function isLocalCapacityError(error) {
+  if (!error || typeof error !== 'object') return false;
+  try {
+    const chain = [], seen = new Set();
+    for (let current = error; current && typeof current === 'object'; current = current.cause) {
+      if (seen.has(current) || chain.length >= 8) return false;
+      seen.add(current);
+      chain.push(current);
+    }
+    return chain.some(item => LOCAL_CAPACITY_CODES.has(item.code));
+  } catch (_) { return false; }
+}
+
 // ─── Dual-Ping Auth Token Manager ───────────────────────────────────────────
 // Centralized token ring shared across all requests.
 // Implements primary (vypn.net) -> fallback (lokke.app) failover.
@@ -148,6 +167,7 @@ class VavooTokenManager {
     try {
       return await this._pingVypn(fetchFn);
     } catch (vypnErr) {
+      if (isLocalCapacityError(vypnErr)) throw vypnErr;
       console.warn(`[VavooProvider] Primary ping (vypn.net) failed: ${vypnErr.message}. Failing over to lokke.app...`);
     }
 
@@ -155,6 +175,7 @@ class VavooTokenManager {
     try {
       return await this._pingLokke(fetchFn);
     } catch (lokkeErr) {
+      if (isLocalCapacityError(lokkeErr)) throw lokkeErr;
       console.error(`[VavooProvider] Secondary ping (lokke.app) failed: ${lokkeErr.message}.`);
       throw new Error(`Dual-ping authentication exhausted: vypn.net & lokke.app both unreachable.`);
     }
@@ -490,14 +511,18 @@ class VavooProvider extends BaseProvider {
                 this.tokenManager.sig = refreshed.sig;
                 this.tokenManager.validUntil = refreshed.validUntil;
               }
-            } catch (_) {}
+            } catch (refreshErr) {
+              if (isLocalCapacityError(refreshErr)) throw refreshErr;
+            }
             this.baseIndex = (siteIndex + 1) % VAVOO_BASE_SITES.length;
             continue;
           }
 
           let j = null;
           if (resolveRes.ok) {
-            try { j = await resolveRes.json(); } catch (_) {}
+            try { j = await resolveRes.json(); } catch (parseErr) {
+              if (isLocalCapacityError(parseErr)) throw parseErr;
+            }
             if (Array.isArray(j) && j[0]?.url) {
               streamUrl = String(j[0].url);
             } else if (j?.url) {
@@ -506,7 +531,9 @@ class VavooProvider extends BaseProvider {
               streamUrl = String(j.data.url);
             }
           } else {
-            try { j = await resolveRes.json(); } catch (_) {}
+            try { j = await resolveRes.json(); } catch (parseErr) {
+              if (isLocalCapacityError(parseErr)) throw parseErr;
+            }
           }
 
           const isNotFound = resolveRes.status === 404 || resolveRes.status === 410;
@@ -535,6 +562,7 @@ class VavooProvider extends BaseProvider {
             console.warn(`[${this.name}] Empty URL in resolve response from ${baseSite} for "${matchTitle}"`);
           }
         } catch (fetchErr) {
+          if (isLocalCapacityError(fetchErr)) throw fetchErr;
           lastErr = fetchErr;
           console.warn(`[${this.name}] Network error resolving on ${baseSite}: ${fetchErr.message}, switching base site...`);
           this.baseIndex = (siteIndex + 1) % VAVOO_BASE_SITES.length;
@@ -649,6 +677,7 @@ class VavooProvider extends BaseProvider {
         }
       })];
     } catch (err) {
+      if (isLocalCapacityError(err)) throw err;
       console.warn(`[${this.name}] Stream resolution failed for "${matchTitle}":`, err.message);
       return [];
     }
@@ -703,7 +732,9 @@ class VavooProvider extends BaseProvider {
         try {
           catData = await catalogRes.json();
           items = Array.isArray(catData?.items) ? catData.items : [];
-        } catch (_) {}
+        } catch (parseErr) {
+          if (isLocalCapacityError(parseErr)) throw parseErr;
+        }
       }
 
       if (items.length === 0 && src.group) {
@@ -735,7 +766,9 @@ class VavooProvider extends BaseProvider {
             const fbData = await fallbackRes.json();
             items = Array.isArray(fbData?.items) ? fbData.items : [];
           }
-        } catch (_) {}
+        } catch (fallbackErr) {
+          if (isLocalCapacityError(fallbackErr)) throw fallbackErr;
+        }
       }
 
       if (items.length === 0) return null;
@@ -798,6 +831,7 @@ class VavooProvider extends BaseProvider {
         }
       }
     } catch (err) {
+      if (isLocalCapacityError(err)) throw err;
       console.warn(`[${this.name}] Dynamic fallback error for "${matchTitle}":`, err.message);
     }
     return null;

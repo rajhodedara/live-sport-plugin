@@ -322,6 +322,16 @@ https://cdn.example.com/sony1.m3u8|User-Agent=ExoPlayer
       expect(network.sources[0].source).toBe('sktech');
     });
 
+    test('does not poison cache when fetchChannels returns empty array', async () => {
+      jest.spyOn(matchResolver, 'fetchLiveMatches').mockResolvedValue([]);
+      jest.spyOn(channelResolver, 'fetchChannels').mockResolvedValueOnce([]);
+
+      provider.clearCache();
+      const matches = await provider.getMatches();
+      expect(matches).toEqual([]);
+      expect(provider._cachedChannelEntities).toBeNull();
+      expect(provider._cachedChannelEntitiesTime).toBe(0);
+    });
     test('resolveStream returns StreamEntities with direct CDN links and proxyHeaders', async () => {
       jest.spyOn(matchResolver, 'resolveMatchStreams').mockResolvedValueOnce([
         {

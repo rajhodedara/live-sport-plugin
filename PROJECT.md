@@ -1,59 +1,58 @@
-# Project: Nuvio Live Sports Plugin Replay & Streaming Pipeline
+# Project: Scorezone Provider Integration & VPS Deployment
 
 ## Architecture
-- Module/package boundaries, data flow, shared interfaces:
-  - **Providers** (`src/providers/`): Scrape replays and live streams (ReplayZoneProvider, FullRacesProvider, SoccerFullProvider, LiveTVProvider).
-  - **Match Aggregator** (`src/services/MatchAggregator.js`): Ingests provider fixtures/replays, deduplicates matches, normalizes dates, merges multi-provider stream sources.
-  - **Cache Service** (`src/services/CacheService.js`, `src/data/matches_cache.json`): Persists matches across runs with fast index lookups.
-  - **Catalog Presentation** (`src/catalog.js`): Surfaces matches into Stremio catalogs, replay subfilters, and replay hubs.
-  - **Stream Resolution** (`src/streams.js`, `src/providers/*Provider.js`): Extracts playable HLS/MP4 URLs and headers (SprintCDN, Byse, Uppod/azplay, OK.ru, Dailymotion).
-  - **Build & Daemon Server** (`dist/index.js`, `package.json`, `@vercel/ncc`): Production bundling and standalone HTTP daemon on port 7000.
+- **Language & Runtime**: Node >= 22, CommonJS only. Express 4 + stremio-addon-sdk + Awilix DI container.
+- **Provider Pattern**: `ScoreZoneProvider` inherits from `BaseProvider`, scraped upstream from `https://testscore.pxxl.pro`.
+- **Egress Stack (PR #59 / PR #61 / Invariant I10)**: All outbound HTTP requests route through `BaseProvider.prototype.proxyFetch` or `ProviderOutbound.safeFetch` with `guardExternal: true`, connect-time DNS validation (`OutboundUrlGuard`), and `SharedOutboundFetch` native slot pool queueing with Undici capacity fallback.
+- **Delivery Model (Invariant I1 / Decision D1)**: Master and variant playlists proxied through `/api/scorezone/manifest/...` (manifest text only). Media segments (.ts) rewritten to direct upstream CDN URLs with `behaviorHints.proxyHeaders`. Zero bulk media bytes transit the server.
+- **Security & Tokens**: HMAC SHA256 signing of `sourceId` using `APP_SECRET` / `SESSION_SECRET` with non-production fallback.
+- **Memory Retention (Decision D4)**: All in-memory caches (`tokenCache`, `playlistCache`, `ipRateLimits`, `_channelCache`) strictly bounded with FIFO eviction to respect 1500 MB PM2 memory ceiling.
+- **Registration (Invariant I4)**:
+  - `src/container.js`: `scorezoneProvider: asClass(ScoreZoneProvider).singleton()`
+  - `src/services/MatchAggregator.js`: Injected and conditionally registered in `this.providers` via `isEnabled()`
+  - `src/streams.js`: Priority, known sources, display names, prewarm skipping, and `dispatchToProvider`
+  - `src/index.js`: Route mounted above `/api` gates, prefix in `STREAM_PREFIXES`, regex in `streamMatch`
 
 ## Feature Inventory
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | Motorsport Session Classification | Classify FP1/FP2/FP3, Qualifying, Sprint, Main Race deterministically and prevent session merging | M1 | survey_1 |
-| 2 | Motorsport Series Classification | Disambiguate F1, F2, F3, F4, Formula E, NASCAR, IndyCar, MotoGP, WSBK, WRC, DTM and prevent series cross-merging | M1 | survey_1 |
-| 3 | Token & Date Window Sanitization | Add generics filter ('full', 'replay', 'show', months) and strict date window / date-0 guard in MatchAggregator | M1 | survey_1 |
-| 4 | idIndex Verification Guard | Verify candidate matches in idIndex via _sameEventPre before adopting index | M1 | survey_1 |
-| 5 | Team Delimiter Guard for Motorsport | Prevent hyphen splitting in race titles from creating fake teams and overwriting Grand Prix titles | M1 | survey_1 |
-| 6 | matches_cache.json Sanitization | Purge bloated black-hole entries (e.g. Barcelona shakedown 204 aliases) and restore standalone F1/NASCAR/MotoGP | M1 | survey_1 |
-| 7 | SoccerFull Date Ingestion | Ensure SoccerFullProvider assigns valid ISO date strings (YYYY-MM-DD) so matches sort correctly and populate date hubs | M2 | survey_2 |
-| 8 | Football Replay Subfilter & Catalog Visibility | Ensure standalone SoccerFull matches populate page 1 and are not dropped by date subfilters | M2 | survey_2 |
-| 9 | LiveTV Mirror & Referer Handling | Preserve dynamic emb.apl\d+.online domains and attach Referer header to prevent 403 bot blocks | M2 | survey_2 |
-| 10 | Multi-Part Replay Source Preservation | In streams.js, ensure secondary replay provider sources (SoccerFull) are not discarded when selecting episode candidates | M2 | survey_2 |
-| 11 | SprintCDN Stream Playback & Web-Readiness | Retain notWebReady: false for SprintCDN streams with open CORS to enable web client playback | M2 | survey_2 |
-| 12 | Manchester City vs PSG Stream Resolution | Verify functional playback URL resolution for Manchester City vs PSG replay | M2 | survey_2 |
-| 13 | Full Jest Test Suite Validation | 100% green test passing across all existing and new test suites (0 failures) | M3 | survey_3 |
-| 14 | Production Bundle & Daemon Verification | npm run build succeeds and daemon server starts cleanly on port 7000 serving manifest | M3 | survey_3 |
-| 15 | GEMINI.md Commit Compliance | Structured commit message with summary, Before & After breakdown, and measured impact metrics | M3 | survey_3 |
+| 1 | Branch Rebase & Conflict Resolution | Rebase `feature/scorezone-provider` commits (`fc27ed6`, `1780143`, `3109411`) onto `stable` (`b1399cf`), resolving conflicts in `.env.example`, `src/index.js`, `src/streams.js` | M1 | Survey |
+| 2 | Guarded Egress Migration | Replace direct `impitClient.safeFetch` in `ScoreZoneProvider.js` and `scoreZoneStream.js` with `BaseProvider.prototype.proxyFetch` / `ProviderOutbound.safeFetch` (`guardExternal: true`) | M1 | Survey / PR #59 |
+| 3 | Pre-flight Check Alignment | Reset `behaviorHints.notWebReady: false` (with `proxyHeaders`) in `ScoreZoneProvider.js` to prevent `verifyStreams` dropping proxy URLs | M1 | Survey / PR #61 |
+| 4 | Cache Capacity Bounds | Enforce FIFO size limits on `tokenCache` (1000), `playlistCache` (1000), `ipRateLimits` (5000), and `_channelCache` (500) | M1 | Survey / D4 |
+| 5 | DI & Aggregator & Stream Registration | Register `ScoreZoneProvider` in `src/container.js`, `src/services/MatchAggregator.js`, `src/streams.js`, and `src/index.js` | M1 | Survey / I4 |
+| 6 | Scorezone Unit & Integration Tests | Update `tests/scorezoneProvider.test.js` to spy on `ProviderOutbound.safeFetch` and verify 17/17 tests pass | M1 | Survey |
+| 7 | Full Regression Test Suite | Verify `node --check` syntax on all files, run targeted tests, and run full suite (`npm test`, 284+ test files) | M2 | R3 |
+| 8 | Multi-Agent Review & Gate Check | Reviewers, Challengers, and Forensic Auditor gate verification | M2 | System |
+| 9 | Production VPS Deployment | Push `stable` to `origin/stable`, deploy to VPS, build staged `dist.next`, swap `dist`, reload PM2 cluster, and live verify | M3 | R4 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Motorsport Deduplication & Cache Sanitization | MatchAggregator session/series classifiers, idIndex guard, date guards, cache cleanup, new unit tests | none | IN_PROGRESS |
-| 2 | Football Replay Pipeline & Multi-Source Stream Resolution | SoccerFull date generation, LiveTV domain/referer fix, streams.js multi-part preservation, SprintCDN web readiness | M1 | PLANNED |
-| 3 | Full Test Suite Pass, Production Build, Daemon Verification & Commit Compliance | Run full test suite (100% green), npm run build, daemon server restart verification, commit formatting per GEMINI.md | M1, M2 | PLANNED |
+| M1 | Integration & Architectural Alignment | Rebase Scorezone branch onto `stable`, resolve conflicts, migrate egress to guarded stack, bound caches, and verify Scorezone unit tests | none | PLANNED |
+| M2 | Full Suite Verification & Audit Gate | Syntax verification, full 284-suite regression tests, Reviewer, Challenger, and Forensic Auditor gate checks | M1 | PLANNED |
+| M3 | Production VPS Deployment | Push `stable` to remote, deploy on VPS (staged build `dist.next`, swap `dist`, reload PM2), and verify live endpoint | M2 | PLANNED |
 
 ## Interface Contracts
-### MatchAggregator ↔ CacheService & Catalog
-- Match objects must preserve distinct IDs for distinct sessions (`p1`, `p2`, `p3`, `qualifying`, `sprint`, `race`).
-- `aliasIds` must only contain IDs of the identical event session from other providers.
-- `title` must reflect the true session and series without being overwritten by NASCAR or secondary fixtures.
-- `date` must be an ISO date string (`YYYY-MM-DD`) or valid epoch timestamp.
+### `ScoreZoneProvider` ↔ `MatchAggregator`
+- `getMatches()`: Returns `Promise<MatchEntity[]>`, with `category: String`, `title: String`, `date: String(timestampMs)`, `team1`, `team2`, `sources: [{ id: String, name: String }]`.
+- `isEnabled()`: Returns `Boolean` (`process.env.SCOREZONE_ENABLED === 'true'`).
 
-### SoccerFullProvider / LiveTVProvider ↔ StreamResolver & streams.js
-- SoccerFullProvider returns stream objects with `{ title, url, behaviorHints: { notWebReady: false } }`.
-- LiveTVProvider returns direct MP4 stream or HLS stream without 403 Forbidden errors.
-- `streams.js` preserves all provider streams for multi-part matches and passes valid stream arrays to Stremio.
+### `ScoreZoneProvider` ↔ `streams.js`
+- `resolveStream(sourceId, category, title, src)`: Returns `Promise<StreamEntity[]>`. Emits URL `${BASE_URL}/api/scorezone/manifest/...` with `behaviorHints: { notWebReady: false, proxyHeaders: { Referer, Origin, 'User-Agent' } }`.
+
+### `scoreZoneStream.js` ↔ Upstream CDN
+- Manifest Route: `GET /api/scorezone/manifest/:sourceId/:channelId.m3u8`
+- Egress: Calls `https://testscore.pxxl.pro` via `ProviderOutbound.safeFetch`.
+- Rewriting: Master playlist rewrites variant URLs to `/api/scorezone/manifest/...`. Media playlists rewrite segment URLs (.ts) to direct CDN absolute URLs.
 
 ## Code Layout
-- `src/services/MatchAggregator.js`: Owned by Milestone 1
-- `src/data/matches_cache.json`: Owned by Milestone 1
-- `tests/motorsportSessionIsolation.test.js`: Owned by Milestone 1
-- `src/providers/SoccerFullProvider.js`: Owned by Milestone 2
-- `src/providers/LiveTVProvider.js`: Owned by Milestone 2
-- `src/streams.js`: Owned by Milestone 2
-- `src/catalog.js`: Owned by Milestone 2
-- `tests/soccerFullReplayStreamResolution.test.js`: Owned by Milestone 2
-- `dist/`: Owned by Milestone 3
+- `src/providers/ScoreZoneProvider.js` (Scraper & match/stream generator)
+- `src/routes/scoreZoneStream.js` (HLS manifest proxy router)
+- `src/services/HlsRewriteService.js` (Playlist URI rewriter)
+- `src/services/MatchAggregator.js` (Multi-provider aggregator)
+- `src/container.js` (Awilix DI registration)
+- `src/streams.js` (Stream dispatch & priority)
+- `src/index.js` (Express entry & route mounting)
+- `tests/scorezoneProvider.test.js` (ScoreZone provider & route test suite)
+- `.env.example` (Scorezone configuration options)

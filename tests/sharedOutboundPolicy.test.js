@@ -32,14 +32,32 @@ test('proxy 403 and proxy failures cannot escape via the direct fallback', async
   expect(fallbackFetch).not.toHaveBeenCalled();
 });
 
-test.each(['ERR_OUTBOUND_BLOCKED', 'ERR_NATIVE_POOL_BUSY'])('does not retry or fall back on %s', async code => {
-  const failure = Object.assign(new Error('Controlled denial'), { code });
+test('does not retry or fall back on ERR_OUTBOUND_BLOCKED', async () => {
+  const failure = Object.assign(new Error('Controlled denial'), { code: 'ERR_OUTBOUND_BLOCKED' });
   const nativeFetch = jest.fn(async () => { throw failure; }), fallbackFetch = jest.fn(), delay = jest.fn();
   const fetch = createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay });
-  await expect(fetch('https://cdn.example.org/metadata')).rejects.toMatchObject({
-    code: code === 'ERR_NATIVE_POOL_BUSY' ? 'ERR_OUTBOUND_CAPACITY' : code
-  });
+  await expect(fetch('https://cdn.example.org/metadata')).rejects.toMatchObject({ code: 'ERR_OUTBOUND_BLOCKED' });
   expect(nativeFetch).toHaveBeenCalledTimes(1); expect(fallbackFetch).not.toHaveBeenCalled(); expect(delay).not.toHaveBeenCalled();
+});
+
+test.each(['ERR_NATIVE_POOL_BUSY', 'ERR_OUTBOUND_CAPACITY'])('falls back to Undici on capacity error on direct egress (%s)', async code => {
+  const failure = Object.assign(new Error('Capacity reached'), { code });
+  const nativeFetch = jest.fn(async () => { throw failure; }), fallbackFetch = jest.fn(async () => result(200)), delay = jest.fn();
+  const fetch = createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay });
+  const response = await fetch('https://cdn.example.org/metadata');
+  expect(response.status).toBe(200);
+  expect(nativeFetch).toHaveBeenCalledTimes(1);
+  expect(fallbackFetch).toHaveBeenCalledTimes(1);
+  expect(delay).not.toHaveBeenCalled();
+});
+
+test('does not fall back to direct egress on proxy capacity error', async () => {
+  process.env.WARP_PROXY_URL = 'socks5://127.0.0.1:40000';
+  const failure = Object.assign(new Error('Native pool busy'), { code: 'ERR_NATIVE_POOL_BUSY' });
+  const nativeFetch = jest.fn(async () => { throw failure; }), fallbackFetch = jest.fn(), delay = jest.fn();
+  const fetch = createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay });
+  await expect(fetch('https://messi.damitv.st/live')).rejects.toMatchObject({ code: 'ERR_OUTBOUND_CAPACITY' });
+  expect(fallbackFetch).not.toHaveBeenCalled();
 });
 
 test('a fallback redirect guard rejection wins over the original native 403', async () => {

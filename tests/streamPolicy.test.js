@@ -3,7 +3,9 @@
 const {
   isRelayedDashStream,
   isDashStream,
-  isBlockedDashStream
+  isBlockedDashStream,
+  isPngCloakedStream,
+  isBlockedStream
 } = require('../src/services/StreamPolicy');
 
 const BASE = 'http://192.168.1.10:7000';
@@ -107,5 +109,27 @@ describe('StreamPolicy — bandwidth rules for DASH', () => {
     expect(isBlockedDashStream({ streamUrl: '/api/manifest?url=https%3A%2F%2Fcdn.example.com%2Fchannel.mpd%3Ftoken%3Dfixture' })).toBe(true);
     expect(isBlockedDashStream({ _rawMpdUrl: 'https://cdn.example.com/channel.mpd?token=fixture' })).toBe(true);
     expect(isRelayedDashStream({ url: '/addon/api/dash/video.m3u8?d=fixture' })).toBe(true);
+  });
+
+  describe('isPngCloakedStream & isBlockedStream', () => {
+    test('detects direct and proxied cloaked host domains', () => {
+      expect(isPngCloakedStream({ url: 'https://edge.wedd48c.top/premium31/index.m3u8' })).toBe(true);
+      expect(isBlockedStream({ url: 'https://edge.wedd48c.top/premium31/index.m3u8' })).toBe(true);
+      expect(isPngCloakedStream({ url: `${BASE}/api/manifest?url=https%3A%2F%2Fedge.wedd48c.top%2Fpremium31%2Findex.m3u8` })).toBe(true);
+      expect(isBlockedStream({ url: `${BASE}/api/manifest?url=https%3A%2F%2Fedge.wedd48c.top%2Fpremium31%2Findex.m3u8` })).toBe(true);
+      expect(isPngCloakedStream({ url: 'https://cowedd4855ws.net/live.m3u8' })).toBe(true);
+      expect(isPngCloakedStream({ url: 'https://cdn.tiktokcdn.com/live.m3u8' })).toBe(true);
+    });
+
+    test('detects PNG segment chunk targets', () => {
+      expect(isPngCloakedStream({ url: 'https://cdn.example.com/hls/segment1.png' })).toBe(true);
+      expect(isBlockedStream({ url: 'https://cdn.example.com/hls/segment1.png' })).toBe(true);
+    });
+
+    test('allows legitimate live HLS streams without cloaking', () => {
+      expect(isPngCloakedStream({ url: 'https://cdn.wideiptv.top/TNT1UK/index.m3u8' })).toBe(false);
+      expect(isBlockedStream({ url: 'https://cdn.wideiptv.top/TNT1UK/index.m3u8' })).toBe(false);
+      expect(isBlockedStream({ url: `${BASE}/api/manifest?url=https%3A%2F%2Fcdn.wideiptv.top%2FTNT1UK%2Findex.m3u8` })).toBe(false);
+    });
   });
 });

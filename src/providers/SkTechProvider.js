@@ -138,9 +138,15 @@ class SkTechProvider extends BaseProvider {
         entity.canonicalTitle = canonicalTitle;
         channelEntities.push(entity);
       }
-      this._cachedChannelEntities = channelEntities;
-      this._cachedChannelEntitiesTime = now;
-      matches.push(...channelEntities);
+      if (Array.isArray(channelEntities) && channelEntities.length > 0) {
+        this._cachedChannelEntities = channelEntities;
+        this._cachedChannelEntitiesTime = now;
+        matches.push(...channelEntities);
+      } else if (this._cachedChannelEntities && this._cachedChannelEntities.length > 0) {
+        matches.push(...this._cachedChannelEntities);
+      } else {
+        matches.push(...channelEntities);
+      }
     }
   } catch (err) {
       console.warn(`[${this.name}] Failed to fetch 24/7 channels:`, err.message);

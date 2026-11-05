@@ -1,7 +1,8 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
-const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
+const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutError } = require('./services/retry');
+const { createDeferredResolution, isInconclusiveResolutionError } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
@@ -10,7 +11,7 @@ const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
-const { isBlockedDashStream } = require('./services/StreamPolicy');
+const { isBlockedDashStream, isBlockedStream } = require('./services/StreamPolicy');
 
 let _liveOverlayRef;
 /**
@@ -51,6 +52,7 @@ function isEventStreamSource(src) {
 }
 
 const SOURCE_PRIORITY = {
+  scorezone: 1,
   leaf: 1,
   daddylive: 1,
   vavoo: 2,
@@ -83,8 +85,8 @@ const SOURCE_PRIORITY = {
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -116,7 +118,8 @@ const NICE_NAMES = {
   admin: 'Streamed.pk',
   echo: 'Streamed.pk',
   golf: 'Streamed.pk',
-  delta: 'Streamed.pk'
+  delta: 'Streamed.pk',
+  scorezone: 'ScoreZone'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -142,7 +145,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   vavoo: 'Vavoo',
   ppvst: 'PPV.st',
   ak47live: 'AK47Live',
-  leaf: 'Leaf'
+  leaf: 'Leaf',
+  scorezone: 'ScoreZone'
 };
 
 function isReplaySource(sourceName) {
@@ -299,6 +303,9 @@ async function dispatchToProvider(sourceName, src, match) {
   } else if (sourceName === 'leaf') {
     const provider = container.resolve('leafProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'scorezone') {
+    const provider = container.resolve('scorezoneProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
     const pName = sourceName.replace('yaml_', '');
@@ -322,8 +329,8 @@ async function dispatchToProvider(sourceName, src, match) {
 const RESOLVE_ATTEMPTS = Number(process.env.RESOLVE_ATTEMPTS || 2);
 const RESOLVE_TOTAL_BUDGET_MS = Number(process.env.RESOLVE_TOTAL_BUDGET_MS || 12000);
 
-// Resolve a single source (extracted from handleStream, logic unchanged)
-async function resolveSource(src, match, config) {
+// Resolve one source, retaining inconclusive local failures for the mint/cache layer.
+async function resolveSource(src, match, config, opts = {}) {
   if (isEventStreamSource(src)) {
     return [];
   }
@@ -333,11 +340,15 @@ async function resolveSource(src, match, config) {
 
   try {
     const deadlineAt = Date.now() + RESOLVE_TOTAL_BUDGET_MS;
-    resStreams = await withRetry(() => dispatchToProvider(sourceName, src, match), {
+    resStreams = await withRetry(() => {
+      opts?.signal?.throwIfAborted();
+      return dispatchToProvider(sourceName, src, match);
+    }, {
       attempts: RESOLVE_ATTEMPTS,
       baseDelayMs: 300,
       maxDelayMs: 1200,
       deadlineAt,
+      shouldRetryError: error => !opts?.signal?.aborted && isTransientError(error),
       label: `resolve:${sourceName}`,
       // An empty result is a real answer ("nothing on offer"), not a failure —
       // retrying it would spend the budget to be told the same thing twice.
@@ -350,6 +361,7 @@ async function resolveSource(src, match, config) {
       s._source = sourceName;
     }
   } catch (e) {
+    reportInconclusiveResolution(e, opts);
     // Distinguish "the network flaked and kept flaking" from "this provider is
     // broken": the first is expected noise, the second wants a stack trace.
     if (isTransientError(e)) {
@@ -706,6 +718,62 @@ function verificationHeaders(stream) {
     .map(([name, value]) => [canonical.get(name.toLowerCase()) || name, value]));
 }
 
+function reportInconclusiveResolution(error, options) {
+  if (!options?.signal?.aborted && !isInconclusiveResolutionError(error)) return false;
+  let reason = 'cancelled';
+  if (!options?.signal?.aborted) {
+    const chain = [], seen = new Set();
+    try {
+      for (let current = error; current && typeof current === 'object'; current = current.cause) {
+        if (seen.has(current) || chain.length >= 8) return false;
+        seen.add(current); chain.push(current);
+      }
+      reason = chain.some(item => item.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(item.code || ''))
+        ? 'capacity' : chain.some(item => item.name === 'AbortError') ? 'cancelled' : 'timeout';
+    } catch (_) { return false; }
+  }
+  try {
+    const reported = options?.onInconclusive?.(reason);
+    if (reported && typeof reported.catch === 'function') reported.catch(() => {});
+  } catch (_) { /* diagnostics must not change verification outcomes */ }
+  return true;
+}
+
+async function runVerificationAttempt(targetUrl, headers, deadlineAt, options) {
+  options?.signal?.throwIfAborted();
+  const remainingMs = deadlineAt - Date.now();
+  const timeoutMs = Math.min(VERIFY_TIMEOUT_MS, remainingMs);
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw createAttemptTimeoutError();
+  const timeout = new AbortController();
+  const signal = AbortSignal.any([timeout.signal, ...(options?.signal ? [options.signal] : [])]);
+  const timer = setTimeout(() => timeout.abort(createAttemptTimeoutError()), timeoutMs);
+  let abort;
+  const cancelled = new Promise((_, reject) => {
+    abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+  });
+  try {
+    // Bound both fetch and body consumption, even if a transport/mock neglects
+    // cancellation. The guarded transport independently owns its native lease.
+    const work = Promise.resolve().then(async () => {
+      signal.throwIfAborted();
+      const response = await _safeFetch(targetUrl, {
+        method: 'GET', headers, signal, timeoutMs, attempts: 1,
+        maxBodyBytes: VERIFY_BODY_MAX_BYTES
+      });
+      signal.throwIfAborted();
+      const body = await response.text();
+      signal.throwIfAborted();
+      return { status: response.status, body, bodyTruncated: response.bodyTruncated === true };
+    });
+    return await Promise.race([work, cancelled]);
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener('abort', abort);
+  }
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
 
   const checkedStreams = await Promise.all(streams.map(async (s) => {
@@ -768,7 +836,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
       const reqHeaders = {
         ...providerHeaders,
-        'User-Agent': customUa || providerHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+        'User-Agent': customUa || providerHeaders['User-Agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
         'Referer': referer,
       };
       if (origin) reqHeaders['Origin'] = origin;
@@ -783,33 +851,12 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
       try {
         const result = await withRetry(
-          async () => {
-            // A fresh controller per attempt: a controller that already fired
-            // aborts the retry the moment it starts.
-            const attemptController = new AbortController();
-            const attemptTimer = setTimeout(() => attemptController.abort(), VERIFY_TIMEOUT_MS);
-            try {
-              // _safeFetch handles impit -> undici fallback automatically on all platforms.
-              // attempts:1 — retrying is this layer's job, so the two do not compound
-              // into a multi-minute stall.
-              const r = await _safeFetch(targetUrl, {
-                method: 'GET',
-                headers: reqHeaders,
-                signal: attemptController.signal,
-                timeoutMs: VERIFY_TIMEOUT_MS,
-                attempts: 1,
-                // Verification only needs a manifest prefix, not an arbitrarily large body.
-                maxBodyBytes: VERIFY_BODY_MAX_BYTES,
-              });
-              return { status: r.status, body: await r.text(), bodyTruncated: r.bodyTruncated === true };
-            } finally {
-              clearTimeout(attemptTimer);
-            }
-          },
+          () => runVerificationAttempt(targetUrl, reqHeaders, verifyDeadlineAt, opts),
           {
             attempts: VERIFY_ATTEMPTS,
             deadlineAt: verifyDeadlineAt,
             label: 'verify',
+            shouldRetryError: error => !opts?.signal?.aborted && isTransientError(error),
             shouldRetryResult: (r) => isTransientStatus(r.status),
             onRetry: ({ attempt, delay, result, error }) => {
               const why = error ? error.message : `HTTP ${result.status}`;
@@ -821,9 +868,10 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         bodySample = result.body;
         bodyTruncated = result.bodyTruncated === true;
       } catch (fetchErr) {
-        const kind = isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
+        const inconclusive = reportInconclusiveResolution(fetchErr, opts);
+        const kind = inconclusive ? 'temporarily unavailable' : isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
-        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        if (cacheKey && !inconclusive) resolveCache.noteFailure(cacheKey);
         return null;
       }
 
@@ -852,15 +900,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
               'Referer': guess,
               'Origin': new URL(guess).origin,
             };
-            const r2 = await _safeFetch(targetUrl, {
-              method: 'GET',
-              headers: retryHeaders,
-              timeoutMs: VERIFY_TIMEOUT_MS,
-              attempts: 1,
-              maxBodyBytes: VERIFY_BODY_MAX_BYTES,
-            });
+            const r2 = await runVerificationAttempt(targetUrl, retryHeaders, verifyDeadlineAt, opts);
             res = { status: r2.status };
-            bodySample = await r2.text();
+            bodySample = r2.body;
             bodyTruncated = r2.bodyTruncated === true;
             if (res.status === 200) {
               referer = guess;
@@ -868,7 +910,10 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
               repairedHeaders = retryHeaders;
             }
           }
-        } catch (_) { /* fall through to the dead-stream handling below */ }
+        } catch (repairError) {
+          if (reportInconclusiveResolution(repairError, opts)) return null;
+          /* otherwise retain the upstream refusal below */
+        }
       }
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
@@ -905,6 +950,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
       // Publish only an accepted repair after HLS validation and slate
       // filtering. Keep nested upstream tokens, recovery keys and fragments.
+      // Reject PNG-cloaked streams (HLS playlists pointing to fake .png segments)
+      if (/(?:^|\n)[^#\n\r]+\.png(?:\?[^\n\r]*)?(?:\r?\n|$)/i.test(bodySample)) {
+        console.log(`[Filter] Dropped PNG-cloaked stream: ${targetUrl}`);
+        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        return null;
+      }
+
       if (repairedHeaders) {
         if (parseManifestProxyUrl(s.url)) {
           const parsed = new URL(s.url, 'http://localhost');
@@ -962,6 +1014,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
+      reportInconclusiveResolution(err, opts);
       console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${err.message}`);
       return null;
     }
@@ -973,11 +1026,20 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 // Mint streams for a single source and health-verify them before they enter the
 // cache, so verification runs once per mint instead of on every request.
 async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
-  const options = opts || {};
+  let inconclusiveReason = null;
+  const options = { ...(opts || {}), onInconclusive(reason) {
+    if (!inconclusiveReason) inconclusiveReason = reason;
+    try {
+      const reported = opts?.onInconclusive?.(reason);
+      if (reported && typeof reported.catch === 'function') reported.catch(() => {});
+    } catch (_) { /* caller diagnostics must not poison the mint */ }
+  } };
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
-  const minted = await resolveSource(src, match, config);
-  return verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
+  const minted = await resolveSource(src, match, config, options);
+  const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
+  return verified.length === 0 && inconclusiveReason
+    ? createDeferredResolution(inconclusiveReason) : verified;
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -995,7 +1057,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf,scorezone';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
@@ -1362,10 +1424,14 @@ async function handleStream(type, id, config) {
     // findMatch accepts aliases; prewarm and remint identify the stored row.
     const key = resolveKey(src, match.id);
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
-    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [] };
+    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [],
+      inconclusive: Boolean(resolveCache.isDeferred?.(key)) };
     const promise = resolveCache
-      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key), timingStream)
+      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+        onInconclusive() { state.inconclusive = true; }
+      }), timingStream)
       .then((minted) => {
+        state.inconclusive = state.inconclusive || Boolean(resolveCache.isDeferred?.(key));
         state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
         state.settled = true;
         return state.value;
@@ -1394,7 +1460,24 @@ async function handleStream(type, id, config) {
   // This guarantees fast streams (e.g. Vavoo) do not cut off DaddyLive with an early return,
   // while still returning instantly as soon as DaddyLive completes (or when already cached).
   const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
-  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0) && inFlight.length > 0;
+  const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
+  const isTvChannel = Boolean(
+    (type === 'tv' || type === 'channel') &&
+    (match ? (
+      match.category === 'networks' ||
+      match.isChannel ||
+      String(match.date) === '0' ||
+      match.kickoff === 0 ||
+      String(match.id || '').includes('_ch_') ||
+      String(id || '').includes('_ch_')
+    ) : (
+      String(id || '').includes('_ch_') ||
+      String(id || '').includes('channel')
+    ))
+  );
+  const hasUnsettledInFlight = inFlight.some(f => !f.settled);
+  const tvNeedsQuorum = isTvChannel && streams.length < TV_CHANNEL_QUORUM && hasUnsettledInFlight;
+  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0 || tvNeedsQuorum) && inFlight.length > 0;
   let timingWaitOutcome = 'no_wait';
 
   if (shouldWait) {
@@ -1402,12 +1485,38 @@ async function handleStream(type, id, config) {
     if (remaining > 0) {
       // If we already have streams and are waiting for Priority-1 (DaddyLive), wait specifically
       // for the Priority-1 promises to complete so we return immediately without stalling.
-      const waitTargets = priority1InFlight.length > 0
-        ? priority1InFlight.map((f) => f.promise)
-        : inFlight.map((f) => f.promise);
+      // For TV channels, wait for in-flight secondary streams up to HARD_DEADLINE_MS or until quorum.
+      let waitTargets;
+      let raceTarget;
+      if (isTvChannel && tvNeedsQuorum) {
+        waitTargets = inFlight.map((f) => f.promise);
+        const targetCount = TV_CHANNEL_QUORUM;
+        const countTotalStreams = () => inFlight.reduce(
+          (acc, cur) => acc + (cur.settled && Array.isArray(cur.value) ? cur.value.length : 0),
+          0
+        );
+        const quorumPromise = new Promise((resolve) => {
+          for (const f of inFlight) {
+            if (f.settled) continue;
+            f.promise.then(() => {
+              const currentTotal = countTotalStreams();
+              const p1Done = priority1InFlight.every(p => p.settled);
+              if (currentTotal >= targetCount && p1Done) {
+                resolve();
+              }
+            }).catch(() => {});
+          }
+        });
+        raceTarget = Promise.race([Promise.allSettled(waitTargets), quorumPromise]);
+      } else {
+        waitTargets = priority1InFlight.length > 0
+          ? priority1InFlight.map((f) => f.promise)
+          : inFlight.map((f) => f.promise);
+        raceTarget = Promise.allSettled(waitTargets);
+      }
 
       const waited = await settleBefore(
-        Promise.allSettled(waitTargets),
+        raceTarget,
         remaining,
         null
       );
@@ -1480,7 +1589,7 @@ async function handleStream(type, id, config) {
   // of DASH — only its target is — so StreamPolicy resolves the wrapped URL
   // before deciding, and leaves proxied live HLS alone.
   const beforeDashPolicy = streams.length;
-  const policyAllowed = streams.filter((s) => !isBlockedDashStream(s));
+  const policyAllowed = streams.filter((s) => !isBlockedStream(s));
   if (policyAllowed.length !== beforeDashPolicy) {
     streams.length = 0;
     streams.push(...policyAllowed);
@@ -1682,7 +1791,7 @@ async function handleStream(type, id, config) {
         // bounded playback context for those player requests; arbitrary cookies,
         // authorization and custom token headers must not reach the addon URL.
         const request = {};
-        if (s._source === 'ak47live') {
+        if (s._source === 'ak47live' || s._source === 'daddylive' || providerName === 'DaddyLive') {
           const headers = verificationHeaders(s);
           const userAgent = manifestUserAgent(headers['User-Agent']);
           if (userAgent) request['User-Agent'] = userAgent;
@@ -1709,6 +1818,7 @@ async function handleStream(type, id, config) {
         else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
         else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
         else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
+        else if (providerName === 'ScoreZone') referer = 'https://scorezonetv.live/';
         
         if (referer) {
           if (!s.behaviorHints.proxyHeaders) {
@@ -1778,14 +1888,15 @@ async function handleStream(type, id, config) {
   }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
-  // Adaptive per-source TTLs keep tokens fresh, so clients may hold the list 30s.
+  // Positive and definite results retain the existing client cache windows.
+  // An empty inconclusive response must not pin a temporary miss for 30 seconds.
 
-
+  const inconclusiveEmpty = streams.length === 0 && inFlight.some(state => state.inconclusive || !state.settled);
   return {
     streams,
-    cacheMaxAge: 30,
-    staleRevalidate: 30,
-    staleError: 60
+    cacheMaxAge: inconclusiveEmpty ? 2 : 30,
+    staleRevalidate: inconclusiveEmpty ? 0 : 30,
+    staleError: inconclusiveEmpty ? 0 : 60
   };
 }
 
@@ -1881,6 +1992,7 @@ module.exports = {
   // Exported for tests: the retry/keep/drop policy is the part worth pinning
   // down, and driving it through handleStream would need the whole match cache.
   verifyStreams,
+  mintVerifiedSources,
   guardedProbeFetch,
   buildProbeSegmentUrl,
   readProbeBytes,

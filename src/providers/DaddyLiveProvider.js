@@ -12,7 +12,7 @@ const os = require('os');
 const { BREAKER_TIMEOUT_MS } = require('../services/CircuitBreakerService');
 const { createHash } = require('node:crypto');
 
-const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
 // A channel broadcasts many events, and one event can have many channels. Its
 // first feed therefore cannot identify the fixture. Retain that old ID as a
@@ -99,9 +99,16 @@ function _cleanManifestUrl(url) {
     .replace(/[\\"']+$/, '');     // trailing JSON/quote leftovers
 }
 
+const CLOAKED_STREAM_PATTERN = /(?:cowedd\d*[a-z0-9]*|wedd\d+[a-z0-9]*|tiktokcdn|tiktokx-origin|\.png(?:$|\?))/i;
+
+function isCloakedStream(url) {
+  if (!url || typeof url !== 'string') return false;
+  return CLOAKED_STREAM_PATTERN.test(url);
+}
+
 function isTikTokCloakedStream(url) {
   if (!url || typeof url !== 'string') return false;
-  return /cowedd4855ws|tiktokcdn|tiktokx-origin/i.test(url);
+  return isCloakedStream(url);
 }
 
 /**
@@ -198,6 +205,10 @@ class DaddyLiveProvider extends BaseProvider {
            /\bevent\s*(sd\s*)?stream\b/i.test(clean);
   }
 
+  static isCloakedStream(url) {
+    return isCloakedStream(url);
+  }
+
   constructor(opts = {}) {
     super(opts);
     this.name = 'DaddyLive';
@@ -215,7 +226,7 @@ class DaddyLiveProvider extends BaseProvider {
     // supplier (wideiptv.top -> cdn.hdm1.net), whose segments are served as
     // video/MP2T straight to the player, so it costs the addon no bandwidth.
     // Its other target (ksohls.ru) is dead and is skipped per host below.
-    this.folders = ['player', 'stream', 'watch', 'plus', 'casting', 'cast', 'hub'];
+    this.folders = ['cast', 'player', 'stream', 'watch', 'plus', 'casting', 'hub'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`
@@ -581,9 +592,16 @@ class DaddyLiveProvider extends BaseProvider {
     return new StreamEntity({
       name: 'DaddyLive',
       title: channelName ? `DaddyLive (${channelName})` : `DaddyLive Stream ${sourceId}`,
-      url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}`,
+      url: `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(referer)}&origin=${encodeURIComponent(origin)}&hlsua=${encodeURIComponent(UA)}`,
       behaviorHints: {
-        notWebReady: false
+        notWebReady: false,
+        proxyHeaders: {
+          request: {
+            'Referer': referer,
+            'Origin': origin,
+            'User-Agent': UA
+          }
+        }
       },
       resolution: 'HD'
     });
@@ -1028,7 +1046,6 @@ class DaddyLiveProvider extends BaseProvider {
                 headers: {
                   'User-Agent': UA,
                   'Referer': playerUrl,
-                  'Origin': base,
                   'Sec-Fetch-Dest': 'iframe',
                   'Sec-Fetch-Mode': 'navigate',
                   'Sec-Fetch-Site': 'cross-site',

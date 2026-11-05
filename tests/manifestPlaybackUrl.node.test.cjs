@@ -55,7 +55,7 @@ test('actual publication block preserves recovery keys and normalizes the suffix
   assert.ok(cached.behaviorHints.proxyHeaders);
 });
 
-test('publication keeps direct HLS headers and only AK47 playback context on proxied HLS', () => {
+test('publication keeps direct HLS headers and AK47/DaddyLive playback context on proxied HLS', () => {
   const text = source('src/streams.js');
   const start = text.indexOf('    // Change only the published path');
   const end = text.indexOf('\n  });', start);
@@ -66,14 +66,21 @@ test('publication keeps direct HLS headers and only AK47 playback context on pro
   const publish = vm.runInNewContext('(function(s,providerName){' + text.slice(start, end) + '\nreturn s;})', { manifestPlaybackUrl, manifestUserAgent, verificationHeaders, URL, BASE_URL: base });
   const direct = { url: 'https://cdn.example.invalid/live.m3u8', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0' } } } };
   const proxied = { _source: 'ak47live', url: base + '/api/manifest?url=' + encodeURIComponent(direct.url) + '&hlsua=FixtureClient%2F1.0', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0', Authorization: 'Bearer fixture', Cookie: 'fixture', 'X-Token': 'fixture' } } } };
+  const dlvProxied = { _source: 'daddylive', url: base + '/api/manifest?url=' + encodeURIComponent(direct.url) + '&hlsua=FixtureClient%2F1.0', behaviorHints: { proxyHeaders: { request: { 'User-Agent': 'FixtureClient/1.0', 'Referer': 'https://assetrage.net/', 'Origin': 'https://assetrage.net', Authorization: 'Bearer bad', Cookie: 'bad=1' } } } };
   publish(direct, 'Ak47Live');
   publish(proxied, 'Ak47Live');
+  publish(dlvProxied, 'DaddyLive');
   assert.equal(direct.behaviorHints.notWebReady, false);
   assert.equal(direct.behaviorHints.proxyHeaders.request['User-Agent'], 'FixtureClient/1.0');
   assert.equal(proxied.behaviorHints.notWebReady, false);
   assert.equal(proxied.behaviorHints.proxyHeaders.request['User-Agent'], 'FixtureClient/1.0');
   assert.deepEqual(Object.keys(proxied.behaviorHints.proxyHeaders.request), ['User-Agent']);
   assert.equal(new URL(proxied.url).searchParams.get('hlsua'), 'FixtureClient/1.0');
+  assert.equal(dlvProxied.behaviorHints.notWebReady, false);
+  assert.equal(dlvProxied.behaviorHints.proxyHeaders.request['User-Agent'], 'FixtureClient/1.0');
+  assert.equal(dlvProxied.behaviorHints.proxyHeaders.request['Referer'], 'https://assetrage.net/');
+  assert.equal(dlvProxied.behaviorHints.proxyHeaders.request['Origin'], 'https://assetrage.net');
+  assert.deepEqual(Object.keys(dlvProxied.behaviorHints.proxyHeaders.request).sort(), ['Origin', 'Referer', 'User-Agent']);
 });
 
 function fixture(body) {

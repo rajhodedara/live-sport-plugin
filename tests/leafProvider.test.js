@@ -1,3 +1,4 @@
+const leafMint = require('../src/services/LeafMint');
 jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn() }));
 const LeafProvider = require('../src/providers/LeafProvider');
 const impitClient = require('../src/services/ProviderOutbound');
@@ -282,6 +283,127 @@ describe('LeafProvider Unit Tests', () => {
       expect(res[0].url).toMatch(new RegExp('^' + BASE_URL + '/api/leaf/m3u8/'));
       const tc = res[0].url.split('/api/leaf/m3u8/')[1].replace('/index.m3u8', '');
       expect(leafState.verify(tc)).toMatchObject({ m: 'streamed:tennis-match', s: '12345' });
+    });
+
+    test('does not treat rate-limit payload as install nag and falls back gracefully', async () => {
+      const rateLimitPayload = {
+        streams: [
+          {
+            name: 'Rate limit reached',
+            title: 'Too many stream requests in a short time. Please wait 1 min and try again.',
+            url: 'https://sports.highfly.to/configure',
+            behaviorHints: { notWebReady: true }
+          }
+        ]
+      };
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => rateLimitPayload
+      });
+
+      const res = await provider.resolveStream('streamed:rate-limited-match', 'football', 'Match');
+      expect(res).toEqual([]);
+      expect(provider._installNagWarned).toBe(false);
+    });
+
+    test('coalesces concurrent requests for the same match ID into a single fetch', async () => {
+      let callCount = 0;
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+        if (url.includes('/stream/sport/')) {
+          callCount++;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [
+                {
+                  name: 'Leaf · Live',
+                  title: '1080p',
+                  url: 'https://papacito.cfd/m3u/555/live.m3u8?ft=token'
+                }
+              ]
+            })
+          };
+        }
+        // probeStreamAlive call
+        return { ok: true, status: 200 };
+      });
+
+      const p1 = provider.resolveStream('streamed:coalesce-match', 'football', 'Match');
+      const p2 = provider.resolveStream('streamed:coalesce-match', 'football', 'Match');
+      const p3 = provider.resolveStream('streamed:coalesce-match', 'football', 'Match');
+
+      const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+      expect(callCount).toBe(1);
+      expect(r1).toHaveLength(1);
+      expect(r2).toHaveLength(1);
+      expect(r3).toHaveLength(1);
+    });
+
+    test('filters out candidate streams that answer 403 on Papacito CDN edge', async () => {
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+        if (url.includes('/stream/sport/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [
+                {
+                  name: 'Leaf · Dead Feed',
+                  title: '1080p',
+                  url: 'https://papacito.cfd/m3u/dead123/live.m3u8?ft=tok1'
+                },
+                {
+                  name: 'Leaf · Alive Feed',
+                  title: '720p',
+                  url: 'https://testleaf.papacito.cfd/m3u/alive456/live.m3u8?ft=tok2'
+                }
+              ]
+            })
+          };
+        }
+        if (url.includes('dead123')) {
+          return { ok: false, status: 403 };
+        }
+        return { ok: true, status: 200 };
+      });
+
+      const res = await provider.resolveStream('streamed:probe-match', 'football', 'Match');
+      expect(res).toHaveLength(1);
+      expect(res[0].quality).toBe('HD');
+      const verified = leafState.verify(res[0].url.split('/api/leaf/m3u8/')[1].replace('/index.m3u8', ''));
+      expect(verified.s).toBe('alive456');
+    });
+
+    test('seeds LeafMint cache when resolving streams', async () => {
+      const seedSpy = jest.spyOn(leafMint, 'seed');
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+        if (url.includes('/stream/sport/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [
+                {
+                  name: 'Leaf · Seed Test',
+                  title: '1080p',
+                  url: 'https://papacito.cfd/m3u/seed789/live.m3u8?ft=seed_token'
+                }
+              ]
+            })
+          };
+        }
+        return { ok: true, status: 200 };
+      });
+
+      await provider.resolveStream('streamed:seed-match', 'football', 'Match');
+      expect(seedSpy).toHaveBeenCalledWith(
+        'streamed:seed-match',
+        'seed789',
+        'https://papacito.cfd/m3u/seed789/live.m3u8?ft=seed_token'
+      );
+      seedSpy.mockRestore();
     });
   });
 });

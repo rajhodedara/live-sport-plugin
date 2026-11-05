@@ -21,11 +21,19 @@ test('shared transport waits and succeeds without fallback after native capacity
     f.holds[0].resolve(); await a; await until(() => f.holds.length === 2); f.holds[1].resolve(); expect((await b).status).toBe(200); expect(f.created()).toBe(1); expect(f.fallbackFetch).not.toHaveBeenCalled();
   } finally { f.holds.forEach(x => x.resolve()); await Promise.allSettled([a, ...(b ? [b] : [])]); await f.pool.close(); }
 });
-test('shared transport reports a bounded capacity failure without direct fallback', async () => {
-  const f = setup({ admissionWaitMs: 20 }); const a = f.fetch('https://cdn.example.org/a', { attempts: 1 });
+test('shared transport falls back to direct fallback on capacity exhaustion', async () => {
+  const f = setup({ admissionWaitMs: 20 });
+  f.fallbackFetch.mockImplementation(async () => new Response('fixture fallback'));
+  const a = f.fetch('https://cdn.example.org/a', { attempts: 1 });
   const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-  try { await until(() => f.holds.length === 1); await expect(f.fetch('https://cdn.example.org/b', { attempts: 1, diagnosticOwner: 'catalog' })).rejects.toMatchObject({ code: 'ERR_OUTBOUND_CAPACITY', transportCode: 'ERR_NATIVE_POOL_BUSY' }); expect(f.fallbackFetch).not.toHaveBeenCalled(); }
-  finally { warn.mockRestore(); f.holds.forEach(x => x.resolve()); await Promise.allSettled([a]); await f.pool.close(); }
+  try {
+    await until(() => f.holds.length === 1);
+    const b = await f.fetch('https://cdn.example.org/b', { attempts: 1, diagnosticOwner: 'catalog' });
+    expect(b.status).toBe(200);
+    expect(f.fallbackFetch).toHaveBeenCalled();
+  } finally {
+    warn.mockRestore(); f.holds.forEach(x => x.resolve()); await Promise.allSettled([a]); await f.pool.close();
+  }
 });
 test('shared queued cancellation removes the caller without fallback or a second slot', async () => {
   const f = setup(); const a = f.fetch('https://cdn.example.org/a', { attempts: 1 });

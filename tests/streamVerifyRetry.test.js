@@ -115,6 +115,15 @@ describe('verifyStreams retry policy', () => {
     expect(cache.failures).toBe(1);
   });
 
+  it('does not negative-cache a stream on capacity or native pool errors', async () => {
+    safeFetch.mockRejectedValue(Object.assign(new Error('pool busy'), { code: 'ERR_OUTBOUND_CAPACITY' }));
+
+    const cache = makeCache();
+    const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, cache);
+
+    expect(out).toHaveLength(0);
+    expect(cache.failures).toBe(0);
+  });
   it('does not retry a 404 — a working server said the stream is gone', async () => {
     safeFetch.mockResolvedValue(status(404));
 
@@ -132,6 +141,16 @@ describe('verifyStreams retry policy', () => {
 
     expect(out).toHaveLength(1);
     expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  it('drops a 200 response whose playlist points to .png cloaked segments', async () => {
+    safeFetch.mockResolvedValue(ok('#EXTM3U\n#EXTINF:4.000,\nchunk-001.png?token=xyz\n#EXTINF:4.000,\nchunk-002.png?token=xyz'));
+
+    const cache = makeCache();
+    const out = await verifyStreams([stream()], 'daddylive:m1:s1', parser, cache);
+
+    expect(out).toHaveLength(0);
+    expect(cache.failures).toBe(1);
   });
 
   it('drops a 200 response whose body is not a playlist', async () => {
