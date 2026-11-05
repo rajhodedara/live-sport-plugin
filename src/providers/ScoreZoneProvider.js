@@ -436,6 +436,8 @@ class ScoreZoneProvider extends BaseProvider {
               }
             }
           },
+          channelName: channel.name,
+          canonicalChannel: channel.name,
           country: channel.country || '',
           countryFlag: flag || '',
           sourceName: 'scorezone',
