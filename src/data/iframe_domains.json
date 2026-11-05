@@ -112,7 +112,7 @@
       "strategy": "nested",
       "referer": "https://wideiptv.top/",
       "first_seen": "2026-10-24",
-      "note": "Player 6 on thedaddy.pk. Embeds /player/{streamName} holding ds*.bluetier.top direct HLS."
+      "note": "Player 6 on thedaddy.li. Embeds /player/{streamName} holding ds*.bluetier.top direct HLS."
     }
   },
   "terminal_hosts": {

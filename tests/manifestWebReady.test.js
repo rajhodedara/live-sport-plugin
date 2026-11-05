@@ -141,6 +141,6 @@ describe('Manifest Proxy Web-Ready Stream Normalization (Issue #42)', () => {
     expect(direct).toBeDefined();
     expect(direct.behaviorHints.notWebReady).toBe(false);
     expect(direct.behaviorHints.proxyHeaders).toBeDefined();
-    expect(direct.behaviorHints.proxyHeaders.request.Referer).toBe('https://thedaddy.pk/');
+    expect(direct.behaviorHints.proxyHeaders.request.Referer).toBe('https://thedaddy.li/');
   });
 });

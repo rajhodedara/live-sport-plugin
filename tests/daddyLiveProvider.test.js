@@ -429,6 +429,7 @@ describe('DaddyLiveProvider', () => {
     });
 
     test('falls back to secondary baseDomain when first schedule endpoint fails', async () => {
+      provider.baseDomains = ['https://thedaddy.li', 'https://mirror.example.com'];
       const mockSchedule = {
         'Friday 21st March 2025 - Schedule Time UK GMT': {
           'Soccer': [{

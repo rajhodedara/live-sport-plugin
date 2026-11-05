@@ -221,12 +221,12 @@ class DaddyLiveProvider extends BaseProvider {
     // even when the schedule fails, so 'did it return anything' is not a
     // usable health signal - fixtures and channels fail independently.
     this.lastScheduleOk = null;
-    this.baseDomains = ['https://thedaddy.pk', 'https://dlive.sx', 'https://dlstreams.st'];
+    this.baseDomains = ['https://thedaddy.li'];
     // `player` stays FIRST: it is the only folder that can reach the plain-TS
     // supplier (wideiptv.top -> cdn.hdm1.net), whose segments are served as
     // video/MP2T straight to the player, so it costs the addon no bandwidth.
     // Its other target (ksohls.ru) is dead and is skipped per host below.
-    this.folders = ['cast', 'player', 'stream', 'watch', 'plus', 'casting', 'hub'];
+    this.folders = ['cast', 'player', 'plus', 'casting'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`

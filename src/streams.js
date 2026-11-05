@@ -1811,7 +1811,7 @@ async function handleStream(type, id, config) {
       } else {
         // Direct unproxied m3u8 stream needing player-level header injection
         let referer = '';
-        if (providerName === 'DaddyLive') referer = 'https://thedaddy.pk/';
+        if (providerName === 'DaddyLive') referer = 'https://thedaddy.li/';
         else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
         else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
         else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
