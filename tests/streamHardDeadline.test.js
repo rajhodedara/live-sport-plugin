@@ -94,6 +94,41 @@ describe('handleStream hard response deadline', () => {
     expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 2, 'budget_exhausted');
   });
 
+  test('for TV channel networks, does not early-return at soft deadline when secondary streams are in flight until quorum is reached', async () => {
+    const channelMatch = {
+      id: 'dlv_ch_339_cartoon-network',
+      title: 'Cartoon Network',
+      category: 'networks',
+      sources: [
+        { source: 'daddylive', id: '339' },
+        { source: 'vavoo', id: 'v1' },
+      ],
+    };
+    const services = {
+      cacheService: { findMatch: () => channelMatch },
+      streamResolveCache: { getOrCreate: jest.fn(key => pending[key.startsWith('daddylive:') ? 0 : 1].promise) },
+      streamScorer: { calculateScore: () => 1 },
+    };
+    container.resolve.mockImplementation(name => services[name]);
+
+    let response;
+    handleStream('tv', 'nuvio_sport_dlv_ch_339_cartoon-network').then(value => { response = value; });
+
+    // Priority-1 (DaddyLive) completes early at 50ms with 1 stream
+    await jest.advanceTimersByTimeAsync(50);
+    pending[0].resolve([playable('https://cdn.example/daddylive.m3u8')]);
+
+    // Soft deadline passes at 100ms: response should NOT be returned yet because Vavoo is still in flight
+    await jest.advanceTimersByTimeAsync(60);
+    expect(response).toBeUndefined();
+
+    // Secondary stream (Vavoo) resolves at 150ms
+    pending[1].resolve([playable('https://cdn.example/vavoo.m3u8')]);
+    await jest.advanceTimersByTimeAsync(10);
+
+    expect(response).toBeDefined();
+    expect(response.streams).toHaveLength(2);
+  });
   test('labels an early return while another source continues in the background', async () => {
     let response;
     handleStream('tv', 'nuvio_sport_deadline').then(value => { response = value; });

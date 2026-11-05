@@ -115,6 +115,15 @@ describe('verifyStreams retry policy', () => {
     expect(cache.failures).toBe(1);
   });
 
+  it('does not negative-cache a stream on capacity or native pool errors', async () => {
+    safeFetch.mockRejectedValue(Object.assign(new Error('pool busy'), { code: 'ERR_OUTBOUND_CAPACITY' }));
+
+    const cache = makeCache();
+    const out = await verifyStreams([stream()], 'watchfooty:m1:s1', parser, cache);
+
+    expect(out).toHaveLength(0);
+    expect(cache.failures).toBe(0);
+  });
   it('does not retry a 404 — a working server said the stream is gone', async () => {
     safeFetch.mockResolvedValue(status(404));
 

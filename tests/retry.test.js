@@ -17,6 +17,9 @@ describe('transient classification', () => {
     expect(isTransientError(Object.assign(new Error('boom'), { code: 'UND_ERR_HEADERS_TIMEOUT' }))).toBe(true);
     expect(isTransientError(new Error('socket hang up'))).toBe(true);
     expect(isTransientError(new Error('impit timeout 5000ms'))).toBe(true);
+    expect(isTransientError(Object.assign(new Error('pool busy'), { code: 'ERR_NATIVE_POOL_BUSY' }))).toBe(true);
+    expect(isTransientError(Object.assign(new Error('outbound capacity'), { code: 'ERR_OUTBOUND_CAPACITY' }))).toBe(true);
+    expect(isTransientError(new Error('Native pool capacity reached'))).toBe(true);
   });
 
   it('treats a nested undici cause as transient', () => {

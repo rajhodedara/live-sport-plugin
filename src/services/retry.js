@@ -33,9 +33,10 @@ const TRANSIENT_ERROR_CODES = new Set([
   'EHOSTUNREACH', 'ENETUNREACH', 'ENETRESET', 'EAI_AGAIN', 'EBUSY',
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
   'UND_ERR_SOCKET', 'UND_ERR_RESPONSE_STATUS_CODE',
+  'ERR_OUTBOUND_CAPACITY', 'ERR_NATIVE_POOL_BUSY',
 ]);
 
-const TRANSIENT_MESSAGE_RE = /timeout|timed out|socket hang up|network|reset by peer|aborted|temporarily|too many requests|EAI_AGAIN/i;
+const TRANSIENT_MESSAGE_RE = /timeout|timed out|socket hang up|network|reset by peer|aborted|temporarily|too many requests|EAI_AGAIN|capacity|native pool/i;
 
 /** True when an HTTP status is worth retrying rather than believing. */
 function isTransientStatus(status) {
@@ -49,7 +50,7 @@ function isTransientError(err) {
   if (!err) return false;
   // An explicit abort is the caller giving up on purpose — never retry it.
   if (err.name === 'AbortError' && err.deadlineExceeded !== true) return false;
-  const code = err.code || (err.cause && err.cause.code);
+  const code = err.code || (err.cause && err.cause.code) || err.transportCode;
   if (code && TRANSIENT_ERROR_CODES.has(code)) return true;
   return TRANSIENT_MESSAGE_RE.test(String(err.message || ''));
 }

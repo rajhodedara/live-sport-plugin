@@ -1,7 +1,16 @@
 const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
-const { withRetry, isTransientStatus, isTransientError } = require('./services/retry');
+const { withRetry, isTransientStatus, isTransientError: retryIsTransientError } = require('./services/retry');
+
+function isTransientError(err) {
+  if (!err) return false;
+  const code = err.code || (err.cause && err.cause.code) || err.transportCode;
+  if (code === 'ERR_OUTBOUND_CAPACITY' || code === 'ERR_NATIVE_POOL_BUSY') return true;
+  const msg = String(err.message || '');
+  if (/capacity|native pool/i.test(msg)) return true;
+  return retryIsTransientError(err);
+}
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
@@ -823,7 +832,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       } catch (fetchErr) {
         const kind = isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
-        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        const isCapacity = fetchErr?.code === 'ERR_OUTBOUND_CAPACITY' || fetchErr?.code === 'ERR_NATIVE_POOL_BUSY' || /capacity|native pool/i.test(String(fetchErr?.message || ''));
+        if (cacheKey && !isCapacity) resolveCache.noteFailure(cacheKey);
         return null;
       }
 
@@ -1401,7 +1411,14 @@ async function handleStream(type, id, config) {
   // This guarantees fast streams (e.g. Vavoo) do not cut off DaddyLive with an early return,
   // while still returning instantly as soon as DaddyLive completes (or when already cached).
   const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
-  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0) && inFlight.length > 0;
+  const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
+  const isTvChannel = Boolean(
+    (type === 'tv' || type === 'channel') &&
+    (match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_') || String(id || '').includes('_ch_')))
+  );
+  const hasUnsettledInFlight = inFlight.some(f => !f.settled);
+  const tvNeedsQuorum = isTvChannel && streams.length < Math.min(TV_CHANNEL_QUORUM, inFlight.length) && hasUnsettledInFlight;
+  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0 || tvNeedsQuorum) && inFlight.length > 0;
   let timingWaitOutcome = 'no_wait';
 
   if (shouldWait) {
@@ -1409,12 +1426,38 @@ async function handleStream(type, id, config) {
     if (remaining > 0) {
       // If we already have streams and are waiting for Priority-1 (DaddyLive), wait specifically
       // for the Priority-1 promises to complete so we return immediately without stalling.
-      const waitTargets = priority1InFlight.length > 0
-        ? priority1InFlight.map((f) => f.promise)
-        : inFlight.map((f) => f.promise);
+      // For TV channels, wait for in-flight secondary streams up to HARD_DEADLINE_MS or until quorum.
+      let waitTargets;
+      let raceTarget;
+      if (isTvChannel && tvNeedsQuorum) {
+        waitTargets = inFlight.map((f) => f.promise);
+        const targetCount = Math.min(TV_CHANNEL_QUORUM, inFlight.length);
+        const countTotalStreams = () => inFlight.reduce(
+          (acc, cur) => acc + (cur.settled && Array.isArray(cur.value) ? cur.value.length : 0),
+          0
+        );
+        const quorumPromise = new Promise((resolve) => {
+          for (const f of inFlight) {
+            if (f.settled) continue;
+            f.promise.then(() => {
+              const currentTotal = countTotalStreams();
+              const p1Done = priority1InFlight.every(p => p.settled);
+              if (currentTotal >= targetCount && p1Done) {
+                resolve();
+              }
+            }).catch(() => {});
+          }
+        });
+        raceTarget = Promise.race([Promise.allSettled(waitTargets), quorumPromise]);
+      } else {
+        waitTargets = priority1InFlight.length > 0
+          ? priority1InFlight.map((f) => f.promise)
+          : inFlight.map((f) => f.promise);
+        raceTarget = Promise.allSettled(waitTargets);
+      }
 
       const waited = await settleBefore(
-        Promise.allSettled(waitTargets),
+        raceTarget,
         remaining,
         null
       );

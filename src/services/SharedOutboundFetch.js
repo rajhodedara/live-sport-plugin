@@ -71,9 +71,15 @@ function createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay = abortab
           return response;
         } catch (failure) {
           if (signal.aborted) throw signal.reason;
-          if (/^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(failure.code || '')) {
+          const isCapacity = failure?.code === 'ERR_OUTBOUND_CAPACITY' ||
+            /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(failure?.code || '');
+          if (isCapacity) {
             console.warn('[GuardedOutbound] Native capacity', JSON.stringify(failure.capacityDiagnostic || { reason: failure.code }));
-            throw Object.assign(failure, { transportCode: failure.code, code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503 });
+            if (proxyUrl) {
+              throw Object.assign(failure, { transportCode: failure.code, code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503 });
+            }
+            lastError = failure;
+            break;
           }
           if (nonRetryable(failure)) throw failure;
           lastError = failure;
