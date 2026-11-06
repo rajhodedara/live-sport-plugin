@@ -77,7 +77,7 @@ describe('PitSport: recover temporary play/watch failures without hiding web fal
   );
 
   test('definitive watch 404 does not incorrectly trigger a short retry', async () => {
-    provider.proxyFetch = jest.fn().mockResolvedValueOnce(play()).mockResolvedValueOnce(fail(404));
+    provider.proxyFetch = jest.fn(async url => url.includes('/play') ? play() : fail(404));
     const rows = await provider.resolveStream(SOURCE.id, 'football', MATCH.title, SOURCE);
     expect(rows).toHaveLength(1);
     expect(inconclusiveStreamsReason(rows)).toBeNull();
