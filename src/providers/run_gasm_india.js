@@ -36,6 +36,25 @@ WebAssembly.instantiate = async function(buffer, importObject) {
 const fs = require('fs');
 const path = require('path');
 
+// Private child-process protocol: exit 75 means local transport contention.
+// The PPV.st parent converts it to ERR_OUTBOUND_CAPACITY for a short cache
+// deferral. Avoid matching error messages or treating blocked destinations
+// as transient, and keep every other WASM failure on the original exit 1.
+const LOCAL_CAPACITY_EXIT_CODE = 75;
+function isLocalCapacityFailure(error) {
+  let found = false;
+  const seen = new Set();
+  for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
+    if (seen.has(current)) return false;
+    seen.add(current);
+    const code = current.code || '';
+    const capacity = code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(code);
+    if (code === 'ERR_OUTBOUND_BLOCKED' || (current.isFatal === true && !capacity)) return false;
+    if (capacity) found = true;
+  }
+  return found;
+}
+
 class EventTarget {
   constructor() { this.listeners = {}; }
   addEventListener(type, callback) { if (!this.listeners[type]) this.listeners[type] = []; this.listeners[type].push(callback); }
@@ -284,7 +303,7 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       return new Response(buf, { status: response.status, headers: realHeaders });
     } catch (err) {
       console.error(`[WASM] Network error on proxy fetch: ${err.message}`);
-      process.exit(1);
+      process.exit(isLocalCapacityFailure(err) ? LOCAL_CAPACITY_EXIT_CODE : 1);
     }
   }
   
@@ -310,10 +329,10 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       await lock.set_stream_jw ? await lock.set_stream_jw(u) : await lock.set_stream(u, e, i);
     } catch (err) {
       console.error("[WASM ERROR from set_stream]", err);
-      process.exit(1);
+      process.exit(isLocalCapacityFailure(err) ? LOCAL_CAPACITY_EXIT_CODE : 1);
     }
   } catch(e) {
     console.error("[WASM] Fatal error in main wrapper:", e);
-    process.exit(1);
+    process.exit(isLocalCapacityFailure(e) ? LOCAL_CAPACITY_EXIT_CODE : 1);
   }
 })();
