@@ -136,8 +136,13 @@ class PitSportProvider extends BaseProvider {
    */
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
-    const programId = (src && src.programId) || sourceId;
+    let programId = (src && src.programId) || sourceId;
     if (!programId) return streams;
+
+    if (typeof programId === 'string' && programId.startsWith('pitsport_')) {
+      const parts = programId.split('_');
+      if (parts[1]) programId = parts[1];
+    }
 
     let playData = null;
     try {
@@ -162,15 +167,19 @@ class PitSportProvider extends BaseProvider {
     }
 
     const videos = [];
-    if (Array.isArray(playData?.data?.videos)) {
-      for (const v of playData.data.videos) {
-        if (v && typeof v.embedUrl === 'string' && v.embedUrl.trim()) {
+    const seenEmbedUrls = new Set();
+    const candidateVideos = [
+      ...(Array.isArray(playData?.data?.videos) ? playData.data.videos : []),
+      ...(playData?.data?.video ? [playData.data.video] : [])
+    ];
+    for (const v of candidateVideos) {
+      if (v && typeof v.embedUrl === 'string' && v.embedUrl.trim()) {
+        const u = v.embedUrl.trim();
+        if (!seenEmbedUrls.has(u)) {
+          seenEmbedUrls.add(u);
           videos.push(v);
         }
       }
-    }
-    if (videos.length === 0 && playData?.data?.video && typeof playData.data.video.embedUrl === 'string') {
-      videos.push(playData.data.video);
     }
 
     if (videos.length === 0) {
@@ -187,7 +196,7 @@ class PitSportProvider extends BaseProvider {
       const streamLabel = matchTitle ? `${matchTitle} (${label})` : `PitSport - ${label}`;
 
       // Extract watchId UUID from embedUrl (e.g. https://embdlol.st/embed/{watchId})
-      const watchMatch = embedUrl.match(/\/embed\/([a-zA-Z0-9_-]+)/);
+      const watchMatch = embedUrl.match(/(?:\/embed\/|\/watch\/|\bv=|\bwatchId=)([a-zA-Z0-9_-]+)/);
       const watchId = watchMatch ? watchMatch[1] : null;
 
       if (watchId) {
@@ -233,6 +242,7 @@ class PitSportProvider extends BaseProvider {
               s._isTikTok = true;
               s._source = this.sourceName;
               s.sourceName = this.sourceName;
+              s.channelName = channelName;
               streams.push(s);
             }
           }
@@ -249,6 +259,7 @@ class PitSportProvider extends BaseProvider {
       });
       webStream._source = this.sourceName;
       webStream.sourceName = this.sourceName;
+      webStream.channelName = label;
       streams.push(webStream);
     }
 

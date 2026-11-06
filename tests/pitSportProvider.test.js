@@ -327,5 +327,89 @@ describe('PitSportProvider', () => {
       const streams = await provider.resolveStream(null, 'nfl', 'Event Title', null);
       expect(streams).toEqual([]);
     });
+
+    test('correctly parses programId from prefixed match id format (pitsport_102750_slug)', async () => {
+      let requestedUrl = '';
+      jest.spyOn(provider, 'proxyFetch').mockImplementation(async (url) => {
+        if (url.includes('/api/v1/programs/')) {
+          requestedUrl = url;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                videos: [
+                  { embedUrl: 'https://embdlol.st/embed/abc-123', label: 'Feed 1' }
+                ]
+              }
+            })
+          };
+        }
+        if (url.includes('api.embdlol.st/watch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ url: 'https://cdn.example.com/live.m3u8' })
+          };
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      });
+
+      const streams = await provider.resolveStream('pitsport_102750_jaguars-vs-ravens', 'american_football', 'Jaguars vs Ravens');
+      expect(requestedUrl).toBe('https://pitsport.st/api/v1/programs/102750/play');
+      expect(streams).toHaveLength(2);
+      expect(streams[0].channelName).toBe('Feed 1');
+    });
+
+    test('deduplicates video and videos when both are present in play data', async () => {
+      jest.spyOn(provider, 'proxyFetch').mockImplementation(async (url) => {
+        if (url.includes('/play')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              data: {
+                video: { embedUrl: 'https://embdlol.st/embed/same-uuid', label: 'Main Feed' },
+                videos: [
+                  { embedUrl: 'https://embdlol.st/embed/same-uuid', label: 'Main Feed' },
+                  { embedUrl: 'https://embdlol.st/embed/diff-uuid', label: 'Second Feed' }
+                ]
+              }
+            })
+          };
+        }
+        if (url.includes('api.embdlol.st/watch')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ url: 'https://cdn.example.com/live.m3u8' })
+          };
+        }
+        throw new Error(`Unexpected URL: ${url}`);
+      });
+
+      const streams = await provider.resolveStream('102750', 'nfl', 'Event Title');
+      // 2 unique feeds -> 2 HLS streams + 2 Web Player fallbacks = 4 streams total
+      expect(streams).toHaveLength(4);
+    });
+  });
+
+  describe('TimingRelations integration', () => {
+    test('TimingRelations recognizes pitsport as registered timing source', () => {
+      const { createTimingRelations, normalizeTimingSource } = require('../src/services/TimingRelations');
+      expect(normalizeTimingSource('pitsport')).toBe('pitsport');
+
+      let emittedSource = null;
+      const relations = createTimingRelations({
+        emit: (row) => {
+          if (row && row.type === 'source_mint_start') {
+            emittedSource = row.source;
+          }
+        }
+      });
+      const workHandle = relations.work('pitsport');
+      relations.startMint(workHandle);
+      expect(emittedSource).toBe('pitsport');
+    });
   });
 });
