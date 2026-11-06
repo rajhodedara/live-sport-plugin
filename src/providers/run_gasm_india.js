@@ -36,6 +36,10 @@ WebAssembly.instantiate = async function(buffer, importObject) {
 const fs = require('fs');
 const path = require('path');
 
+// Copied alongside this child script in dist; keeps the numeric exit protocol
+// and the guarded error classifier shared with the parent provider.
+const { LOCAL_CAPACITY_EXIT_CODE, isLocalCapacityFailure } = require('./PpvStWasmExit');
+
 class EventTarget {
   constructor() { this.listeners = {}; }
   addEventListener(type, callback) { if (!this.listeners[type]) this.listeners[type] = []; this.listeners[type].push(callback); }
@@ -284,7 +288,7 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       return new Response(buf, { status: response.status, headers: realHeaders });
     } catch (err) {
       console.error(`[WASM] Network error on proxy fetch: ${err.message}`);
-      process.exit(1);
+      process.exit(isLocalCapacityFailure(err) ? LOCAL_CAPACITY_EXIT_CODE : 1);
     }
   }
   
@@ -310,10 +314,10 @@ global.fetch = async (url, opts) => { console.log('FETCH CALLED WITH:', url);
       await lock.set_stream_jw ? await lock.set_stream_jw(u) : await lock.set_stream(u, e, i);
     } catch (err) {
       console.error("[WASM ERROR from set_stream]", err);
-      process.exit(1);
+      process.exit(isLocalCapacityFailure(err) ? LOCAL_CAPACITY_EXIT_CODE : 1);
     }
   } catch(e) {
     console.error("[WASM] Fatal error in main wrapper:", e);
-    process.exit(1);
+    process.exit(isLocalCapacityFailure(e) ? LOCAL_CAPACITY_EXIT_CODE : 1);
   }
 })();
