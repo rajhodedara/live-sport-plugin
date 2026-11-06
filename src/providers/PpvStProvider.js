@@ -1,4 +1,5 @@
 const BaseProvider = require('./BaseProvider');
+const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
@@ -141,7 +142,24 @@ class PpvStProvider extends BaseProvider {
 
       const stdout = await new Promise((resolve, reject) => {
         execFile('node', [scriptPath, channelId, referer, 'EMPTY', embedUrl], { timeout: 15000 }, (err, stdout, stderr) => {
-          if (err) return reject(new Error(stderr || err.message));
+          if (err) {
+            // Exit 75 is the extractor's typed local-capacity signal; it is
+            // not proof that PPV.st has no playable stream. Keep it distinct
+            // from a hard WASM failure so the cache can retry after 2s.
+            if (err.code === 75) {
+              return reject(Object.assign(new Error('PPV.st extractor transport capacity exhausted'), {
+                code: 'ERR_OUTBOUND_CAPACITY', isFatal: true
+              }));
+            }
+            // execFile kills a timed-out child with SIGTERM. The previous
+            // generic wrapper stripped that signal, creating a 30s cache miss.
+            if (err.killed === true && err.signal === 'SIGTERM') {
+              return reject(Object.assign(new Error('PPV.st extractor deadline exceeded'), {
+                name: 'TimeoutError', code: 'ETIMEDOUT'
+              }));
+            }
+            return reject(new Error(stderr || err.message));
+          }
           resolve(stdout);
         });
       });
@@ -183,6 +201,10 @@ class PpvStProvider extends BaseProvider {
           streams.push(s);
       }
     } catch(e) {
+      // The extractor reported a *local* transient failure. Propagate it
+      // before adding the web fallback; otherwise a positive web-only cache
+      // entry can hide the direct stream for the full TTL.
+      if (isInconclusiveResolutionError(e)) throw e;
       console.warn(`[${this.name}] WASM extraction failed: ${e.message}`);
     }
     
