@@ -1,19 +1,17 @@
-# Session Checkpoint: Basketball Replays Zero-Bleeding Bridge Unwrapping & Stable Release
+# Session Checkpoint: Basketball Replays & Leaf Premium Deployment to VPS
 **Date**: 2026-11-06
-**Status**: Completed
+**Status**: Completed (Deployed to Production VPS)
 
 ### What Was Completed
-- **Branches**: `feat/leaf-premium-integration` & `stable` (both pushed to `origin`).
-- **`src/providers/BasketballVideoProvider.js`**:
-  - Generalized bridge unwrap with `isBridgeUrl(dest, baseUrl)` covering modern replay domains (`nhlgamestoday.com`, `guidedesgemmes.com`, `guideanimaux.com`, `nflontv.com`, and `nbaontv.com`) while rejecting invalid/host-spoofed URLs (`evil.example`).
-  - Added nearest HTML server heading extraction (`<b>Server #1 (OK)</b>`, `<b>Condensed Game</b>`) to label watch links with descriptive titles instead of generic "Watch".
-  - Extracted direct MP4/HLS streams from OK.ru embeds (`vd*.okcdn.ru`) and Byse with `behaviorHints: { notWebReady: false, proxyHeaders: ... }`, completely fulfilling Invariant I1 (Zero Server Video Bytes egress).
-- **`tests/basketballVideoProvider.test.js`**:
-  - Added unit test verifying modern bridge unwrapping, server heading parsing, and zero-egress direct CDN URL generation.
-- **Git Actions**:
-  - Committed on `feat/leaf-premium-integration`: `aaea07f fix(basketball): unwrap modern replay bridge domains and resolve server headings`.
-  - Merged cleanly into `stable` (`5e9265b..aaea07f`).
-  - Pushed to `origin stable` and `origin feat/leaf-premium-integration`.
+- **Branches**: `feat/leaf-premium-integration` & `stable` (both pushed to `origin`, HEAD `ea0c642`).
+- **VPS Deployment**:
+  - Fast-forward pulled `origin/stable` (`5e9265b..ea0c642`).
+  - Zero dependency diffs in `package-lock.json` (no native binary churn under traffic).
+  - Prebuild timezone checks verified 65/65 against IANA 2026f.
+  - Built staged distribution bundle (`dist.next`) and verified `MATCHES_CACHE_PATH` runtime mapping.
+  - Executed atomic directory swap (`dist.next` -> `dist`) and rolling reload on PM2 cluster (PIDs 1108880, 1108909).
+  - Executed `npm run sync:matches`: 13,532 total matches aggregated (including 40 BasketballVideo replays, 18 PitSport events, and 19 Leaf fixtures).
+  - Cluster health endpoint `/health` returned 200 OK with 0 open breakers and healthy memory.
 
 ### Verification Record
 - `node --check src/providers/BasketballVideoProvider.js`: Clean exit (code 0).
@@ -21,3 +19,4 @@
 - `npm test -- tests/basketballVideoProvider.test.js`: 11/11 passed.
 - `npm test -- tests/leafRecapProvider.test.js`: 14/14 passed.
 - Replay resolution on `livetv_memphis-sacramento-20261101`: 4 direct OK.ru CDN streams returned with 0 VPS bandwidth.
+- Production cluster `/health`: 200 OK, memory nominal (353MB / 519MB).
