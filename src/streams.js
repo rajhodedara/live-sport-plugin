@@ -1419,12 +1419,18 @@ async function handleStream(type, id, config) {
     try { timingStream = timingRelations.stream(); } catch (_) { /* diagnostic only */ }
   }
 
-  const inFlight = [];        // per-source promise + settled result for the fallback wait
-  const races = activeSources.map((src) => {
-    // findMatch accepts aliases; prewarm and remint identify the stored row.
+  // A single match can carry many Priority-1 channel variants. A few stalled
+  // mirrors must not hold a playable response to the hard deadline. Quorum is
+  // counted per resolved source key, not per quality/stream variant.
+  const PRIORITY1_QUORUM = 3;
+  const inFlight = [];
+  for (const src of activeSources) {
     const key = resolveKey(src, match.id);
     const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
-    const state = { key, source: src.source, isPriority1, promise: null, settled: false, value: [],
+    // Local positive cache entries are already verified. On a warm re-click,
+    // wait for these cheap reads, not for new scrapes on the missing mirrors.
+    const wasWarm = isPriority1 && Boolean(resolveCache.has?.(key));
+    const state = { key, source: src.source, isPriority1, wasWarm, promise: null, settled: false, value: [],
       inconclusive: Boolean(resolveCache.isDeferred?.(key)) };
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
@@ -1439,21 +1445,20 @@ async function handleStream(type, id, config) {
       .catch(() => { state.settled = true; return []; });
     state.promise = promise;
     inFlight.push(state);
-    // Wrap so we can tell "settled in time" from "still running".
-    return settleBefore(
-      promise.then((value) => ({ late: false, value })),
-      SOFT_DEADLINE_MS,
-      { late: true, value: [] }
-    );
-  });
-
-  const raced = await Promise.allSettled(races);
-  let lateCount = 0;
-  for (const r of raced) {
-    if (r.status !== 'fulfilled') continue;
-    if (r.value.late) { lateCount++; continue; }
-    if (Array.isArray(r.value.value)) streams.push(...r.value.value);
   }
+
+  const warmPriority1 = inFlight.filter(f => f.wasWarm);
+  if (warmPriority1.length >= PRIORITY1_QUORUM) {
+    await Promise.allSettled(warmPriority1.map(f => f.promise));
+  } else {
+    // One shared timer rather than a timer per source. Providers remain in
+    // flight after the response cutoff so their successful results warm cache.
+    await settleBefore(Promise.allSettled(inFlight.map(f => f.promise)), SOFT_DEADLINE_MS, null);
+  }
+  for (const f of inFlight) {
+    if (f.settled && Array.isArray(f.value)) streams.push(...f.value);
+  }
+  let lateCount = inFlight.filter(f => !f.settled).length;
 
   // If nothing usable arrived by the soft deadline, OR if priority-1 sources (DaddyLive)
   // are still in flight, wait for them up to the remaining hard budget.
@@ -1477,7 +1482,9 @@ async function handleStream(type, id, config) {
   );
   const hasUnsettledInFlight = inFlight.some(f => !f.settled);
   const tvNeedsQuorum = isTvChannel && streams.length < TV_CHANNEL_QUORUM && hasUnsettledInFlight;
-  const shouldWait = (streams.length === 0 || priority1InFlight.length > 0 || tvNeedsQuorum) && inFlight.length > 0;
+  const priority1ReadyCount = () => inFlight.filter(f => f.isPriority1 && f.settled && f.value.length > 0).length;
+  const priority1QuorumMet = priority1ReadyCount() >= PRIORITY1_QUORUM;
+  const shouldWait = (streams.length === 0 || (priority1InFlight.length > 0 && !priority1QuorumMet) || tvNeedsQuorum) && inFlight.length > 0;
   let timingWaitOutcome = 'no_wait';
 
   if (shouldWait) {
@@ -1513,6 +1520,18 @@ async function handleStream(type, id, config) {
           ? priority1InFlight.map((f) => f.promise)
           : inFlight.map((f) => f.promise);
         raceTarget = Promise.allSettled(waitTargets);
+        if (priority1InFlight.length > 0) {
+          // Once three distinct verified Priority-1 sources have succeeded,
+          // don't make the user wait for the remaining slow/broken mirrors.
+          const quorumPromise = new Promise((resolve) => {
+            for (const f of priority1InFlight) {
+              f.promise.then(() => {
+                if (priority1ReadyCount() >= PRIORITY1_QUORUM) resolve();
+              });
+            }
+          });
+          raceTarget = Promise.race([raceTarget, quorumPromise]);
+        }
       }
 
       const waited = await settleBefore(
