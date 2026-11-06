@@ -56,6 +56,7 @@ const SOURCE_PRIORITY = {
   scorezone: 1,
   leaf: 1,
   daddylive: 1,
+  pitsport: 2,
   vavoo: 2,
   sktech: 2,
   ppvst: 2,
@@ -86,8 +87,8 @@ const SOURCE_PRIORITY = {
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -120,7 +121,8 @@ const NICE_NAMES = {
   echo: 'Streamed.pk',
   golf: 'Streamed.pk',
   delta: 'Streamed.pk',
-  scorezone: 'ScoreZone'
+  scorezone: 'ScoreZone',
+  pitsport: 'PitSport'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -147,7 +149,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   ppvst: 'PPV.st',
   ak47live: 'AK47Live',
   leaf: 'Leaf',
-  scorezone: 'ScoreZone'
+  scorezone: 'ScoreZone',
+  pitsport: 'PitSport'
 };
 
 function isReplaySource(sourceName) {
@@ -306,6 +309,9 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'scorezone') {
     const provider = container.resolve('scorezoneProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'pitsport') {
+    const provider = container.resolve('pitSportProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -1052,7 +1058,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf,scorezone';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf,scorezone,pitsport';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
@@ -1674,6 +1680,7 @@ async function handleStream(type, id, config) {
     else if (s._source === 'ppvst' || sTitleLower.includes('ppvst')) providerName = 'PPV.st';
     else if (s._source === 'livetv' || sTitleLower.includes('livetv')) providerName = 'LiveTV';
     else if (s._source === 'replayzone' || sTitleLower.includes('replayzone')) providerName = 'ReplayZone';
+    else if (s._source === 'pitsport' || sTitleLower.includes('pitsport')) providerName = 'PitSport';
 
     let originalTitle = s.title || '';
     let channelName = '';
@@ -1845,6 +1852,7 @@ async function handleStream(type, id, config) {
         else if (providerName === 'DamiTV') referer = 'https://damitv.st/';
         else if (providerName === 'Vavoo') referer = 'https://vavoo.to/';
         else if (providerName === 'ScoreZone') referer = 'https://scorezonetv.live/';
+        else if (providerName === 'PitSport') referer = 'https://embdlol.st/';
         
         if (referer) {
           if (!s.behaviorHints.proxyHeaders) {
