@@ -7,6 +7,7 @@ const { BASE_URL } = require('../config');
 const path = require('path');
 const { execFile } = require('child_process');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
+const { isLowPpvSourceMetadata } = require('../services/PpvQualityPolicy');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 
@@ -52,22 +53,24 @@ class PpvStProvider extends BaseProvider {
           if (!stream || typeof stream.name !== 'string' || !stream.name.trim()) continue;
           const slug = stream.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40).replace(/^-|-$/g, '');
           const sources = [];
-          if (stream.iframe) sources.push({
+          if (stream.iframe && !isLowPpvSourceMetadata(stream)) sources.push({
             source: 'ppvst',
             id: stream.id,
             channelName: stream.source_tag || stream.name,
-            embedUrl: stream.iframe
+            embedUrl: stream.iframe,
+            resolution: stream.resolution || stream.quality || undefined
           });
 
           if (Array.isArray(stream.substreams)) {
             stream.substreams.forEach(sub => {
-              if (sub && sub.iframe) {
+              if (sub && sub.iframe && !isLowPpvSourceMetadata(sub, { includeName: true })) {
                 sources.push({
                   source: 'ppvst',
                   id: sub.id,
                   channelName: sub.source_tag || sub.name || stream.name,
                   embedUrl: sub.iframe,
-                  language: sub.locale
+                  language: sub.locale,
+                  resolution: sub.resolution || sub.quality || undefined
                 });
               }
             });
@@ -205,7 +208,7 @@ class PpvStProvider extends BaseProvider {
                 }
               }
             },
-            resolution: 'HD',
+            resolution: src.resolution || 'HD',
             channelName: channelName || undefined,
             language: typeof src.language === 'string' ? src.language : undefined
           });
