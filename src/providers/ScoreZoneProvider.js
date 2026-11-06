@@ -2,6 +2,7 @@
 
 const crypto = require('crypto');
 const BaseProvider = require('./BaseProvider');
+const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
@@ -197,6 +198,14 @@ class ScoreZoneProvider extends BaseProvider {
           return channels;
         }
       } catch (err) {
+        // Local pool congestion / timeout does not mean this channel is gone.
+        // If no last-known channels exist, bubble up to the stream resolver so
+        // it can apply its short inconclusive cooldown rather than 30s negative.
+        // A usable prior snapshot still wins, including during refresh failure.
+        if (isInconclusiveResolutionError(err) &&
+            !(Array.isArray(this._cachedIptvChannels) && this._cachedIptvChannels.length > 0)) {
+          throw err;
+        }
         console.warn(`[ScoreZone] IPTV channels fetch failed: ${err.message}`);
       }
 
@@ -397,10 +406,15 @@ class ScoreZoneProvider extends BaseProvider {
       const isExpired = !channel || !channel.expiresAt || (channel.expiresAt <= now + 60000);
 
       if (isExpired) {
-        const freshChannels = await this._getIptvChannels(true);
-        const refreshed = freshChannels?.find(c => c.id === channelId);
-        if (refreshed) {
-          channel = refreshed;
+        try {
+          const freshChannels = await this._getIptvChannels(true);
+          const refreshed = freshChannels?.find(c => c.id === channelId);
+          if (refreshed) channel = refreshed;
+        } catch (err) {
+          // The catalog already carried a direct URL. Do not discard it only
+          // because an optional channel-metadata refresh hit local congestion.
+          // Without a usable URL, let the cache defer this inconclusive miss.
+          if (!src?.streamUrl || !isInconclusiveResolutionError(err)) throw err;
         }
       }
 
