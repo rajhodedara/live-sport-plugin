@@ -1448,7 +1448,7 @@ async function handleStream(type, id, config) {
   }
 
   const warmPriority1 = inFlight.filter(f => f.wasWarm);
-  if (warmPriority1.length >= PRIORITY1_QUORUM) {
+  if (new Set(warmPriority1.map(f => f.key)).size >= PRIORITY1_QUORUM) {
     await Promise.allSettled(warmPriority1.map(f => f.promise));
   } else {
     // One shared timer rather than a timer per source. Providers remain in
@@ -1460,10 +1460,9 @@ async function handleStream(type, id, config) {
   }
   let lateCount = inFlight.filter(f => !f.settled).length;
 
-  // If nothing usable arrived by the soft deadline, OR if priority-1 sources (DaddyLive)
-  // are still in flight, wait for them up to the remaining hard budget.
-  // This guarantees fast streams (e.g. Vavoo) do not cut off DaddyLive with an early return,
-  // while still returning instantly as soon as DaddyLive completes (or when already cached).
+  // If no stream is available, or fewer than three distinct Priority-1
+  // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
+  // cannot stall a normal event once a playable Priority-1 quorum is ready.
   const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
   const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
   const isTvChannel = Boolean(
@@ -1482,7 +1481,9 @@ async function handleStream(type, id, config) {
   );
   const hasUnsettledInFlight = inFlight.some(f => !f.settled);
   const tvNeedsQuorum = isTvChannel && streams.length < TV_CHANNEL_QUORUM && hasUnsettledInFlight;
-  const priority1ReadyCount = () => inFlight.filter(f => f.isPriority1 && f.settled && f.value.length > 0).length;
+  const priority1ReadyCount = () => new Set(inFlight
+    .filter(f => f.isPriority1 && f.settled && f.value.length > 0)
+    .map(f => f.key)).size;
   const priority1QuorumMet = priority1ReadyCount() >= PRIORITY1_QUORUM;
   const shouldWait = (streams.length === 0 || (priority1InFlight.length > 0 && !priority1QuorumMet) || tvNeedsQuorum) && inFlight.length > 0;
   let timingWaitOutcome = 'no_wait';
