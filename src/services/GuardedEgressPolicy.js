@@ -11,7 +11,9 @@ function hostnameOf(value) {
 
 function isLeafTarget(value) {
   const host = hostnameOf(value);
-  return host === 'sports.highfly.to' ||
+  const isHighfly = host === 'highfly.to' || host.endsWith('.highfly.to') ||
+                    host === 'highfly.dev' || host.endsWith('.highfly.dev');
+  return isHighfly ||
     ((host === 'papacito.cfd' || host.endsWith('.papacito.cfd')) &&
       host !== 'w1.papacito.cfd' && !host.endsWith('.w1.papacito.cfd'));
 }

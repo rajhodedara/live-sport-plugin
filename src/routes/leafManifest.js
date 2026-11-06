@@ -46,7 +46,9 @@ const sessionCache = new Map();
 
 function isTransientFetchFailure(error) {
   return error?.leafTransient === true || error?.name === 'TimeoutError' ||
-    TRANSIENT_NETWORK_CODES.has(error?.code);
+    TRANSIENT_NETWORK_CODES.has(error?.code) ||
+    error?.upstreamStatus === 429 || error?.rateLimit === true ||
+    error?.code === 'ERR_LEAF_MINT_RATE_LIMIT';
 }
 
 /**
@@ -236,7 +238,7 @@ function parseUpstreamManifest(body, targetUrl) {
   const discMatch = body.match(/#EXT-X-DISCONTINUITY-SEQUENCE:(\d+)/);
   const discontinuitySeq = discMatch ? parseInt(discMatch[1], 10) : 0;
 
-  const segRegex = /(https?:\/\/[^\s\/]+)\/leaf\/([^\s\/]+)\/([^\s\/]+)\/seg_(\d+)\.ts/g;
+  const segRegex = /(?:(https?:\/\/[^\s\/]+))?\/leaf\/([^\s\/]+)\/([^\s\/]+)\/seg_(\d+)\.ts/g;
   const matches = [...body.matchAll(segRegex)];
 
   if (!matches || matches.length === 0) {
@@ -244,7 +246,7 @@ function parseUpstreamManifest(body, targetUrl) {
   }
 
   const firstMatch = matches[0];
-  const cdnBase = firstMatch[1];
+  const cdnBase = firstMatch[1] || (targetUrl ? new URL(targetUrl).origin : 'https://w1.papacito.cfd');
   const slug = firstMatch[2];
   const session = firstMatch[3];
   const edge = parseInt(firstMatch[4], 10);

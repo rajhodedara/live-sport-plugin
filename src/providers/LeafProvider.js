@@ -4,7 +4,7 @@ const StreamEntity = require('../domain/StreamEntity');
 const impitClient = require('../services/ProviderOutbound');
 const leafState = require('../services/LeafState');
 const leafMint = require('../services/LeafMint');
-const { normalizeConfigBlob } = leafMint;
+const { normalizeConfigBlob, extractOrigin, isRateLimit } = leafMint;
 const { BASE_URL } = require('../config');
 const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 
@@ -71,8 +71,10 @@ class LeafProvider extends BaseProvider {
     const override = process.env.LEAF_API_URL;
     if (override) return override.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
 
-    const origin = (process.env.LEAF_API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, '');
     const rawConfig = process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID || '';
+    const detectedOrigin = extractOrigin(rawConfig);
+    const origin = (process.env.LEAF_API_ORIGIN || detectedOrigin || DEFAULT_ORIGIN).replace(/\/+$/, '');
+
     const config = normalizeConfigBlob(rawConfig);
 
     return config ? `${origin}/${config}` : origin;
@@ -90,11 +92,7 @@ class LeafProvider extends BaseProvider {
    * @returns {boolean}
    */
   static isRateLimit(streamsList) {
-    return (streamsList || []).some((st) => st && (
-      /rate limit/i.test(st.name || '') ||
-      /rate limit/i.test(st.title || '') ||
-      /too many stream requests/i.test(st.title || '')
-    ));
+    return isRateLimit(streamsList);
   }
 
   static isInstallNag(streamsList) {

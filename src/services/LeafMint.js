@@ -31,9 +31,10 @@ const num = (v, dflt) => {
   return Number.isFinite(n) && n > 0 ? n : dflt;
 };
 
-const MINT_TTL_MS = Math.min(10 * 60 * 1000, Math.max(5 * 1000, num(process.env.LEAF_MINT_TTL_MS, 60 * 1000)));
+const MINT_TTL_MS = Math.min(8 * 60 * 60 * 1000, Math.max(5 * 1000, num(process.env.LEAF_MINT_TTL_MS, 4 * 60 * 60 * 1000)));
 const MINT_TIMEOUT_MS = Math.min(30000, Math.max(2000, num(process.env.LEAF_MINT_TIMEOUT_MS, 8000)));
 const MAX_MINT_BYTES = 256 * 1024;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Backoff: base delay per failure class, doubling per consecutive failure, capped.
 const NEG_BASE_MS = num(process.env.LEAF_MINT_BACKOFF_MS, 15 * 1000); // transport errors / 5xx
@@ -52,13 +53,27 @@ function toBase64Url(json) {
     .replace(/=+$/, '');
 }
 
+function extractOrigin(rawInput) {
+  if (!rawInput || typeof rawInput !== 'string') return null;
+  const trimmed = rawInput.trim();
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const u = new URL(trimmed);
+      return u.origin;
+    } catch (_) {}
+  }
+  return null;
+}
+
 /**
  * Robust normalizer for LEAF_INSTALL_CONFIG / LEAF_FREE_USER_ID.
  * Handles:
  *  - Full URLs: https://sports.highfly.to/bbecb026-6920-4b62-b006-ddd3eeb31e8d.6bd757136d146439/manifest.json
+ *  - Highfly Premium URLs: https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json
  *  - Raw JSON string: {"freeUserId":"..."}
  *  - Pre-encoded base64url JSON blob: eyJmcmVlVXNlcklkIjoi...
  *  - Bare token string: bbecb026-6920-4b62-b006-ddd3eeb31e8d.6bd757136d146439
+ *  - Bare UUID token: bff8de7f-67bc-49e0-99e3-fefecee64abb
  *
  * @param {string} rawInput
  * @returns {string} base64url or segment config string
@@ -67,10 +82,20 @@ function normalizeConfigBlob(rawInput) {
   if (!rawInput || typeof rawInput !== 'string') return '';
   let input = rawInput.trim();
 
-  // If user pasted a full URL
-  const urlMatch = input.match(/sports\.highfly\.to\/([^\/\s]+)/i);
+  // If user pasted a full URL (sports.highfly.to, premium.highfly.to, *.highfly.to, *.highfly.dev, etc.)
+  const urlMatch = input.match(/(?:[a-z0-9-]+\.)*highfly\.(?:to|dev)\/([^\/\s]+)/i);
   if (urlMatch) {
     input = urlMatch[1];
+  } else if (/^https?:\/\//i.test(input)) {
+    try {
+      const u = new URL(input);
+      const parts = u.pathname.split('/').filter(Boolean);
+      if (parts.length > 0) {
+        input = parts[parts.length - 1].toLowerCase() === 'manifest.json' && parts.length > 1
+          ? parts[parts.length - 2]
+          : parts[0];
+      }
+    } catch (_) {}
   }
   input = input.replace(/\/manifest\.json$/i, '').replace(/^\/+|\/+$/g, '');
 
@@ -91,6 +116,11 @@ function normalizeConfigBlob(rawInput) {
     }
   } catch (_) {}
 
+  // Bare UUID token (Highfly Premium subscription token)
+  if (UUID_REGEX.test(input)) {
+    return input;
+  }
+
   // Bare string (e.g. uuid.hash)
   if (input.includes('.') || input.length > 20) {
     return toBase64Url({ freeUserId: input });
@@ -100,15 +130,28 @@ function normalizeConfigBlob(rawInput) {
 }
 
 /**
+ * Check if upstream returned rate limit stub.
+ */
+function isRateLimit(streamsList) {
+  return (streamsList || []).some((st) => st && (
+    /rate limit/i.test(st.name || '') ||
+    /rate limit/i.test(st.title || '') ||
+    /too many stream requests/i.test(st.title || '')
+  ));
+}
+
+/**
  * Mirror LeafProvider.buildApiUrl(): LEAF_API_URL is a whole-base kill switch,
  * otherwise origin + per-install config blob.
  */
 function apiBase() {
   const override = process.env.LEAF_API_URL;
   if (override) return override.replace(/\/manifest\.json$/i, '').replace(/\/+$/, '');
-  const origin = (process.env.LEAF_API_ORIGIN || DEFAULT_ORIGIN).replace(/\/+$/, '');
 
   const rawConfig = process.env.LEAF_INSTALL_CONFIG || process.env.LEAF_FREE_USER_ID || '';
+  const detectedOrigin = extractOrigin(rawConfig);
+  const origin = (process.env.LEAF_API_ORIGIN || detectedOrigin || DEFAULT_ORIGIN).replace(/\/+$/, '');
+
   const config = normalizeConfigBlob(rawConfig);
   return config ? `${origin}/${config}` : origin;
 }
@@ -212,8 +255,20 @@ async function mintUrl(matchId, slug, opts = {}) {
   const flightKey = `${key}|${opts.force ? 'force' : 'normal'}`;
   if (inFlightMints.has(flightKey)) return inFlightMints.get(flightKey);
   // Set the promise before entering I/O, including synchronous dependency throws.
-  const pending = Promise.resolve().then(() => fetchMint(matchId, slug, opts, key, base))
-    .finally(() => inFlightMints.delete(flightKey));
+  const pending = Promise.resolve().then(async () => {
+    try {
+      return await fetchMint(matchId, slug, opts, key, base);
+    } catch (err) {
+      if ((err.rateLimit || err.upstreamStatus === 429) && mintCache.has(key)) {
+        const hit = mintCache.get(key);
+        if (hit && hit.url) {
+          console.warn(`[LeafMint] Upstream rate limit hit for ${matchId}/${slug || ''}; preserving cached Papacito URL`);
+          return hit.url;
+        }
+      }
+      throw err;
+    }
+  }).finally(() => inFlightMints.delete(flightKey));
   inFlightMints.set(flightKey, pending);
   return pending;
 }
@@ -255,6 +310,17 @@ async function fetchMint(matchId, slug, opts, key, base) {
     throw Object.assign(new Error('Leaf mint returned invalid metadata'), { code: 'ERR_LEAF_MINT_BODY' });
   }
   const streams = body && Array.isArray(body.streams) ? body.streams : [];
+
+  if (isRateLimit(streams)) {
+    const err = Object.assign(new Error('Leaf mint hit upstream rate limit'), {
+      code: 'ERR_LEAF_MINT_RATE_LIMIT',
+      rateLimit: true,
+      upstreamStatus: 429
+    });
+    recordFailure(matchId, slug, 'ERR_LEAF_MINT_RATE_LIMIT', NEG_BASE_429_MS, base);
+    throw err;
+  }
+
   const candidates = streams
     .map((s) => s && s.url)
     .filter((u) => {
@@ -290,5 +356,6 @@ function stats() {
 
 module.exports = {
   mintUrl, seed, invalidate, noteFailure, isCoolingDown, cooldownRemaining,
-  isConfigured, stats, apiBase, normalizeConfigBlob, MINT_TTL_MS
+  isConfigured, stats, apiBase, normalizeConfigBlob, MINT_TTL_MS,
+  extractOrigin, isRateLimit, UUID_REGEX
 };
