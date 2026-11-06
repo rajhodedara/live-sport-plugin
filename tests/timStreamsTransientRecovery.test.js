@@ -78,7 +78,7 @@ describe('TimStreams: inconclusive extraction must not become a long positive we
     provider.proxyFetch = jest.fn().mockResolvedValue({ ok: false, status: 404 });
     const rows = await provider.resolveStream(source.id, 'football', match.title, source);
     expect(rows).toHaveLength(1);
-    expect(rows[0].url).toBeNull();
+    expect(rows[0].url).toBeUndefined();
     expect(rows[0].externalUrl).toContain('/watch?url=');
   });
 
