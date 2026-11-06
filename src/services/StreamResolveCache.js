@@ -22,7 +22,8 @@ const sharedRevision = value => typeof value === 'string' && /^[a-f0-9-]{36}$/i.
 const { withTimingWork } = require('./TimingContext');
 const resolverConflictState = require('./ResolverConflictState');
 const { allowsLegacyResolverTcp } = require('./ResolverTrustPolicy');
-const { createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError } = require('./StreamResolutionOutcome');
+const { createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError,
+  inconclusiveStreamsReason, DIRECT_RETRY_HINT } = require('./StreamResolutionOutcome');
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
 // generic structuredClone serializer by 5-15x on these shapes, and cloneStream
@@ -50,6 +51,22 @@ function cloneStream(stream) {
     copy.behaviorHints = _cloneHints(stream.behaviorHints);
   }
   return copy;
+}
+
+function clonePublicStream(stream) {
+  const copy = cloneStream(stream);
+  delete copy[DIRECT_RETRY_HINT];
+  return copy;
+}
+
+// A short positive web fallback can cross the unchanged L2 ok/failed protocol.
+// Accept its internal hint only on a web-only payload; never alter direct media
+// or treat an arbitrary provider control field as evidence of a failure.
+function webRetryReason(streams) {
+  if (!Array.isArray(streams) || !streams.length || !streams.every(s => s && !s.url && typeof s.externalUrl === 'string')) return null;
+  const descriptor = Object.getOwnPropertyDescriptor(streams[0], DIRECT_RETRY_HINT);
+  const reason = descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : null;
+  return ['timeout', 'capacity', 'cancelled', 'unavailable'].includes(reason) ? reason : null;
 }
 
 // ─── Shared L2 (resolver-hosted) ─────────────────────────────────────────────
@@ -228,7 +245,7 @@ class StreamResolveCache {
       this.entries.delete(key);
       return false;
     }
-    return entry.status === 'deferred';
+    return entry.status === 'deferred' || (entry.status === 'ok' && Boolean(entry.retryReason));
   }
 
   /**
@@ -268,7 +285,7 @@ class StreamResolveCache {
     this.entries.delete(key);
     this.entries.set(key, e);
     if (e.status !== 'ok') return null;
-    return e.streams.map(cloneStream);
+    return e.streams.map(clonePublicStream);
   }
 
   /**
@@ -284,14 +301,16 @@ class StreamResolveCache {
     if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
     const matchId = key.split(':')[1] || '';
     const streams = Array.isArray(remote.streams) ? remote.streams : [];
+    const retryReason = remote.status === 'ok' ? webRetryReason(streams) : null;
     this.entries.delete(key);
     this.entries.set(key, {
       streams: streams.map(cloneStream),
       matchId,
       status: remote.status === 'ok' ? 'ok' : 'failed',
-      expiresAt,
+      expiresAt: retryReason ? Math.min(expiresAt, Date.now() + 2000) : expiresAt,
       lastAccess: Date.now(),
       sharedRevision: sharedRevision(remote.revision),
+      ...(retryReason ? { retryReason } : {}),
     });
     this._evictIfNeeded();
     return true;
@@ -349,7 +368,7 @@ class StreamResolveCache {
         return [];
       }
       this.statsCounters.hits++;
-      return existing.streams.map(cloneStream);
+      return existing.streams.map(clonePublicStream);
     }
 
     const pending = this.inFlight.get(key);
@@ -480,7 +499,7 @@ class StreamResolveCache {
         // Pruning can run while the provider is resolving. Discard both
         // positive and negative late answers before touching either cache.
         if (operation.pruned) {
-          if (isDeferredResolution(streams)) await releaseOwnedClaim();
+          await releaseOwnedClaim();
           return;
         }
         if (isDeferredResolution(streams)) {
@@ -494,9 +513,17 @@ class StreamResolveCache {
         let status = 'failed';
         let ttl = this.negativeTtlMs;
         let localEntry;
+        let storedStreams = [];
         if (Array.isArray(streams) && streams.length > 0) {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
+          storedStreams = streams.map(clonePublicStream);
+          const retryReason = inconclusiveStreamsReason(streams);
+          if (retryReason && storedStreams.every(s => s && !s.url && typeof s.externalUrl === 'string')) {
+            storedStreams[0][DIRECT_RETRY_HINT] = retryReason;
+            ttl = Math.min(ttl, 2000);
+            this.statsCounters.deferrals++;
+          }
           // A PPV web fallback is usable as a hand-off, but it must not delay
           // another direct-playback attempt longer than an empty result did.
           if (sourceName === 'ppvst' && streams.every(s => s && !s.url && s.externalUrl)) {
@@ -510,10 +537,13 @@ class StreamResolveCache {
               }
             }
           }
-          localEntry = this._set(key, sourceName, matchId, streams, 'ok', ttl);
+          localEntry = this._set(key, sourceName, matchId, storedStreams, 'ok', ttl);
         } else {
           localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
         }
+        // Keep publication authority until the RPC settles, even if an expiry
+        // reader has already removed this entry from the local map.
+        operation.publicationEntry = localEntry;
         // Write-through so the other worker inherits the mint instantly.
         if (claimed && this._sharedAvailable()) {
           const publish = token => this._sharedJson(
@@ -521,7 +551,7 @@ class StreamResolveCache {
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ streams: status === 'ok' ? streams : [], ttlMs: ttl, status, ownerToken: token }),
+              body: JSON.stringify({ streams: status === 'ok' ? storedStreams : [], ttlMs: ttl, status, ownerToken: token }),
             },
             2000
           );
@@ -546,9 +576,29 @@ class StreamResolveCache {
             }
           }
         }
+        if (operation.pruned || localEntry.invalidated) {
+          await releaseOwnedClaim();
+          return;
+        }
+        // Publishing can consume the entire two-second retry window. Start
+        // that cooldown when this mint finishes so its first caller still
+        // receives the verified web fallback. Never rearm media, an explicit
+        // invalidation, a pruned operation, or a newer local publication.
+        const current = this.entries.get(key);
+        if (localEntry.retryReason && !operation.publicationEvicted &&
+            this.pendingOperations.get(key) === operation &&
+            (!current || current === localEntry)) {
+          const completedAt = Date.now();
+          localEntry.resolvedAt = completedAt;
+          localEntry.expiresAt = Math.max(localEntry.expiresAt, completedAt + ttl);
+          localEntry.lastAccess = completedAt;
+          this.entries.delete(key);
+          this.entries.set(key, localEntry);
+          this._evictIfNeeded();
+        }
       } catch (error) {
         if (operation.pruned) {
-          if (isDeferredResolution(error) || isInconclusiveResolutionError(error)) await releaseOwnedClaim();
+          await releaseOwnedClaim();
           return;
         }
         if (deferred || isDeferredResolution(error) || isInconclusiveResolutionError(error)) {
@@ -592,6 +642,8 @@ class StreamResolveCache {
       expiresAt: now + ttlMs,
       lastAccess: now
     };
+    const retryReason = status === 'ok' ? webRetryReason(streams) : null;
+    if (retryReason) entry.retryReason = retryReason;
     this.entries.set(key, entry);
     this._evictIfNeeded();
     return entry;
@@ -605,7 +657,7 @@ class StreamResolveCache {
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);
-    if (e && e.status === 'ok') {
+    if (e && e.status === 'ok' && !e.retryReason && e.expiresAt > Date.now()) {
       e.expiresAt = Math.max(e.expiresAt, Date.now() + next);
     }
   }
@@ -618,8 +670,10 @@ class StreamResolveCache {
     this.ttl.set(sourceName, next);
     const entry = this.entries.get(key);
     if (entry) entry.invalidated = true;
+    const publicationEntry = this.pendingOperations.get(key)?.publicationEntry;
+    if (publicationEntry) publicationEntry.invalidated = true;
     this.entries.delete(key);
-    this._invalidateShared(key, entry?.sharedRevision).catch(() => {});
+    this._invalidateShared(key, entry?.sharedRevision || publicationEntry?.sharedRevision).catch(() => {});
   }
 
   async _invalidateShared(key, revision) {
@@ -660,6 +714,8 @@ class StreamResolveCache {
   _evictIfNeeded() {
     while (this.entries.size > this.maxEntries) {
       const oldestKey = this.entries.keys().next().value;
+      const operation = this.pendingOperations.get(oldestKey);
+      if (operation && operation.publicationEntry === this.entries.get(oldestKey)) operation.publicationEvicted = true;
       this.entries.delete(oldestKey);
       this.statsCounters.evictions++;
     }

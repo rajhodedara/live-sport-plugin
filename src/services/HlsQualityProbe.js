@@ -28,8 +28,9 @@
  * - One small playlist GET plus one ranged GET (≤ 512 KB) per stream.
  * - Results cached by token-free slug for 10 min; failures cached for 60 s.
  * - Max 4 concurrent probes process-wide; in-flight requests are de-duplicated.
- * - Any failure returns null. The caller keeps its existing fallback label; this
- *   service never throws, never drops a stream and never blocks past its budget.
+ * - The total deadline includes queue wait. Failure returns null so the caller
+ *   keeps its fallback label. Canceled work retains its physical slot until its
+ *   fetch/body settles, even if the caller has already received null.
  */
 
 const CLOAKED_PREFIX_BYTES = 42;
@@ -370,19 +371,44 @@ class HlsQualityProbe {
     this.cache.set(key, { expiresAt: this.now() + ttlMs, value });
   }
 
-  async _acquire() {
-    if (this.active < this.maxConcurrent) {
+  async _acquire(signal, deadlineAt) {
+    const expired = () => signal.aborted || performance.now() >= deadlineAt;
+    const failure = () => signal.reason || new DOMException('Quality probe deadline', 'TimeoutError');
+    if (expired()) throw failure();
+    if (this.active < this.maxConcurrent && this.waiters.length === 0) {
       this.active++;
       return;
     }
-    await new Promise((resolve) => this.waiters.push(resolve));
-    this.active++;
+    await new Promise((resolve, reject) => {
+      let pending = true;
+      const finish = (fn, value) => {
+        if (!pending) return;
+        pending = false;
+        const index = this.waiters.indexOf(waiter);
+        if (index !== -1) this.waiters.splice(index, 1);
+        signal.removeEventListener('abort', abort);
+        fn(value);
+      };
+      const abort = () => finish(reject, failure());
+      const waiter = { grant() {
+        if (!pending) return false;
+        if (expired()) { finish(reject, failure()); return false; }
+        // _release transfers its existing reservation, so no new arrival can
+        // take the slot before this waiter's continuation resumes.
+        finish(resolve);
+        return true;
+      } };
+      this.waiters.push(waiter);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
   }
 
   _release() {
+    while (this.waiters.length) {
+      if (this.waiters.shift().grant()) return;
+    }
     this.active = Math.max(0, this.active - 1);
-    const next = this.waiters.shift();
-    if (next) next();
   }
 
   /**
@@ -407,36 +433,68 @@ class HlsQualityProbe {
     const running = this.inFlight.get(key);
     if (running) return running;
 
-    const task = this._run(manifestUrl, { ...opts, fetch: fetchImpl })
+    const controller = new AbortController();
+    const deadlineAt = performance.now() + this.timeoutMs;
+    let expire;
+    const deadline = new Promise(resolve => { expire = resolve; });
+    const timer = setTimeout(() => {
+      controller.abort(new DOMException('Quality probe deadline', 'TimeoutError'));
+      expire(null);
+    }, this.timeoutMs);
+    // Reserve single-flight before invoking a supplied fetch implementation.
+    const work = Promise.resolve()
+      .then(() => this._run(manifestUrl, { ...opts, fetch: fetchImpl, signal: controller.signal, deadlineAt }))
       .catch(() => null)
+      .then(value => controller.signal.aborted ? null : value);
+    const task = Promise.race([work, deadline])
       .then((value) => {
         this._cacheSet(key, value, value ? this.ttlMs : this.negativeTtlMs);
         return value ? { ...value, cached: false } : null;
       })
-      .finally(() => { this.inFlight.delete(key); });
+      .finally(() => { clearTimeout(timer); });
 
     this.inFlight.set(key, task);
+    // A fetch/body can ignore AbortSignal. Return on time, but keep the active
+    // reservation and same-key single-flight until the underlying work settles.
+    Promise.allSettled([work, task]).then(() => {
+      if (this.inFlight.get(key) === task) this.inFlight.delete(key);
+    });
     return task;
   }
 
   async _run(manifestUrl, opts) {
-    await this._acquire();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const { signal, deadlineAt } = opts;
+    const remaining = () => {
+      signal.throwIfAborted();
+      const ms = Math.ceil(deadlineAt - performance.now());
+      if (ms <= 0) throw new DOMException('Quality probe deadline', 'TimeoutError');
+      return ms;
+    };
+    let acquired = false;
     try {
+      await this._acquire(signal, deadlineAt);
+      acquired = true;
+      remaining();
       const headers = { 'User-Agent': opts.userAgent || 'Mozilla/5.0' };
       if (opts.referer) headers.Referer = opts.referer;
       if (opts.origin) headers.Origin = opts.origin;
 
       const playlistRes = await opts.fetch(manifestUrl, {
         headers,
-        signal: controller.signal,
+        signal,
+        timeoutMs: remaining(),
+        attempts: 1,
         maxBodyBytes: PLAYLIST_MAX_BYTES
       });
+      if (signal.aborted || performance.now() >= deadlineAt) {
+        if (typeof playlistRes?.body?.cancel === 'function') await playlistRes.body.cancel();
+        return null;
+      }
       if (!playlistRes || !playlistRes.ok) return null;
       const playlistText = typeof playlistRes.text === 'function'
         ? await playlistRes.text()
         : String(playlistRes.body || '');
+      remaining();
       const playlist = parseMediaPlaylist(playlistText);
       // A master playlist declares its own quality; streams.js already reads it,
       // and guessing a rendition here would contradict the declared ladder.
@@ -449,12 +507,19 @@ class HlsQualityProbe {
 
       const segmentRes = await opts.fetch(segmentUrl, {
         headers: { ...headers, Range: `bytes=0-${this.rangeBytes - 1}` },
-        signal: controller.signal,
+        signal,
+        timeoutMs: remaining(),
+        attempts: 1,
         maxBodyBytes: this.rangeBytes + 64 * 1024
       });
+      if (signal.aborted || performance.now() >= deadlineAt) {
+        if (typeof segmentRes?.body?.cancel === 'function') await segmentRes.body.cancel();
+        return null;
+      }
       if (!segmentRes || !segmentRes.ok) return null;
 
       const raw = Buffer.from(await segmentRes.arrayBuffer());
+      remaining();
       if (!raw.length) return null;
 
       const media = stripCloak(raw);
@@ -485,8 +550,7 @@ class HlsQualityProbe {
     } catch (_) {
       return null;
     } finally {
-      clearTimeout(timer);
-      this._release();
+      if (acquired) this._release();
     }
   }
 }

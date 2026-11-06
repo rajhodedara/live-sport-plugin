@@ -1,6 +1,6 @@
 const BaseProvider = require('./BaseProvider');
 const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
-const { LOCAL_CAPACITY_EXIT_CODE } = require('./PpvStWasmExit');
+const { LOCAL_CAPACITY_EXIT_CODE, LOCAL_TIMEOUT_EXIT_CODE, LOCAL_CANCELLED_EXIT_CODE } = require('./PpvStWasmExit');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
@@ -152,9 +152,15 @@ class PpvStProvider extends BaseProvider {
                 code: 'ERR_OUTBOUND_CAPACITY', isFatal: true
               }));
             }
+            if (err.code === LOCAL_CANCELLED_EXIT_CODE) {
+              return reject(Object.assign(new Error('PPV.st extractor transport cancelled'), {
+                name: 'AbortError', code: 'ABORT_ERR'
+              }));
+            }
             // execFile kills a timed-out child with SIGTERM. The previous
             // generic wrapper stripped that signal, creating a 30s cache miss.
-            if (err.killed === true && err.signal === 'SIGTERM') {
+            // The child can also report a typed fetch timeout before this kill.
+            if (err.code === LOCAL_TIMEOUT_EXIT_CODE || (err.killed === true && err.signal === 'SIGTERM')) {
               return reject(Object.assign(new Error('PPV.st extractor deadline exceeded'), {
                 name: 'TimeoutError', code: 'ETIMEDOUT'
               }));

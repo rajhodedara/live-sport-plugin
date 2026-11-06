@@ -7,6 +7,10 @@ const TIMEOUT_CODES = new Set([
   'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'
 ]);
 const CAPACITY_CODE = /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/;
+// Array identity keeps partial provider evidence separate from provider JSON.
+// No URLs, errors or additional control objects are retained here.
+const inconclusiveStreams = new WeakMap();
+const DIRECT_RETRY_HINT = '_nuvioDirectRetry';
 
 function createDeferredResolution(reason, retryAfterMs = 2000) {
   const delay = Number.isSafeInteger(retryAfterMs) ? retryAfterMs : 2000;
@@ -50,4 +54,33 @@ function isInconclusiveResolutionError(error) {
   } catch (_) { return false; }
 }
 
-module.exports = { createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError };
+function inconclusiveErrorReason(error) {
+  if (!isInconclusiveResolutionError(error)) return null;
+  try {
+    const chain = [];
+    for (let current = error; current && typeof current === 'object'; current = current.cause) {
+      if (chain.includes(current) || chain.length >= 8) return null;
+      chain.push(current);
+    }
+    if (chain.some(item => item.name === 'AbortError')) return 'cancelled';
+    if (chain.some(item => item.code === 'ERR_OUTBOUND_CAPACITY' || CAPACITY_CODE.test(item.code || ''))) return 'capacity';
+    return 'timeout';
+  } catch (_) { return null; }
+}
+
+function markInconclusiveStreams(streams, errorOrReason) {
+  if (!Array.isArray(streams)) return streams;
+  const reason = typeof errorOrReason === 'string' && REASONS.has(errorOrReason)
+    ? errorOrReason : inconclusiveErrorReason(errorOrReason);
+  if (reason) inconclusiveStreams.set(streams, reason);
+  return streams;
+}
+
+function inconclusiveStreamsReason(streams) {
+  return Array.isArray(streams) ? inconclusiveStreams.get(streams) || null : null;
+}
+
+module.exports = {
+  createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError,
+  inconclusiveErrorReason, markInconclusiveStreams, inconclusiveStreamsReason, DIRECT_RETRY_HINT
+};

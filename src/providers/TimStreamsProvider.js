@@ -1,6 +1,6 @@
 const { safeFetch } = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
-const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
+const { isInconclusiveResolutionError, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
@@ -291,6 +291,7 @@ class TimStreamsProvider extends BaseProvider {
       // caching them as a complete success hides the missing direct feed for
       // the entire positive TTL. Propagate only if no direct feed succeeded.
       if (inconclusive && !streams.some(row => row && row.url)) throw inconclusive;
+      if (inconclusive) markInconclusiveStreams(streams, inconclusive);
     } catch (err) {
       if (isInconclusiveResolutionError(err)) throw err;
       console.error(`[${this.name}] resolveStream failed for ${sourceId}:`, err.message);
