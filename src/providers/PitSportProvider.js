@@ -6,7 +6,7 @@ const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
 const { isTransientStatus, isTransientError } = require('../services/retry');
-const { isInconclusiveResolutionError, inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
+const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
