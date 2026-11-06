@@ -56,7 +56,7 @@ describe('verified Priority-1 quorum response window', () => {
       streamResolveCache: cache,
       streamScorer: { calculateScore: () => 1 }
     })[name]);
-    return { id: `nuvio_sport_${match.id}`, controls, cache };
+    return { id: `nuvio_sport_${match.id}`, controls, cache, match };
   }
 
   test('warm re-click returns three cached feeds without waiting for a stalled mirror or soft timer', async () => {
@@ -104,6 +104,22 @@ describe('verified Priority-1 quorum response window', () => {
     expect(response).toBeUndefined();
     await jest.advanceTimersByTimeAsync(90);
     expect(response.streams).toHaveLength(3);
+  });
+
+  test('duplicate rows with the same cache key never count as three working sources', async () => {
+    const { id, match } = fixture({ warm: ['a'], ready: ['a'] });
+    match.sources = [
+      { source: 'daddylive', id: 'a' },
+      { source: 'daddylive', id: 'a' },
+      { source: 'daddylive', id: 'a' },
+      { source: 'daddylive', id: 'd' }
+    ];
+    let response;
+    handleStream('tv', id).then(value => { response = value; });
+    await jest.advanceTimersByTimeAsync(110);
+    expect(response).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(90);
+    expect(response).toBeDefined();
   });
 
   test('TV channel still waits for the existing five-stream channel quorum', async () => {
