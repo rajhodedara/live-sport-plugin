@@ -95,11 +95,17 @@ class PpvStProvider extends BaseProvider {
             }
           }
 
+          let streamCat = category;
+          const streamUrl = stream.iframe || '';
+          if (/\b(?:ncaa|college|ncaab|ncaaf)\b/i.test(`${stream.name} ${cat.category}`) || /\/(?:cbb|cfb)\//i.test(streamUrl)) {
+            streamCat = 'college';
+          }
+
           matches.push(new MatchEntity({
             id: `ppv_${stream.id}_${slug}`,
             title: stream.name,
             baseTitle: stream.name,
-            category: is247 ? 'networks' : this.normalizeCategory(category),
+            category: is247 ? 'networks' : this.normalizeCategory(streamCat),
             date: is247 ? '' : (stream.starts_at ? String(stream.starts_at * 1000) : '0'),
             status: is247 ? '' : (stream.starts_at && stream.starts_at * 1000 > Date.now() ? 'upcoming' : 'live'),
             popular: is247 ? '1' : undefined,

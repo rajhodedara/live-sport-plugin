@@ -70,7 +70,10 @@ class PitSportProvider extends BaseProvider {
           .replace(/^-|-$/g, '');
 
         let rawCategory = (item.competitionSlug || item.footer || '').toLowerCase();
-        if (/formula|rally|supercar|motocross|karting|motor/i.test(rawCategory) || /formula\s*1|\bf1\b|motogp|nascar|indycar/i.test(title)) {
+        const fullCatContext = `${item.competitionSlug || ''} ${item.footer || ''} ${title}`.toLowerCase();
+        if (/\b(?:ncaa|college|ncaab|ncaaf)\b/i.test(fullCatContext)) {
+          rawCategory = 'college';
+        } else if (/formula|rally|supercar|motocross|karting|motor/i.test(rawCategory) || /formula\s*1|\bf1\b|motogp|nascar|indycar/i.test(title)) {
           rawCategory = 'motorsport';
         }
         const category = this.normalizeCategory(rawCategory);

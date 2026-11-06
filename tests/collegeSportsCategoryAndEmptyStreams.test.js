@@ -147,5 +147,60 @@ describe('College Sports Categorization and Empty Stream Guards', () => {
 
       expect(aggregator._sameEventPre(p1, p2)).toBe(true);
     });
+
+    test('merges college and basketball if dual teams match (Cal Poly vs Arizona)', () => {
+      const aggregator = new MatchAggregator({ providers: [], cacheService: { set: jest.fn() } });
+      const p1 = aggregator._precompute({
+        id: 'dlive_123',
+        title: 'Cal Poly vs Arizona',
+        category: 'college'
+      });
+      const p2 = aggregator._precompute({
+        id: 'pitsport_456',
+        title: 'Cal Poly vs Arizona',
+        category: 'basketball'
+      });
+
+      expect(aggregator._sameEventPre(p1, p2)).toBe(true);
+    });
+
+    test('reconciles Mens College Basketball with unqualified basketball into college category only', async () => {
+      const m1 = {
+        id: 'dlv_event_cal_poly',
+        title: 'Cal Poly vs Arizona',
+        category: 'college',
+        date: '1793935800000',
+        league: "Men's College Basketball",
+        team1: { name: 'Cal Poly' },
+        team2: { name: 'Arizona' },
+        sources: [{ source: 'daddylive', id: '341' }]
+      };
+      const m2 = {
+        id: 'ppv_cal_poly',
+        title: 'Cal Poly Mustangs at Arizona Wildcats',
+        category: 'basketball',
+        date: '1793935800000',
+        league: 'Basketball',
+        team1: { name: 'Cal Poly Mustangs' },
+        team2: { name: 'Arizona Wildcats' },
+        sources: [{ source: 'ppvst', id: 31751, embedUrl: 'https://taifood-blog.asia/embed/cbb/2026-11-05/cp-ariz' }]
+      };
+
+      let saved = null;
+      const aggregator = new MatchAggregator({
+        daddyLiveProvider: { name: 'daddylive', getMatches: async () => [m1] },
+        ppvStProvider: { name: 'ppvst', getMatches: async () => [m2] },
+        cacheService: {
+          getMatchesReadOnly: () => [],
+          getMatches: () => [],
+          setMatches: (items) => { saved = items; }
+        }
+      });
+
+      await aggregator.syncMatches();
+      expect(saved).toHaveLength(1);
+      expect(saved[0].category).toBe('college');
+      expect(saved[0].sources).toHaveLength(2);
+    });
   });
 });

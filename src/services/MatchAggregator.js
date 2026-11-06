@@ -401,17 +401,26 @@ function _teamPairsSimilar(a, b) {
     (_teamsSimilar(a[0], b[1]) && _teamsSimilar(a[1], b[0]));
 }
 
+function _keysCompatible(k1, k2) {
+  if (k1 === k2) return true;
+  const [g1, a1, s1] = (k1 || '').split('|');
+  const [g2, a2, s2] = (k2 || '').split('|');
+  if (a1 !== a2 || s1 !== s2) return false;
+  if ((g1 === 'men' && !g2) || (g2 === 'men' && !g1)) return true;
+  return false;
+}
+
 function _squadsCompatible(p1, p2) {
   const a = p1.squad, b = p2.squad;
   if (!a || !b) return true;
-  if (a.conflicting || b.conflicting || a.key !== b.key) return false;
+  if (a.conflicting || b.conflicting || !_keysCompatible(a.key, b.key)) return false;
   if (!a.teamKeys || !b.teamKeys) return true;
-  if (a.teamKeys.every(key => key === a.key) && b.teamKeys.every(key => key === b.key)) return true;
+  if (a.teamKeys.every(key => _keysCompatible(key, a.key)) && b.teamKeys.every(key => _keysCompatible(key, b.key))) return true;
   if (!p1.teams || !p2.teams) return false;
   return (_teamsSimilar(p1.teams[0], p2.teams[0]) && _teamsSimilar(p1.teams[1], p2.teams[1]) &&
-      a.teamKeys[0] === b.teamKeys[0] && a.teamKeys[1] === b.teamKeys[1]) ||
+      _keysCompatible(a.teamKeys[0], b.teamKeys[0]) && _keysCompatible(a.teamKeys[1], b.teamKeys[1])) ||
     (_teamsSimilar(p1.teams[0], p2.teams[1]) && _teamsSimilar(p1.teams[1], p2.teams[0]) &&
-      a.teamKeys[0] === b.teamKeys[1] && a.teamKeys[1] === b.teamKeys[0]);
+      _keysCompatible(a.teamKeys[0], b.teamKeys[1]) && _keysCompatible(a.teamKeys[1], b.teamKeys[0]));
 }
 
 const _resolvedTeam = name => Boolean(name) && !/^(?:tba|tbd|unknown|to be (?:announced|decided|determined)|team(?: [ab12])?|winner.*|loser.*)$/i.test(name);
@@ -783,6 +792,12 @@ class MatchAggregator {
     } else if (rawCategory === 'football' && /\b(?:euroleague|eurocup|fiba|eurobasket|adriatic league|b1\.league)\b/i.test(`${title} ${e && e.league || ''}`)) {
       rawCategory = 'basketball';
       if (e) e.category = 'basketball';
+    } else if (!isChannel && rawCategory !== 'college') {
+      const fullContext = `${titleLower} ${leagueLower} ${e && (e.competition || e.footer || '')}`.toLowerCase();
+      if (/\b(?:ncaa|college|ncaab|ncaaf)\b/.test(fullContext) || /\/(?:cbb|cfb)\//.test(fullContext) || (e && e.sources && e.sources.some(s => s.embedUrl && /\/(?:cbb|cfb)\//i.test(s.embedUrl)))) {
+        rawCategory = 'college';
+        if (e) e.category = 'college';
+      }
     }
 
     let channelIdentityKey = (e && e.channelIdentityKey) ? e.channelIdentityKey : null;
@@ -853,8 +868,9 @@ class MatchAggregator {
   _normalizeCategory(c) {
     if (!c) return c;
     const lc = c.toLowerCase();
-    if (['nbl', 'nba', 'wnba', 'euroleague', 'eurocup', 'fiba', 'ncaa_basketball'].includes(lc)) return 'basketball';
-    if (['nfl', 'ncaa', 'cfl', 'college'].includes(lc)) return 'american_football';
+    if (['college', 'ncaa', 'ncaa_basketball', 'ncaa_football', 'ncaab', 'ncaaf'].includes(lc)) return 'college';
+    if (['nbl', 'nba', 'wnba', 'euroleague', 'eurocup', 'fiba'].includes(lc)) return 'basketball';
+    if (['nfl', 'cfl'].includes(lc)) return 'american_football';
     if (['nrl', 'super_league', 'afl', 'rugby_league', 'rugby_union', 'rugby15'].includes(lc)) return 'rugby';
     if (['mls', 'epl', 'la_liga', 'bundesliga', 'serie_a', 'ligue_1', 'ucl', 'uel', 'soccer', 'football'].includes(lc)) return 'football';
     if (['formula_1', 'formulaone', 'motogp', 'indycar', 'nascar'].includes(lc)) return 'motorsport';
@@ -903,9 +919,12 @@ class MatchAggregator {
     const _normalizeCategory = (c) => this._normalizeCategory(c);
     const c1 = _normalizeCategory(p1.category);
     const c2 = _normalizeCategory(p2.category);
-    const isCollegeFootball = ((p1.category || '').toLowerCase() === 'college' && (c2 === 'american_football' || c2 === 'football')) ||
-                              ((p2.category || '').toLowerCase() === 'college' && (c1 === 'american_football' || c1 === 'football'));
-    if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeFootball) {
+    const COLLEGE_PARENTS = new Set(['american_football', 'football', 'basketball', 'baseball', 'hockey']);
+    const isCollegeSport = (c1 === 'college' && COLLEGE_PARENTS.has(c2)) ||
+                           (c2 === 'college' && COLLEGE_PARENTS.has(c1)) ||
+                           ((p1.category || '').toLowerCase() === 'college' && COLLEGE_PARENTS.has(c2)) ||
+                           ((p2.category || '').toLowerCase() === 'college' && COLLEGE_PARENTS.has(c1));
+    if (c1 && c2 && c1 !== 'other' && c2 !== 'other' && c1 !== c2 && !isCollegeSport) {
       return false;
     }
 
@@ -1429,7 +1448,8 @@ class MatchAggregator {
         if (idx === -1 && !pre.isChannel && !ambiguousReplay) {
           const c2 = this._normalizeCategory(pre.category);
           const rawCat2 = (pre.category || '').toLowerCase();
-          const isCollegeFootball2 = rawCat2 === 'college' || c2 === 'american_football' || c2 === 'football';
+          const isCollege2 = rawCat2 === 'college' || c2 === 'college';
+          const isCollegeParent2 = ['american_football', 'football', 'basketball', 'baseball', 'hockey'].includes(c2);
 
           if (c2 === 'other' || !c2) {
             // 'other' cross-matches with date window guard
@@ -1443,8 +1463,17 @@ class MatchAggregator {
           } else {
             const checkedIndices = new Set();
             const bucketsToCheck = [categoryBuckets.get(c2), categoryBuckets.get('other')];
-            if (isCollegeFootball2) {
-              bucketsToCheck.push(categoryBuckets.get('college'), categoryBuckets.get('american_football'), categoryBuckets.get('football'));
+            if (isCollege2) {
+              bucketsToCheck.push(
+                categoryBuckets.get('college'),
+                categoryBuckets.get('american_football'),
+                categoryBuckets.get('football'),
+                categoryBuckets.get('basketball'),
+                categoryBuckets.get('baseball'),
+                categoryBuckets.get('hockey')
+              );
+            } else if (isCollegeParent2) {
+              bucketsToCheck.push(categoryBuckets.get('college'));
             }
 
             for (let bIdx = 0; bIdx < bucketsToCheck.length; bIdx++) {
