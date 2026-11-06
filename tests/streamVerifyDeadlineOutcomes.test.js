@@ -302,7 +302,7 @@ describe('actual stream response cache hints', () => {
     expect(safeFetch).toHaveBeenCalledTimes(1);
   });
 
-  test('a positive list keeps its cache policy when another source is deferred', async () => {
+  test('a positive partial list allows a quick refresh when another source is deferred', async () => {
     handlerMatch.sources = [{ ...source, id: 'healthy' }, { ...source, id: 'busy' }];
     provider.resolveStream.mockImplementation(async id => {
       if (id === 'busy') throw Object.assign(new Error('pool busy'), {
@@ -314,7 +314,7 @@ describe('actual stream response cache hints', () => {
     const response = await request();
     expect(response.streams).toHaveLength(1);
     expect(response.streams[0].url).toContain('/healthy/');
-    expect(response).toMatchObject({ cacheMaxAge: 30, staleRevalidate: 30, staleError: 60 });
+    expect(response).toMatchObject({ cacheMaxAge: 2, staleRevalidate: 0, staleError: 0 });
     expect(cache.entries.get('timstreams:fixture:busy').status).toBe('deferred');
   });
 

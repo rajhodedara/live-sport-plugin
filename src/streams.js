@@ -2,7 +2,8 @@ const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
 const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutError } = require('./services/retry');
-const { createDeferredResolution, isInconclusiveResolutionError } = require('./services/StreamResolutionOutcome');
+const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
+  inconclusiveStreamsReason } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
 const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
@@ -719,19 +720,8 @@ function verificationHeaders(stream) {
 }
 
 function reportInconclusiveResolution(error, options) {
-  if (!options?.signal?.aborted && !isInconclusiveResolutionError(error)) return false;
-  let reason = 'cancelled';
-  if (!options?.signal?.aborted) {
-    const chain = [], seen = new Set();
-    try {
-      for (let current = error; current && typeof current === 'object'; current = current.cause) {
-        if (seen.has(current) || chain.length >= 8) return false;
-        seen.add(current); chain.push(current);
-      }
-      reason = chain.some(item => item.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(item.code || ''))
-        ? 'capacity' : chain.some(item => item.name === 'AbortError') ? 'cancelled' : 'timeout';
-    } catch (_) { return false; }
-  }
+  const reason = options?.signal?.aborted ? 'cancelled' : inconclusiveErrorReason(error);
+  if (!reason) return false;
   try {
     const reported = options?.onInconclusive?.(reason);
     if (reported && typeof reported.catch === 'function') reported.catch(() => {});
@@ -1037,9 +1027,14 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
   const minted = await resolveSource(src, match, config, options);
+  const providerReason = inconclusiveStreamsReason(minted);
+  if (providerReason) options.onInconclusive(providerReason);
   const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
-  return verified.length === 0 && inconclusiveReason
-    ? createDeferredResolution(inconclusiveReason) : verified;
+  if (!inconclusiveReason || verified.some(row => row && row.url)) return verified;
+  // A surviving web button does not establish that the direct feed is gone.
+  // Keep that usable fallback, but retry the inconclusive direct work soon.
+  return verified.length ? markInconclusiveStreams(verified, inconclusiveReason)
+    : createDeferredResolution(inconclusiveReason);
 }
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
@@ -1437,7 +1432,8 @@ async function handleStream(type, id, config) {
         onInconclusive() { state.inconclusive = true; }
       }), timingStream)
       .then((minted) => {
-        state.inconclusive = state.inconclusive || Boolean(resolveCache.isDeferred?.(key));
+        const hasResults = Array.isArray(minted) && minted.length > 0;
+        state.inconclusive = Boolean(resolveCache.isDeferred?.(key)) || (!hasResults && state.inconclusive);
         state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
         state.settled = true;
         return state.value;
@@ -1447,13 +1443,65 @@ async function handleStream(type, id, config) {
     inFlight.push(state);
   }
 
+  // Inspect the current publication snapshot without changing cached/provider
+  // rows. A web fallback or a result removed by the final policy is not a
+  // working feed for either quorum.
+  const isYoutubeRow = (row) => {
+    if (row.ytId) return true;
+    let external = row.externalUrl;
+    if (typeof external !== 'string') return false;
+    if (external.includes('/watch?')) {
+      const wrapped = external.match(/[?&](?:url|embed)=([^&]+)/);
+      if (wrapped) {
+        try { external = decodeURIComponent(wrapped[1]); } catch (_) {}
+      }
+    }
+    return /youtube\.com|youtu\.be/i.test(external);
+  };
+  const isDirectRow = (row) => isYoutubeRow(row) ||
+    (typeof row.url === 'string' && row.url.length > 0 && !row.externalUrl && row.name !== 'Nuvio Web Player');
+  const publicationRows = () => {
+    const current = inFlight.flatMap(f => f.settled && Array.isArray(f.value) ? f.value : []);
+    const prematch = suppressPreMatchTeamChannels(current, match);
+    const seen = new Set();
+    return prematch.filter(row => {
+      if (!row) return false;
+      const identity = row.ytId ? 'yt:' + row.ytId :
+        (row.url ? 'url:' + row.url : (row.externalUrl ? 'ext:' + row.externalUrl : null));
+      if (!identity || seen.has(identity)) return false;
+      seen.add(identity);
+      if (isBlockedStream(row)) return false;
+      return !config || config.webStreams !== 'disabled' || isDirectRow(row);
+    });
+  };
+  const priority1Keys = new Set(inFlight.filter(f => f.isPriority1).map(f => f.key));
+  const priority1ReadyCount = (rows = publicationRows()) => new Set(rows
+    .filter(row => isDirectRow(row) && priority1Keys.has(row._cacheKey))
+    .map(row => row._cacheKey)).size;
+  const remainingBudget = () => Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
+  const observeUntil = (predicate) => {
+    let observing = true;
+    const promise = new Promise(resolve => {
+      const check = () => { if (observing && predicate()) resolve(); };
+      for (const f of inFlight) if (!f.settled) f.promise.then(check, check);
+      check();
+    });
+    return { promise, stop() { observing = false; } };
+  };
+
   const warmPriority1 = inFlight.filter(f => f.wasWarm);
   if (new Set(warmPriority1.map(f => f.key)).size >= PRIORITY1_QUORUM) {
-    await Promise.allSettled(warmPriority1.map(f => f.promise));
+    // has() is only a hint: expiry can turn that cheap read into a new mint.
+    // Return when enough actual direct results arrive, bounded even if another
+    // formerly warm key is still being refreshed.
+    const warm = observeUntil(() => priority1ReadyCount() >= PRIORITY1_QUORUM ||
+      inFlight.every(f => f.settled));
+    await settleBefore(warm.promise, Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
+    warm.stop();
   } else {
     // One shared timer rather than a timer per source. Providers remain in
     // flight after the response cutoff so their successful results warm cache.
-    await settleBefore(Promise.allSettled(inFlight.map(f => f.promise)), SOFT_DEADLINE_MS, null);
+    await settleBefore(Promise.allSettled(inFlight.map(f => f.promise)), Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
   }
   for (const f of inFlight) {
     if (f.settled && Array.isArray(f.value)) streams.push(...f.value);
@@ -1463,7 +1511,6 @@ async function handleStream(type, id, config) {
   // If no stream is available, or fewer than three distinct Priority-1
   // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
   // cannot stall a normal event once a playable Priority-1 quorum is ready.
-  const priority1InFlight = inFlight.filter(f => f.isPriority1 && !f.settled);
   const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
   const isTvChannel = Boolean(
     (type === 'tv' || type === 'channel') &&
@@ -1479,67 +1526,26 @@ async function handleStream(type, id, config) {
       String(id || '').includes('channel')
     ))
   );
-  const hasUnsettledInFlight = inFlight.some(f => !f.settled);
-  const tvNeedsQuorum = isTvChannel && streams.length < TV_CHANNEL_QUORUM && hasUnsettledInFlight;
-  const priority1ReadyCount = () => new Set(inFlight
-    .filter(f => f.isPriority1 && f.settled && f.value.length > 0)
-    .map(f => f.key)).size;
-  const priority1QuorumMet = priority1ReadyCount() >= PRIORITY1_QUORUM;
-  const shouldWait = (streams.length === 0 || (priority1InFlight.length > 0 && !priority1QuorumMet) || tvNeedsQuorum) && inFlight.length > 0;
+  const readyToRespond = () => {
+    if (inFlight.every(f => f.settled)) return true;
+    const eligible = publicationRows();
+    if (eligible.length === 0) return false;
+    const priority1Pending = inFlight.some(f => f.isPriority1 && !f.settled);
+    if (priority1Pending && priority1ReadyCount(eligible) < PRIORITY1_QUORUM) return false;
+    return !isTvChannel || eligible.filter(isDirectRow).length >= TV_CHANNEL_QUORUM;
+  };
+  const shouldWait = !readyToRespond() && inFlight.length > 0;
   let timingWaitOutcome = 'no_wait';
 
   if (shouldWait) {
-    const remaining = Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
+    const remaining = remainingBudget();
     if (remaining > 0) {
-      // If we already have streams and are waiting for Priority-1 (DaddyLive), wait specifically
-      // for the Priority-1 promises to complete so we return immediately without stalling.
-      // For TV channels, wait for in-flight secondary streams up to HARD_DEADLINE_MS or until quorum.
-      let waitTargets;
-      let raceTarget;
-      if (isTvChannel && tvNeedsQuorum) {
-        waitTargets = inFlight.map((f) => f.promise);
-        const targetCount = TV_CHANNEL_QUORUM;
-        const countTotalStreams = () => inFlight.reduce(
-          (acc, cur) => acc + (cur.settled && Array.isArray(cur.value) ? cur.value.length : 0),
-          0
-        );
-        const quorumPromise = new Promise((resolve) => {
-          for (const f of inFlight) {
-            if (f.settled) continue;
-            f.promise.then(() => {
-              const currentTotal = countTotalStreams();
-              const p1Done = priority1InFlight.every(p => p.settled);
-              if (currentTotal >= targetCount && p1Done) {
-                resolve();
-              }
-            }).catch(() => {});
-          }
-        });
-        raceTarget = Promise.race([Promise.allSettled(waitTargets), quorumPromise]);
-      } else {
-        waitTargets = priority1InFlight.length > 0
-          ? priority1InFlight.map((f) => f.promise)
-          : inFlight.map((f) => f.promise);
-        raceTarget = Promise.allSettled(waitTargets);
-        if (priority1InFlight.length > 0) {
-          // Once three distinct verified Priority-1 sources have succeeded,
-          // don't make the user wait for the remaining slow/broken mirrors.
-          const quorumPromise = new Promise((resolve) => {
-            for (const f of priority1InFlight) {
-              f.promise.then(() => {
-                if (priority1ReadyCount() >= PRIORITY1_QUORUM) resolve();
-              });
-            }
-          });
-          raceTarget = Promise.race([raceTarget, quorumPromise]);
-        }
-      }
-
-      const waited = await settleBefore(
-        raceTarget,
-        remaining,
-        null
-      );
+      // Re-evaluate publication eligibility whenever a source settles. In
+      // particular, finished-but-hidden Priority-1 web rows must not cut off
+      // another provider's pending playable result.
+      const wait = observeUntil(readyToRespond);
+      const waited = await settleBefore(wait.promise, remaining, null);
+      wait.stop();
       timingWaitOutcome = waited === null ? 'hard_wait_expired' : 'wait_completed';
     } else timingWaitOutcome = 'budget_exhausted';
     for (const f of inFlight) {
@@ -1908,15 +1914,16 @@ async function handleStream(type, id, config) {
   }
 
   // Verification now happens once per mint (mintVerifiedSources), not per request.
-  // Positive and definite results retain the existing client cache windows.
-  // An empty inconclusive response must not pin a temporary miss for 30 seconds.
+  // Complete and definite results retain the existing client cache windows.
+  // A partial list must not pin missing high-quality sources for 30 seconds
+  // while their background work is still pending or temporarily deferred.
 
-  const inconclusiveEmpty = streams.length === 0 && inFlight.some(state => state.inconclusive || !state.settled);
+  const partialResolution = inFlight.some(state => state.inconclusive || !state.settled);
   return {
     streams,
-    cacheMaxAge: inconclusiveEmpty ? 2 : 30,
-    staleRevalidate: inconclusiveEmpty ? 0 : 30,
-    staleError: inconclusiveEmpty ? 0 : 60
+    cacheMaxAge: partialResolution ? 2 : 30,
+    staleRevalidate: partialResolution ? 0 : 30,
+    staleError: partialResolution ? 0 : 60
   };
 }
 

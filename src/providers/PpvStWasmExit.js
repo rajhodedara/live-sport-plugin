@@ -1,23 +1,41 @@
 'use strict';
 
-// Private PPV.st WASM subprocess protocol. Exit 75 is reserved for confirmed
-// *local* transport admission failures. Every other child failure stays exit 1.
+// Private PPV.st WASM subprocess protocol. These statuses carry only typed
+// inconclusive transport outcomes; ordinary extraction failures stay exit 1.
 const LOCAL_CAPACITY_EXIT_CODE = 75;
+const LOCAL_TIMEOUT_EXIT_CODE = 76;
+const LOCAL_CANCELLED_EXIT_CODE = 77;
+const TIMEOUT_CODES = new Set([
+  'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT'
+]);
 
-function isLocalCapacityFailure(error) {
-  let found = false;
-  const seen = new Set();
-  for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
-    if (seen.has(current)) return false;
-    seen.add(current);
-    const code = current.code || '';
-    const capacity = code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(code);
-    // Never turn a prohibited destination or another fatal transport error
-    // into a retry by trusting an outer timeout/capacity wrapper.
-    if (code === 'ERR_OUTBOUND_BLOCKED' || (current.isFatal === true && !capacity)) return false;
-    if (capacity) found = true;
-  }
-  return found;
+function wasmFailureExitCode(error) {
+  if (!error || typeof error !== 'object') return 1;
+  try {
+    const chain = [], seen = new Set();
+    for (let current = error; current && typeof current === 'object'; current = current.cause) {
+      // A truncated chain has not established that a deeper guard/fatal error
+      // is absent. Cycles and unreadable error properties fail closed as well.
+      if (seen.has(current) || chain.length >= 8) return 1;
+      seen.add(current);
+      chain.push(current);
+    }
+    const capacity = item => item.code === 'ERR_OUTBOUND_CAPACITY' ||
+      /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(item.code || '');
+    if (chain.some(item => item.code === 'ERR_OUTBOUND_BLOCKED' ||
+      (item.isFatal === true && !capacity(item)))) return 1;
+    if (chain.some(item => item.name === 'AbortError' || item.code === 'ABORT_ERR')) return LOCAL_CANCELLED_EXIT_CODE;
+    if (chain.some(capacity)) return LOCAL_CAPACITY_EXIT_CODE;
+    if (chain.some(item => item.name === 'TimeoutError' || TIMEOUT_CODES.has(item.code))) return LOCAL_TIMEOUT_EXIT_CODE;
+  } catch (_) { /* Unknown errors are not a transport retry signal. */ }
+  return 1;
 }
 
-module.exports = { LOCAL_CAPACITY_EXIT_CODE, isLocalCapacityFailure };
+function isLocalCapacityFailure(error) {
+  return wasmFailureExitCode(error) === LOCAL_CAPACITY_EXIT_CODE;
+}
+
+module.exports = {
+  LOCAL_CAPACITY_EXIT_CODE, LOCAL_TIMEOUT_EXIT_CODE, LOCAL_CANCELLED_EXIT_CODE,
+  wasmFailureExitCode, isLocalCapacityFailure
+};

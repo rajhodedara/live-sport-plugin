@@ -204,7 +204,7 @@ class CronService {
    * Leaf-only freshness pass.
    *
    * Rebuilds the overlay from upstream, replaces the snapshot wholesale, and
-   * drops resolved-stream entries for the fixtures that entered, left or
+   * drops Leaf resolved-stream entries for the fixtures that entered, left or
    * changed. It never writes the catalog - see LiveOverlayService for why that
    * matters (14 MB rewrite, read-modify-write race with the 4h sync, and a
    * lastFetchTime reset that would starve the SWR path).
@@ -271,13 +271,12 @@ class CronService {
   }
 
   /**
-   * Drop resolved-stream entries for one match whose overlay just changed.
+   * Drop Leaf resolved-stream entries for one match whose overlay just changed.
    *
-   * Lifecycle policy lives with the caller that knows *why* the entry is stale
-   * (a source appeared, or the fixture ended), so the resolve cache keeps no
-   * knowledge of the overlay. Deliberately NOT a correctness mechanism for new
-   * sources either: an unseen source has no cache key to evict. The loop mirrors
-   * StreamResolveCache#pruneEnded.
+   * The overlay is authoritative only for Leaf. Other providers' positive,
+   * negative and deferred entries remain valid when a Leaf source changes;
+   * evicting them forced unrelated PPV/TimStreams work to be repeated. Ended
+   * fixtures still use pruneStreamCache(), which removes every source.
    */
   _invalidateOverlayMatch(matchId) {
     try {
@@ -286,9 +285,19 @@ class CronService {
       const target = String(matchId);
       let dropped = 0;
       for (const [key, entry] of cache.entries) {
-        if (entry && String(entry.matchId) === target) {
+        if (typeof key === 'string' && key.startsWith('leaf:') &&
+            entry && String(entry.matchId) === target) {
+          entry.invalidated = true;
           cache.entries.delete(key);
           dropped += 1;
+        }
+      }
+      // An expiry reader may have removed a Leaf entry while its publication
+      // is still pending. Fence that same result without touching other sources.
+      for (const [key, operation] of cache.pendingOperations || []) {
+        if (typeof key === 'string' && key.startsWith('leaf:') && operation &&
+            String(operation.matchId) === target && operation.publicationEntry) {
+          operation.publicationEntry.invalidated = true;
         }
       }
       if (dropped > 0 && cache.statsCounters) cache.statsCounters.evictions += dropped;

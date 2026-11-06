@@ -157,6 +157,11 @@ class ScoreZoneProvider extends BaseProvider {
       });
       this.fetchStreams = this.circuitBreaker.wrap(`${this.name}_fetchStreams`, async (sourceId, category, title, src) => {
         return this._resolveStreamInternal(sourceId, category, title, src);
+      }, {
+        // Local admission/timeout failures must reach the source cache as
+        // inconclusive, not become the breaker's null fallback. Opossum's
+        // error filter also excludes them from its upstream-failure count.
+        errorFilter: isInconclusiveResolutionError
       });
     }
   }

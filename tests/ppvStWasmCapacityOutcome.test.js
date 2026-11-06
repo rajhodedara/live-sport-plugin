@@ -14,7 +14,10 @@ jest.mock('../src/catalog', () => ({ isReplayMatch: () => false }));
 const { execFile } = require('child_process');
 const container = require('../src/container');
 const { safeFetch } = require('../src/services/ProviderOutbound');
-const { LOCAL_CAPACITY_EXIT_CODE, isLocalCapacityFailure } = require('../src/providers/PpvStWasmExit');
+const {
+  LOCAL_CAPACITY_EXIT_CODE, LOCAL_TIMEOUT_EXIT_CODE, LOCAL_CANCELLED_EXIT_CODE,
+  wasmFailureExitCode, isLocalCapacityFailure
+} = require('../src/providers/PpvStWasmExit');
 const { isInconclusiveResolutionError } = require('../src/services/StreamResolutionOutcome');
 const PpvStProvider = require('../src/providers/PpvStProvider');
 const StreamResolveCache = require('../src/services/StreamResolveCache');
@@ -43,6 +46,50 @@ describe('PPV.st WASM private exit protocol', () => {
     expect(isLocalCapacityFailure({ code: 'ETIMEDOUT' })).toBe(false);
     expect(isLocalCapacityFailure({ message: 'native pool capacity', code: 'UNKNOWN' })).toBe(false);
   });
+
+  test('classifies only typed timeout/cancellation and gives cancellation precedence', () => {
+    expect(wasmFailureExitCode({ name: 'TimeoutError' })).toBe(LOCAL_TIMEOUT_EXIT_CODE);
+    expect(wasmFailureExitCode({ cause: { code: 'UND_ERR_BODY_TIMEOUT' } })).toBe(LOCAL_TIMEOUT_EXIT_CODE);
+    expect(wasmFailureExitCode({ name: 'AbortError', cause: { code: 'ERR_NATIVE_POOL_BUSY' } })).toBe(LOCAL_CANCELLED_EXIT_CODE);
+    expect(wasmFailureExitCode({ code: 'ABORT_ERR' })).toBe(LOCAL_CANCELLED_EXIT_CODE);
+    expect(wasmFailureExitCode({ message: 'timeout, cancelled, native pool busy' })).toBe(1);
+    expect(wasmFailureExitCode({ statusCode: 503 })).toBe(1);
+  });
+
+  test.each([
+    { name: 'TimeoutError', cause: { code: 'ERR_OUTBOUND_BLOCKED', isFatal: true } },
+    { name: 'AbortError', cause: { code: 'ERR_OUTBOUND_BLOCKED', isFatal: true } },
+    { code: 'ERR_NATIVE_POOL_BUSY', cause: { code: 'ERR_NATIVE_POOL_CLOSED', isFatal: true } }
+  ])('a deeper guard/fatal rejection takes precedence over an inconclusive wrapper (%j)', error => {
+    expect(wasmFailureExitCode(error)).toBe(1);
+  });
+
+  test('accepts a complete eight-cause chain, but rejects truncation and cycles before classifying', () => {
+    const chain = length => {
+      const nodes = Array.from({ length }, () => ({}));
+      nodes[0].code = 'ERR_NATIVE_POOL_BUSY';
+      for (let i = 1; i < nodes.length; i++) nodes[i - 1].cause = nodes[i];
+      return nodes;
+    };
+    expect(isLocalCapacityFailure(chain(8)[0])).toBe(true);
+    const tooLong = chain(9);
+    expect(wasmFailureExitCode(tooLong[0])).toBe(1);
+    tooLong[8].code = 'ERR_OUTBOUND_BLOCKED';
+    tooLong[8].isFatal = true;
+    expect(wasmFailureExitCode(tooLong[0])).toBe(1);
+    const cycle = chain(9);
+    cycle[8].cause = cycle[0];
+    expect(wasmFailureExitCode(cycle[0])).toBe(1);
+    const shortCycle = chain(2);
+    shortCycle[1].cause = shortCycle[0];
+    expect(wasmFailureExitCode(shortCycle[0])).toBe(1);
+  });
+
+  test('unreadable causes remain ordinary extraction failures', () => {
+    const error = { code: 'ERR_NATIVE_POOL_BUSY' };
+    Object.defineProperty(error, 'cause', { get() { throw new Error('unreadable cause'); } });
+    expect(wasmFailureExitCode(error)).toBe(1);
+  });
 });
 
 describe('PPV.st extractor preserves local transient failures', () => {
@@ -70,6 +117,26 @@ describe('PPV.st extractor preserves local transient failures', () => {
     await expect(provider.resolveStream(src.id, 'football', match.title, src)).rejects.toMatchObject({
       name: 'TimeoutError', code: 'ETIMEDOUT'
     });
+  });
+
+  test.each([
+    [LOCAL_TIMEOUT_EXIT_CODE, 'TimeoutError', 'ETIMEDOUT'],
+    [LOCAL_CANCELLED_EXIT_CODE, 'AbortError', 'ABORT_ERR']
+  ])('a child transport exit %i keeps its typed outcome before the global child deadline', async (exitCode, name, code) => {
+    callback(childError(exitCode));
+    await expect(provider.resolveStream(src.id, 'football', match.title, src)).rejects.toMatchObject({ name, code });
+  });
+
+  test.each([
+    childError('ERR_CHILD_PROCESS_STDIO_MAXBUFFER'),
+    childError(1),
+    childError(String(LOCAL_TIMEOUT_EXIT_CODE))
+  ])('ordinary child errors cannot become transient from stderr text (%j)', async error => {
+    callback(error, '', 'TimeoutError ETIMEDOUT ERR_OUTBOUND_CAPACITY');
+    const rows = await provider.resolveStream(src.id, 'football', match.title, src);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].url).toBeUndefined();
+    expect(rows[0].externalUrl).toContain('/watch?url=');
   });
 
   test('ordinary WASM failure retains the web fallback, not a capacity deferral', async () => {
@@ -125,5 +192,19 @@ describe('PPV.st extractor preserves local transient failures', () => {
     expect(cache.entries.get(key).status).toBe('ok');
     expect(execFile).toHaveBeenCalledTimes(2);
     expect(safeFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    [LOCAL_TIMEOUT_EXIT_CODE, 'timeout'],
+    [LOCAL_CANCELLED_EXIT_CODE, 'cancelled']
+  ])('the cache retains child transport exit %i as a short %s deferral', async (exitCode, reason) => {
+    callback(childError(exitCode));
+    const cache = new StreamResolveCache();
+    cache._sharedAvailable = () => false;
+    await expect(cache.getOrCreate(key, () => provider.resolveStream(src.id, 'football', match.title, src))).resolves.toEqual([]);
+    const entry = cache.entries.get(key);
+    expect(entry).toMatchObject({ status: 'deferred', reason, streams: [] });
+    expect(entry.expiresAt - entry.resolvedAt).toBe(2000);
+    expect(execFile).toHaveBeenCalledTimes(1);
   });
 });
