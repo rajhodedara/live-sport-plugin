@@ -136,8 +136,35 @@ describe('call sites are wired correctly', () => {
     expect((source.match(/= resolveSyncTimeoutMs\(\)/g) || []).length).toBe(2);
   });
 
-  test('the 4 resolve-path fetches keep their literal 6000 (bounded by handleStream)', () => {
-    expect((source.match(/AbortSignal\.timeout\(6000\)/g) || []).length).toBe(4);
+  test('discovery retains its six-second ceiling and respects earlier parent or phase cancellation', async () => {
+    jest.useFakeTimers();
+    try {
+      const start = source.indexOf('function discoverySignal(');
+      const end = source.indexOf('\n}', start);
+      const sandbox = { AbortSignal: {
+        any: AbortSignal.any.bind(AbortSignal),
+        timeout(ms) {
+          const controller = new AbortController();
+          setTimeout(() => controller.abort(new DOMException('Discovery timed out', 'TimeoutError')), ms);
+          return controller.signal;
+        }
+      } };
+      vm.createContext(sandbox);
+      vm.runInContext(source.slice(start, end + 2) + '; this.makeSignal = discoverySignal;', sandbox);
+      const ordinary = sandbox.makeSignal();
+      await jest.advanceTimersByTimeAsync(5999);
+      expect(ordinary.aborted).toBe(false);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(ordinary.reason.name).toBe('TimeoutError');
+      for (const field of ['signal', 'mediaController']) {
+        const controller = new AbortController();
+        const signal = sandbox.makeSignal({ [field]: field === 'signal' ? controller.signal : controller });
+        const reason = new DOMException('Earlier deadline', 'AbortError');
+        controller.abort(reason);
+        expect(signal.aborted).toBe(true);
+        expect(signal.reason).toBe(reason);
+      }
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
   });
 
   test('no sync fetch was left at the flat 6000 regression value', () => {

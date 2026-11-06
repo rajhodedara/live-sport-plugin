@@ -1,3 +1,7 @@
+jest.mock('../src/services/DaddyLiveMediaCheck', () => ({
+  checkDaddyLiveMedia: jest.fn(async () => ({ status: 'ok' }))
+}));
+
 // Container wiring is exercised, but native workers and external I/O are not.
 jest.mock('../src/services/StreamedWasmPool', () => ({
   resolveWasmStream: jest.fn(async () => { throw new Error('Unexpected WASM execution in unit fixture'); }),
@@ -485,10 +489,12 @@ describe('DaddyLiveProvider', () => {
       const result = await resolveSource(
         { source: 'daddylive', id: '55', channelName: 'ESPN' },
         { category: 'basketball', title: 'Lakers vs Warriors' },
-        null
+        null,
+        { signal: new AbortController().signal }
       );
 
-      expect(spy).toHaveBeenCalledWith('55', 'basketball', 'Lakers vs Warriors', expect.objectContaining({ source: 'daddylive' }));
+      expect(spy).toHaveBeenCalledWith('55', 'basketball', 'Lakers vs Warriors',
+        expect.objectContaining({ source: 'daddylive' }), expect.objectContaining({ signal: expect.any(AbortSignal) }));
       expect(result.length).toBe(1);
       expect(result[0]._source).toBe('daddylive');
       spy.mockRestore();

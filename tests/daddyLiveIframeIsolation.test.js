@@ -1,4 +1,9 @@
 'use strict';
+
+jest.mock('../src/services/DaddyLiveMediaCheck', () => ({
+  checkDaddyLiveMedia: jest.fn(async () => ({ status: 'ok' }))
+}));
+
 const Provider = require('../src/providers/DaddyLiveProvider');
 test('tries a second iframe when the first fails', async () => {
   const circuitBreaker = { wrap: () => ({ fire: async () => null }), wrapSync: () => ({ fire: async () => null }) };
