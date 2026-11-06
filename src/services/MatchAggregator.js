@@ -1876,7 +1876,7 @@ class MatchAggregator {
     //   3 past-in-retention kickoff already passed but still inside 24h window
     // Entries within each priority tier retain their original relative order (stable sort).
     try {
-      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf'];
+      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf', 'pitsport'];
       const configuredCarryMax = Number(process.env.CARRY_FORWARD_MAX || 600);
       const CARRY_FORWARD_MAX = Number.isFinite(configuredCarryMax) ? Math.max(0, Math.trunc(configuredCarryMax)) : 0;
       const nowForCarry = Date.now();
@@ -1922,6 +1922,10 @@ class MatchAggregator {
         const scheduleBrokeFor = (srcName) => this.providers.some((p) =>
           p && p.sourceName === srcName && p.lastScheduleOk === false);
 
+        // PitSport can legitimately have no active home events. Unlike the
+        // older DaddyLive/Leaf policy, only a confirmed failed PitSport fetch
+        // may resurrect a prior fixture from the bounded 24h snapshot.
+        if (provider === 'pitsport' && !scheduleBrokeFor(provider)) continue;
         if (usedProvider(provider) && !scheduleBrokeFor(provider)) continue; // provider answered fully; nothing to carry
 
         if (scheduleBrokeFor(provider)) {
