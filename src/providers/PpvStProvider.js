@@ -1,5 +1,6 @@
 const BaseProvider = require('./BaseProvider');
 const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
+const { LOCAL_CAPACITY_EXIT_CODE } = require('./PpvStWasmExit');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
@@ -146,7 +147,7 @@ class PpvStProvider extends BaseProvider {
             // Exit 75 is the extractor's typed local-capacity signal; it is
             // not proof that PPV.st has no playable stream. Keep it distinct
             // from a hard WASM failure so the cache can retry after 2s.
-            if (err.code === 75) {
+            if (err.code === LOCAL_CAPACITY_EXIT_CODE) {
               return reject(Object.assign(new Error('PPV.st extractor transport capacity exhausted'), {
                 code: 'ERR_OUTBOUND_CAPACITY', isFatal: true
               }));
