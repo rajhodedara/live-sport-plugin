@@ -205,7 +205,9 @@ class PpvStProvider extends BaseProvider {
                 }
               }
             },
-            resolution: 'HD'
+            resolution: 'HD',
+            channelName: channelName || undefined,
+            language: typeof src.language === 'string' ? src.language : undefined
           });
           if (isTikTokStream) {
             s.isTikTok = true;
@@ -229,6 +231,8 @@ class PpvStProvider extends BaseProvider {
             name: 'PpvSt',
             title: `${matchTitle || sourceId} (Web Player)`,
             externalUrl: `/watch?url=${encodeURIComponent(embedUrl)}&title=${encodeURIComponent(matchTitle || 'Live Event')}`,
+            channelName: typeof src.channelName === 'string' ? src.channelName : undefined,
+            language: typeof src.language === 'string' ? src.language : undefined,
         }));
     }
     
