@@ -132,6 +132,7 @@ describe('PitSportProvider', () => {
     };
 
     test('parses and deduplicates matches across carousel, live, and upcoming lists', async () => {
+      jest.spyOn(Date, 'now').mockReturnValue(1793928000 * 1000);
       jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
         ok: true,
         json: async () => mockHomeApiResponse
