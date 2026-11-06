@@ -70,14 +70,39 @@ class PitSportProvider extends BaseProvider {
           .replace(/^-|-$/g, '');
 
         let rawCategory = (item.competitionSlug || item.footer || '').toLowerCase();
-        if (/formula|rally|supercar|motocross|karting|motor/i.test(rawCategory)) {
+        if (/formula|rally|supercar|motocross|karting|motor/i.test(rawCategory) || /formula\s*1|\bf1\b|motogp|nascar|indycar/i.test(title)) {
           rawCategory = 'motorsport';
         }
         const category = this.normalizeCategory(rawCategory);
 
+        let finalTitle = title;
+        if (category === 'motorsport') {
+          const rawSeries = (item.footer || (item.competitionSlug ? item.competitionSlug.toUpperCase() : '')).trim();
+          const isGeneric = !rawSeries || /^(pitsport|motorsport|motor\s*sport|racing)$/i.test(rawSeries);
+          if (!isGeneric) {
+            const hasExact = new RegExp(`(?:^|[^a-zA-Z0-9])${rawSeries.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}(?:[^a-zA-Z0-9]|$)`, 'i').test(title);
+            const hasSeries = hasExact ||
+              (/\b(?:formula\s*1|f1)\b/i.test(rawSeries) && /\b(?:formula\s*1|f1)\b/i.test(title)) ||
+              (/\bmotogp\b/i.test(rawSeries) && /\bmotogp\b/i.test(title)) ||
+              (/\bmoto\s*2\b/i.test(rawSeries) && /\bmoto\s*2\b/i.test(title)) ||
+              (/\bmoto\s*3\b/i.test(rawSeries) && /\bmoto\s*3\b/i.test(title)) ||
+              (/\bnascar\b/i.test(rawSeries) && /\bnascar\b/i.test(title)) ||
+              (/\bindycar\b/i.test(rawSeries) && /\bindycar\b/i.test(title)) ||
+              (/\bsupercars?\b/i.test(rawSeries) && /\bsupercars?\b/i.test(title)) ||
+              (/\bdtm\b/i.test(rawSeries) && /\bdtm\b/i.test(title)) ||
+              (/\b(?:wsbk|superbike)\b/i.test(rawSeries) && /\b(?:wsbk|superbike)\b/i.test(title)) ||
+              (/\b(?:wrc|rally)\b/i.test(rawSeries) && /\b(?:wrc|rally)\b/i.test(title));
+            if (!hasSeries) {
+              finalTitle = `${rawSeries}: ${title}`;
+            }
+          }
+        }
+
         // sessionStart in PitSport is in epoch seconds
         const sessionStartSec = Number(item.sessionStart);
-        const startTimeMs = Number.isFinite(sessionStartSec) && sessionStartSec > 0 ? sessionStartSec * 1000 : 0;
+        const startTimeMs = Number.isFinite(sessionStartSec) && sessionStartSec > 0
+          ? (sessionStartSec < 1e11 ? sessionStartSec * 1000 : sessionStartSec)
+          : 0;
         const date = startTimeMs > 0 ? String(startTimeMs) : '0';
 
         let status = 'upcoming';
@@ -93,17 +118,21 @@ class PitSportProvider extends BaseProvider {
           team2 = { name: extracted[1] };
         }
 
+        // Only use PitSport poster & thumbnail for F1 and motorsport category
+        const isMotorsportOrF1 = category === 'motorsport';
+        const artworkUrl = isMotorsportOrF1 ? (item.background || null) : null;
+
         matches.push(new MatchEntity({
           id: `pitsport_${programId}_${slug}`,
-          title: title,
+          title: finalTitle,
           baseTitle: title,
           category: category,
           date: date,
           status: status,
           league: item.footer || (item.competitionSlug ? item.competitionSlug.toUpperCase() : 'PitSport'),
           logo: item.logo || null,
-          thumbnail_url: item.background || null,
-          poster: item.background || null,
+          thumbnail_url: artworkUrl,
+          poster: artworkUrl,
           team1: team1,
           team2: team2,
           sources: [
@@ -114,7 +143,7 @@ class PitSportProvider extends BaseProvider {
               playHref: item.playHref || `/programs/${item.programId}/play`,
               slug: item.slug,
               channelName: item.footer || item.competitionSlug || 'PitSport',
-              name: title
+              name: finalTitle
             }
           ]
         }));

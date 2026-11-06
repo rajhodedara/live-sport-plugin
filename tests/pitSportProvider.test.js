@@ -151,7 +151,8 @@ describe('PitSportProvider', () => {
       expect(nflMatch.status).toBe('live');
       expect(nflMatch.league).toBe('NFL');
       expect(nflMatch.logo).toBe('http://pitsport.st/uploads/nfl-2a4401bb.png');
-      expect(nflMatch.poster).toBe('http://pitsport.st/uploads/nfl-801eb12d.webp');
+      expect(nflMatch.poster).toBe('');
+      expect(nflMatch.thumbnail_url).toBe('');
       expect(nflMatch.team1).toEqual({ name: 'Jacksonville Jaguars' });
       expect(nflMatch.team2).toEqual({ name: 'Baltimore Ravens' });
       expect(nflMatch.sources).toHaveLength(1);
@@ -169,6 +170,8 @@ describe('PitSportProvider', () => {
       const nbaMatch = matches.find(m => m.id.startsWith('pitsport_102626'));
       expect(nbaMatch).toBeDefined();
       expect(nbaMatch.category).toBe('basketball');
+      expect(nbaMatch.poster).toBe('');
+      expect(nbaMatch.thumbnail_url).toBe('');
       expect(nbaMatch.team1).toEqual({ name: 'Orlando Magic' });
       expect(nbaMatch.team2).toEqual({ name: 'Phoenix Suns' });
 
@@ -176,6 +179,8 @@ describe('PitSportProvider', () => {
       const wrestlingMatch = matches.find(m => m.id.startsWith('pitsport_102806'));
       expect(wrestlingMatch).toBeDefined();
       expect(wrestlingMatch.category).toBe('mma');
+      expect(wrestlingMatch.poster).toBe('');
+      expect(wrestlingMatch.thumbnail_url).toBe('');
 
       // Verify Australian Supercars Championship mapped to motorsport
       const supercarsMatch = matches.find(m => m.id.startsWith('pitsport_102823'));
@@ -183,11 +188,15 @@ describe('PitSportProvider', () => {
       expect(supercarsMatch.category).toBe('motorsport');
       expect(supercarsMatch.status).toBe('upcoming');
       expect(supercarsMatch.date).toBe(String(1793936400 * 1000));
+      expect(supercarsMatch.poster).toBe('http://pitsport.st/uploads/v8supers-30d6491f.webp');
+      expect(supercarsMatch.thumbnail_url).toBe('http://pitsport.st/uploads/v8supers-30d6491f.webp');
 
       // Verify F1 match mapped to motorsport
       const f1Match = matches.find(m => m.id.startsWith('pitsport_102850'));
       expect(f1Match).toBeDefined();
       expect(f1Match.category).toBe('motorsport');
+      expect(f1Match.poster).toBe('http://pitsport.st/uploads/f1.webp');
+      expect(f1Match.thumbnail_url).toBe('http://pitsport.st/uploads/f1.webp');
     });
 
     test('handles empty or HTTP error response gracefully', async () => {
@@ -411,6 +420,180 @@ describe('PitSportProvider', () => {
       const workHandle = relations.work('pitsport');
       relations.startMint(workHandle);
       expect(emittedSource).toBe('pitsport');
+    });
+  });
+
+  describe('Aggregation & Poster Safeguards', () => {
+    const MatchAggregator = require('../src/services/MatchAggregator');
+    const agg = new MatchAggregator({});
+
+    test('German football alias merges Hamburg SV and Hamburger SV across all spelling variants', () => {
+      const e1 = {
+        id: 'dlv_1',
+        title: 'Hamburger SV vs Borussia Monchengladbach',
+        category: 'football',
+        date: '1793970000000'
+      };
+      const e2 = {
+        id: 'pitsport_102795_hamburg-sv-vs-borussia-monchengladbach',
+        title: 'Hamburg SV vs Borussia Mönchengladbach',
+        category: 'football',
+        date: '1793970000000'
+      };
+      const scorezone = {
+        id: 'scorezone_1812746',
+        title: "Hamburger SV vs Borussia M'gladbach",
+        category: 'football',
+        date: '1793970000000'
+      };
+      const moenchengladbach = {
+        id: 'other_1',
+        title: 'Hamburg vs Borussia Moenchengladbach',
+        category: 'football',
+        date: '1793970000000'
+      };
+
+      expect(agg.isSameEvent(e1, e2)).toBe(true);
+      expect(agg.isSameEvent(e2, scorezone)).toBe(true);
+      expect(agg.isSameEvent(e1, scorezone)).toBe(true);
+      expect(agg.isSameEvent(scorezone, moenchengladbach)).toBe(true);
+    });
+
+    test('Motorsport circuit aliases merge Interlagos with São Paulo and Brazilian Grand Prix variants', () => {
+      const sp = {
+        id: 'sp_1',
+        title: 'Formula 1 São Paulo Grand Prix - Practice 1',
+        category: 'motorsport',
+        date: '1793970000000'
+      };
+      const br = {
+        id: 'br_1',
+        title: 'Formula 1: Brazilian Grand Prix - Practice 1',
+        category: 'motorsport',
+        date: '1793970000000'
+      };
+      const gpOfBrazil = {
+        id: 'dlv_gp_brazil',
+        title: 'Grand Prix of Brazil - Practice 1',
+        league: 'Formula 1',
+        category: 'motorsport',
+        date: '1793970000000'
+      };
+      const pitsportInterlagos = {
+        id: 'pitsport_102815_interlagos',
+        title: 'Formula 1: Interlagos — Free Practice 1',
+        category: 'motorsport',
+        date: '1793970000000'
+      };
+
+      expect(agg.isSameEvent(sp, pitsportInterlagos)).toBe(true);
+      expect(agg.isSameEvent(br, pitsportInterlagos)).toBe(true);
+      expect(agg.isSameEvent(gpOfBrazil, pitsportInterlagos)).toBe(true);
+
+      // Verify that replay provider (rz_) remains isolated from live fixtures
+      const rzReplay = {
+        id: 'rz_brazil_fp1',
+        title: 'Grand Prix of Brazil - Practice 1',
+        league: 'Formula 1',
+        category: 'motorsport',
+        date: '1793970000000'
+      };
+      expect(agg.isSameEvent(rzReplay, pitsportInterlagos)).toBe(false);
+    });
+
+    test('Motorsport circuit aliases merge Lusail with Qatar Grand Prix', () => {
+      const qatar = {
+        id: 'q_1',
+        title: 'MotoGP Qatar Grand Prix - Practice 1',
+        category: 'motorsport',
+        date: '1793959200000'
+      };
+      const pitsportLusail = {
+        id: 'pitsport_102831_lusail',
+        title: 'MotoGP: Lusail — Free Practice 1',
+        category: 'motorsport',
+        date: '1793959200000'
+      };
+
+      expect(agg.isSameEvent(qatar, pitsportLusail)).toBe(true);
+    });
+
+    test('Motorsport title prefixing does not duplicate existing series labels or prefix generic footers', async () => {
+      jest.spyOn(provider, 'proxyFetch').mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          data: {
+            live: [
+              {
+                programId: 9001,
+                titleText: 'NASCAR Cup Series: Pennzoil 400',
+                footer: 'NASCAR',
+                competitionSlug: 'nascar',
+                sessionStart: 1793927700
+              },
+              {
+                programId: 9002,
+                titleText: 'F1: Monaco Grand Prix - Qualifying',
+                footer: 'Formula 1',
+                competitionSlug: 'formula-1',
+                sessionStart: 1793927700
+              },
+              {
+                programId: 9003,
+                titleText: 'Interlagos — Free Practice 1',
+                footer: 'Motorsport',
+                competitionSlug: 'motorsport',
+                sessionStart: 1793927700
+              }
+            ]
+          }
+        })
+      });
+
+      const matches = await provider.getMatches();
+      const nascar = matches.find(m => m.id.startsWith('pitsport_9001'));
+      expect(nascar.title).toBe('NASCAR Cup Series: Pennzoil 400'); // not duplicated
+
+      const f1 = matches.find(m => m.id.startsWith('pitsport_9002'));
+      expect(f1.title).toBe('F1: Monaco Grand Prix - Qualifying'); // not duplicated
+
+      const generic = matches.find(m => m.id.startsWith('pitsport_9003'));
+      expect(generic.title).toBe('Interlagos — Free Practice 1'); // generic "Motorsport" footer ignored
+    });
+
+    test('Aggregator strips non-motorsport pitsport poster and background during merge', async () => {
+      const existing = {
+        id: 'fixture_1',
+        title: 'Hamburg SV vs Borussia Mönchengladbach',
+        category: 'football',
+        date: '1793970000000',
+        poster: '',
+        thumbnail_url: '',
+        background: '',
+        sources: [{ source: 'daddylive', id: '1' }]
+      };
+      const pitsportMatch = {
+        id: 'pitsport_102795',
+        title: 'Hamburger SV vs Borussia Monchengladbach',
+        category: 'football',
+        date: '1793970000000',
+        poster: 'http://pitsport.st/uploads/bundesliga-b066ab50.webp',
+        thumbnail_url: 'http://pitsport.st/uploads/bundesliga-b066ab50.webp',
+        background: 'http://pitsport.st/uploads/bundesliga-b066ab50.webp',
+        sources: [{ source: 'pitsport', id: '102795' }]
+      };
+
+      const testAgg = new MatchAggregator({ cacheService: { getMatches: () => [], setMatches: () => {} } });
+      testAgg.providers = [
+        { sourceName: 'daddylive', getMatches: async () => [existing] },
+        { sourceName: 'pitsport', getMatches: async () => [pitsportMatch] }
+      ];
+      const merged = await testAgg.syncMatches();
+      expect(merged).toHaveLength(1);
+      // Non-motorsport PitSport poster & background must NOT be adopted
+      expect(merged[0].poster || '').toBe('');
+      expect(merged[0].thumbnail_url || '').toBe('');
+      expect(merged[0].background || '').toBe('');
     });
   });
 });

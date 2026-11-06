@@ -511,6 +511,13 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   if (providerThumb && (/ppvservices\.st/i.test(providerThumb) || /unique-tournament/i.test(providerThumb) || /ondemand\.st/i.test(providerThumb))) providerThumb = null;
   if (providerLogo && (/ppvservices\.st/i.test(providerLogo) || /unique-tournament/i.test(providerLogo) || /ondemand\.st/i.test(providerLogo))) providerLogo = null;
 
+  // Filter out PitSport posters/thumbnails for non-motorsport events
+  const isMotorsportOrF1 = match.category === 'motorsport' || /formula|rally|supercar|motocross|karting|motor/i.test(match.category || '');
+  if (!isMotorsportOrF1) {
+    if (providerPoster && /pitsport/i.test(providerPoster)) providerPoster = null;
+    if (providerThumb && /pitsport/i.test(providerThumb)) providerThumb = null;
+  }
+
   // 24/7 TV channels are continuous network stations (Fox Cricket, Willow, NHL Network, etc.),
   // not sporting fixtures with posters. Always generate clean official TV network cards.
   if (match.category === 'networks') {

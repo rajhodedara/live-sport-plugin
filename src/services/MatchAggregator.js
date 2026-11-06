@@ -192,6 +192,31 @@ const COMPOUND_ALIASES = [
     [/\bformula\s*(?:four|4)\b|\bf[- ]?4\b/g, 'formulafour'],
     [/\bformula\s*e\b|\bformula-e\b/g, 'formulae'],
     [/\bgrand\s*prix\b|\bgp\b/g, 'grandprix'],
+    // Motorsport Circuits & Grand Prix Names
+    [/\bsao\s*paulo\b|\binterlagos\b/g, 'saopaulo'],
+    [/\b(?:brazil(?:ian)?\s*(?:grand\s*prix|gp)|(?:grand\s*prix|gp)\s*(?:of\s*)?brazil)\b/gi, 'saopaulo grandprix'],
+    [/\blusail\b/g, 'qatar'],
+    [/\bsakhir\b/g, 'bahrain'],
+    [/\byas\s*marina\b/g, 'abudhabi'],
+    [/\bmarina\s*bay\b/g, 'singapore'],
+    [/\bspa\s*francorchamps\b/g, 'spa'],
+    [/\bspielberg\b|\bred\s*bull\s*ring\b/g, 'austrian'],
+    [/\bhungaroring\b/g, 'hungarian'],
+    [/\bzandvoort\b/g, 'dutch'],
+    [/\bsuzuka\b/g, 'japanese'],
+    [/\balbert\s*park\b/g, 'australian'],
+    [/\bmontmelo\b|\bcatalunya\b/g, 'barcelona'],
+    [/\bhermanos\s*rodriguez\b/g, 'mexico'],
+    [/\bricardo\s*tormo\b/g, 'valencia'],
+    [/\btermas\s*de\s*rio\s*hondo\b/g, 'argentina'],
+    [/\bmugello\b/g, 'italian'],
+    [/\bphillip\s*island\b/g, 'australian'],
+    [/\bmandalika\b/g, 'indonesia'],
+    [/\bchang\s*(?:international\s*)?circuit\b|\bburiram\b/g, 'thailand'],
+    [/\bmotegi\b|\btwin\s*ring\s*motegi\b/g, 'japanese'],
+    [/\bsachsenring\b/g, 'german'],
+    [/\bportimao\b|\balgarve\b/g, 'portuguese'],
+    [/\bassen\b|\btt\s*assen\b/g, 'dutch'],
     // Football (Soccer)
     [/\bman(chester)?\s*utd\b|\bmanchester\s*united\b/g, 'manchesterunited'],
     [/\bman\.?\s+united\b/g, 'manchesterunited'], // "Man United" / "Man. United" (gap found by A/B testing)
@@ -225,7 +250,28 @@ const COMPOUND_ALIASES = [
     [/\bsporting\s*(?:cp|clube\s*de\s*portugal|lisbon)\b/g, 'sportingcp'],
     [/\bathletic\s*(club|bilbao)\b/g, 'athleticbilbao'],
     [/\bbayer(\s*04)?\s*leverkusen\b|\bleverkusen\b/g, 'bayerleverkusen'],
-    [/\bborussia\s*m[oö]nchengladbach\b|\bm['’]?gladbach\b/g, 'monchengladbach'],
+    [/\b(?:borussia\s*)?(?:m[oö]nchengladbach|moenchengladbach|m['’]?gladbach)\b/gi, 'monchengladbach'],
+    [/\bhamburger(\s*sv)?\b|\bhamburg\s*sv\b|\bhsv\b/g, 'hamburg'],
+    [/\b(sv\s*)?werder\s*bremen\b|\bwerder\b/g, 'werderbremen'],
+    [/\bhertha(\s*bsc)?\b|\bhertha\s*berlin\b/g, 'herthaberlin'],
+    [/\beintracht\s*frankfurt\b|\bsge\b/g, 'eintrachtfrankfurt'],
+    [/\b(vfb\s*)?stuttgart\b/g, 'stuttgart'],
+    [/\b(vfl\s*)?wolfsburg\b/g, 'wolfsburg'],
+    [/\b(sc\s*)?freiburg\b/g, 'freiburg'],
+    [/\b(1\.\s*fsv\s*)?mainz(\s*05)?\b/g, 'mainz'],
+    [/\b(fc\s*)?augsburg\b/g, 'augsburg'],
+    [/\b(1\.\s*fc\s*)?union\s*berlin\b/g, 'unionberlin'],
+    [/\b(fc\s*)?st[\s\.]*pauli\b/g, 'stpauli'],
+    [/\b(tsg\s*)?hoffenheim\b/g, 'hoffenheim'],
+    [/\b(1\.\s*fc\s*)?heidenheim\b/g, 'heidenheim'],
+    [/\b(vfl\s*)?bochum\b/g, 'bochum'],
+    [/\b(ksv\s*)?holstein\s*kiel\b|\bholstein\b/g, 'holsteinkiel'],
+    [/\b(fc\s*)?schalke(\s*04)?\b/g, 'schalke'],
+    [/\bhannover(\s*96)?\b/g, 'hannover'],
+    [/\b(1\.\s*fc\s*)?(koln|koeln|cologne)\b/g, 'koln'],
+    [/\bfortuna\s*d[uü]sseldorf\b/g, 'dusseldorf'],
+    [/\b(1\.\s*fc\s*)?kaiserslautern\b/g, 'kaiserslautern'],
+    [/\b(1\.\s*fc\s*)?n[uü]rnberg\b/g, 'nurnberg'],
     [/\bpsv(\s*eindhoven)?\b/g, 'psveindhoven'],
     [/\bfeyenoord(\s*rotterdam)?\b/g, 'feyenoord'],
     [/\b(red\s*star(\s*belgrade)?|crvena\s*zvezda)\b/g, 'crvenazvezda'],
@@ -938,7 +984,7 @@ class MatchAggregator {
     // e.g. "RACE - F1 2026 - Singapore Grand Prix Full Race Replay" vs "Formula 1 Singapore Grand Prix 2026 Race Replay"
     if (isMoto1 && isMoto2) {
       const isGrandPrix = (t) => t.has('grandprix') || t.has('gp') || t.has('formulaone') || t.has('formulatwo') || t.has('formulathree') || t.has('formulafour') || t.has('formulae') || t.has('motogp') || t.has('moto2') || t.has('moto3') || t.has('nascar') || t.has('rally') || t.has('indycar') || t.has('dtm') || t.has('wsbk') || t.has('superbike');
-      if (isGrandPrix(p1.tokens) && isGrandPrix(p2.tokens)) {
+      if ((isGrandPrix(p1.tokens) || p1.motorsportSeries !== 'other') && (isGrandPrix(p2.tokens) || p2.motorsportSeries !== 'other')) {
         const specificShared = [...p1.tokens].filter(x => p2.tokens.has(x) && !MOTORSPORT_GENERICS.has(x) && isNaN(x));
         if (specificShared.length >= 1) return true;
       }
@@ -1368,7 +1414,8 @@ class MatchAggregator {
               if (sharedCount < 2 && pre.tokens.size > 2) continue;
               const pCand = finalPres[cIdx];
               // Replay precision/game constraints are checked together below.
-              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
+              const maxDateDelta = (pre.category === 'motorsport' || pCand.category === 'motorsport') ? 172800000 : DAY_MS;
+              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDelta) continue;
               if (this._sameEventPre(pCand, pre)) {
                 if (acceptCandidate(cIdx)) break;
               }
@@ -1389,7 +1436,8 @@ class MatchAggregator {
             for (let i = finalMatches.length - 1; i >= 0; i--) {
               const pCand = finalPres[i];
               if (pCand.isChannel) continue;
-              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
+              const maxDateDelta = (pre.category === 'motorsport' || pCand.category === 'motorsport') ? 172800000 : DAY_MS;
+              if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDelta) continue;
               if (this._sameEventPre(pCand, pre) && acceptCandidate(i)) break;
             }
           } else {
@@ -1408,7 +1456,8 @@ class MatchAggregator {
                 checkedIndices.add(i);
                 const pCand = finalPres[i];
                 if (pCand.isChannel) continue;
-                if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > DAY_MS) continue;
+                const maxDateDelta = (pre.category === 'motorsport' || pCand.category === 'motorsport') ? 172800000 : DAY_MS;
+                if (!(pre.isReplay && pCand.isReplay) && pre.date && pCand.date && Math.abs(pre.date - pCand.date) > maxDateDelta) continue;
                 if (this._sameEventPre(pCand, pre)) {
                   if (acceptCandidate(i)) break;
                 }
@@ -1497,16 +1546,19 @@ class MatchAggregator {
             }
           }
         }
-        if (match.popular === '1') existing.popular = '1';
-        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st') && !match.poster.includes('unique-tournament') && !match.poster.includes('ondemand.st')) existing.poster = match.poster;
+        const isPitSportNonMotorsport = (url) => url && /pitsport/i.test(url) && existing.category !== 'motorsport';
+        if (!existing.poster && match.poster && !match.poster.includes('ppvservices.st') && !match.poster.includes('unique-tournament') && !match.poster.includes('ondemand.st') && !isPitSportNonMotorsport(match.poster)) existing.poster = match.poster;
         if (!existing.logo && match.logo && !match.logo.includes('ppvservices.st') && !match.logo.includes('unique-tournament') && !match.logo.includes('ondemand.st')) existing.logo = match.logo;
-        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st') && !match.thumbnail_url.includes('unique-tournament') && !match.thumbnail_url.includes('ondemand.st')) existing.thumbnail_url = match.thumbnail_url;
+        if (!existing.thumbnail_url && match.thumbnail_url && !match.thumbnail_url.includes('ppvservices.st') && !match.thumbnail_url.includes('unique-tournament') && !match.thumbnail_url.includes('ondemand.st') && !isPitSportNonMotorsport(match.thumbnail_url)) existing.thumbnail_url = match.thumbnail_url;
         if (existing.category === 'networks' || match.category === 'networks') existing.poster = '';
+        if (existing.category !== 'motorsport' && existing.poster && /pitsport/i.test(existing.poster)) existing.poster = '';
+        if (existing.category !== 'motorsport' && existing.thumbnail_url && /pitsport/i.test(existing.thumbnail_url)) existing.thumbnail_url = '';
+        if (existing.category !== 'motorsport' && existing.background && /pitsport/i.test(existing.background)) existing.background = '';
         // Carry a live score across the merge the same way artwork is carried.
         // A later provider that reports a score wins over an earlier blank.
         if (!existing.score && match.score) existing.score = match.score;
         if (!existing.date && match.date) existing.date = match.date;
-        if (!existing.background && match.background) existing.background = match.background;
+        if (!existing.background && match.background && !isPitSportNonMotorsport(match.background)) existing.background = match.background;
         if (!existing.league && match.league) existing.league = match.league;
         if (!existing.team1 && match.team1) existing.team1 = match.team1;
         else if (existing.team1 && !existing.team1.logo && match.team1 && match.team1.logo) existing.team1.logo = match.team1.logo;
