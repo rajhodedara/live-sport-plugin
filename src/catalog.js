@@ -77,7 +77,7 @@ const REPLAY_SPORTS = [
 ];
 
 // Sources whose matches qualify for the replay retention window and replay hubs.
-const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
+const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap']);
 
 // Static tables hoisted to module scope: mapMatchToMetaPreview runs per meta
 // per page, and allocating these per call churned ~7 RegExp objects + a 15-key
@@ -802,7 +802,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
     const getReplaySourceRank = (s) => {
       const name = (s.name || '').toLowerCase();
       const prov = s.source || '';
-      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays') {
+      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays' || prov === 'mlblive' || prov === 'leaf_recap') {
         if (/part\s*1|1st\s*half|full/i.test(name)) return 1;
         if (/part\s*2|2nd\s*half/i.test(name)) return 2;
         return 3;

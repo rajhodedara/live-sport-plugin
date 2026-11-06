@@ -73,6 +73,7 @@ const SOURCE_PRIORITY = {
   fullraces: 2,
   hockeyreplays: 2,
   mlblive: 2,
+  leaf_recap: 2,
   watchfooty: 2,
   admin: 3,
   streamedpk: 3,
@@ -86,9 +87,9 @@ const SOURCE_PRIORITY = {
 
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 
-const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
+const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
 const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -117,6 +118,7 @@ const NICE_NAMES = {
   'fullraces': 'FullRaces',
   'hockeyreplays': 'HockeyReplays',
   'mlblive': 'MLBLive',
+  'leaf_recap': 'Highfly Recap',
   admin: 'Streamed.pk',
   echo: 'Streamed.pk',
   golf: 'Streamed.pk',
@@ -144,6 +146,7 @@ const CHANNEL_TITLE_NICE_NAMES = {
   fullraces: 'FullRaces',
   hockeyreplays: 'HockeyReplays',
   mlblive: 'MLBLive',
+  leaf_recap: 'Highfly Recap',
   sktech: 'SKTech',
   vavoo: 'Vavoo',
   ppvst: 'PPV.st',
@@ -306,6 +309,9 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'leaf') {
     const provider = container.resolve('leafProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'leaf_recap') {
+    const provider = container.resolve('leafRecapProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'scorezone') {
     const provider = container.resolve('scorezoneProvider');
@@ -1340,7 +1346,7 @@ async function handleStream(type, id, config) {
     const getReplaySourceRank = (s) => {
       const name = (s.name || '').toLowerCase();
       const prov = s.source || '';
-      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays') {
+      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays' || prov === 'mlblive' || prov === 'leaf_recap') {
         if (/part\s*1|1st\s*half|full/i.test(name)) return 1;
         if (/part\s*2|2nd\s*half/i.test(name)) return 2;
         return 3;
@@ -1392,7 +1398,7 @@ async function handleStream(type, id, config) {
   try {
     const { isReplayMatch } = require('./catalog');
     if (isReplayMatch(match)) {
-      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
+      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap']);
       const replaySources = candidateSources.filter(s => s && REPLAY_SOURCES.has(s.source));
       if (replaySources.length > 0) {
         candidateSources = replaySources;
@@ -2037,5 +2043,9 @@ module.exports = {
   applyParsedPlaylistQuality,
   formatChannelStreamTitle,
   KNOWN_LIVE_SOURCES,
-  KNOWN_REPLAY_SOURCES
+  KNOWN_REPLAY_SOURCES,
+  KNOWN_FALLBACKS,
+  NICE_NAMES,
+  CHANNEL_TITLE_NICE_NAMES,
+  SOURCE_PRIORITY
 };
