@@ -102,7 +102,7 @@ describe('PPV.st extractor preserves local transient failures', () => {
       .mockImplementationOnce((_cmd, _args, _opts, done) => done(null, goodStdout, ''));
     safeFetch.mockResolvedValue({
       ok: true, status: 200,
-      text: async () => '#EXTM3U\\n#EXT-X-TARGETDURATION:5\\n#EXTINF:4,\\nsegment.ts\\n'
+      text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:5\n#EXTINF:4,\nsegment.ts\n'
     });
     const cache = new StreamResolveCache();
     cache._sharedAvailable = () => false;
