@@ -26,7 +26,7 @@ test('accepts Leaf hostnames into signed application state while ignoring lookal
     'https://user@papacito.cfd/live.m3u8?ft=fixture',
     'ftp://papacito.cfd/live.m3u8?ft=fixture',
   ];
-  safeFetch.mockResolvedValue({ ok: true, json: async () => ({ streams: entries.map(url => ({ url })) }) });
+  safeFetch.mockResolvedValue({ ok: true, status: 200, text: async () => '#EXTM3U\n#EXTINF:6,\nsegment.ts\n', json: async () => ({ streams: entries.map(url => ({ url })) }) });
   const streams = await new LeafProvider().resolveStream('fixture');
   expect(streams).toHaveLength(2);
   const leafState = require('../src/services/LeafState');

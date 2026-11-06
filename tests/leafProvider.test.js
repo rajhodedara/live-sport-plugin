@@ -4,7 +4,17 @@ const LeafProvider = require('../src/providers/LeafProvider');
 const impitClient = require('../src/services/ProviderOutbound');
 const { BASE_URL } = require('../src/config');
 const leafState = require('../src/services/LeafState');
+const { resetAccountRateLimits } = require('../src/services/LeafRateLimitState');
 const originalAppSecret = process.env.APP_SECRET;
+const originalLeafEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('LEAF_')));
+
+const playlistResponse = () => ({
+  ok: true, status: 200, bodyTruncated: false,
+  text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6,\nhttps://w1.papacito.cfd/leaf/fixture/1/seg_1.ts\n',
+});
+const metadataAndPlaylist = data => async url => url.includes('/stream/sport/')
+  ? { ok: true, status: 200, bodyTruncated: false, json: async () => data }
+  : playlistResponse();
 
 const TEST_CONFIG = Buffer.from(JSON.stringify({ freeUserId: 'test-user-id.abcdef' }))
   .toString('base64')
@@ -17,6 +27,9 @@ describe('LeafProvider Unit Tests', () => {
   let safeFetchSpy;
 
   beforeEach(() => {
+    for (const key of Object.keys(process.env)) if (key.startsWith('LEAF_')) delete process.env[key];
+    resetAccountRateLimits();
+    leafMint.invalidate();
     process.env.APP_SECRET = 'fixture-private-leaf-state-key';
     // Leaf reads its per-install config from the environment (never hardcoded),
     // so every test has to provide one before the provider is constructed.
@@ -30,8 +43,8 @@ describe('LeafProvider Unit Tests', () => {
       safeFetchSpy.mockRestore();
       safeFetchSpy = null;
     }
-    delete process.env.LEAF_INSTALL_CONFIG;
-    delete process.env.LEAF_API_URL;
+    for (const key of Object.keys(process.env)) if (key.startsWith('LEAF_')) delete process.env[key];
+    Object.assign(process.env, originalLeafEnv);
     if (originalAppSecret === undefined) delete process.env.APP_SECRET;
     else process.env.APP_SECRET = originalAppSecret;
   });
@@ -165,11 +178,7 @@ describe('LeafProvider Unit Tests', () => {
         ]
       };
 
-      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => mockStreamsResponse
-      });
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(metadataAndPlaylist(mockStreamsResponse));
 
       const streams = await provider.resolveStream('streamed:golden-state-warriors-vs-memphis-grizzlies-2601690', 'basketball', 'Warriors vs Grizzlies');
 
@@ -265,19 +274,15 @@ describe('LeafProvider Unit Tests', () => {
       delete process.env.LEAF_INSTALL_CONFIG;
       process.env.LEAF_API_URL = 'https://sports.highfly.to/scoped_config_base';
       const customProvider = new LeafProvider();
-      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          streams: [
-            {
-              name: 'Leaf (Strong) · Court 1',
-              title: '1920x1080 · ~5.0 Mbps',
-              url: 'https://papacito.cfd/m3u/12345/live.m3u8?ft=token_val'
-            }
-          ]
-        })
-      });
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(metadataAndPlaylist({
+        streams: [
+          {
+            name: 'Leaf (Strong) · Court 1',
+            title: '1920x1080 · ~5.0 Mbps',
+            url: 'https://papacito.cfd/m3u/12345/live.m3u8?ft=token_val'
+          }
+        ]
+      }));
       const res = await customProvider.resolveStream('streamed:tennis-match', 'tennis', 'Match');
       expect(res).toHaveLength(1);
       expect(res[0].url).toMatch(new RegExp('^' + BASE_URL + '/api/leaf/m3u8/'));
@@ -327,7 +332,7 @@ describe('LeafProvider Unit Tests', () => {
           };
         }
         // probeStreamAlive call
-        return { ok: true, status: 200 };
+        return playlistResponse();
       });
 
       const p1 = provider.resolveStream('streamed:coalesce-match', 'football', 'Match');
@@ -366,7 +371,7 @@ describe('LeafProvider Unit Tests', () => {
         if (url.includes('dead123')) {
           return { ok: false, status: 403 };
         }
-        return { ok: true, status: 200 };
+        return playlistResponse();
       });
 
       const res = await provider.resolveStream('streamed:probe-match', 'football', 'Match');
@@ -394,14 +399,15 @@ describe('LeafProvider Unit Tests', () => {
             })
           };
         }
-        return { ok: true, status: 200 };
+        return playlistResponse();
       });
 
       await provider.resolveStream('streamed:seed-match', 'football', 'Match');
       expect(seedSpy).toHaveBeenCalledWith(
         'streamed:seed-match',
         'seed789',
-        'https://papacito.cfd/m3u/seed789/live.m3u8?ft=seed_token'
+        'https://papacito.cfd/m3u/seed789/live.m3u8?ft=seed_token',
+        { base: `https://sports.highfly.to/${TEST_CONFIG}` }
       );
       seedSpy.mockRestore();
     });

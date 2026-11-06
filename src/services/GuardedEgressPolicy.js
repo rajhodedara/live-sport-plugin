@@ -2,15 +2,18 @@
 
 // Classification selects an existing egress/profile; the transport must still
 // validate every URL, resolved address and redirect before allocating a slot.
-function hostnameOf(value) {
+function hostnameOf(value, rejectUserinfo = false) {
   try {
     if (typeof value !== 'string' && !(value instanceof URL)) return '';
-    return new URL(String(value)).hostname.toLowerCase().replace(/\.$/, '');
+    if (rejectUserinfo && /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*@/i.test(String(value))) return '';
+    const parsed = new URL(String(value));
+    if (rejectUserinfo && (parsed.username || parsed.password)) return '';
+    return parsed.hostname.toLowerCase().replace(/\.$/, '');
   } catch (_) { return ''; }
 }
 
 function isLeafTarget(value) {
-  const host = hostnameOf(value);
+  const host = hostnameOf(value, true);
   const isHighfly = host === 'highfly.to' || host.endsWith('.highfly.to') ||
                     host === 'highfly.dev' || host.endsWith('.highfly.dev');
   return isHighfly ||

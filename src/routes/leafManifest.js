@@ -19,11 +19,14 @@
  */
 
 const express = require('express');
+const crypto = require('node:crypto');
 const router = express.Router();
 const providerOutbound = require('../services/ProviderOutbound');
 const { validateLeafManifestUrl: validateTargetUrl } = require('../services/GuardedEgressPolicy');
 const leafState = require('../services/LeafState');
 const leafMint = require('../services/LeafMint');
+const { resolveLeafInstallConfig } = require('../services/LeafInstallConfig');
+const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
 
 // Live edge vs request budget: papacito's playlists run #EXT-X-TARGETDURATION:11
 // (~10s segments, ~8 deep window), so a 6s shared cache never serves a segment that
@@ -32,31 +35,124 @@ const leafMint = require('../services/LeafMint');
 const MANIFEST_CACHE_TTL_MS = Math.max(2500, Number(process.env.LEAF_PLAYLIST_TTL_MS) || 6000);
 const FALLBACK_TTL_MS = 60 * 1000; // 60s stale fallback in case upstream has transient timeout
 const MAX_MANIFEST_BYTES = 256 * 1024;
-const TRANSIENT_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const MAX_CACHE_ENTRIES = 1000;
+const MAX_IN_FLIGHT_FETCHES = 128;
+const RETRY_BACKOFF_MS = 2000;
+const MAX_RETRY_AFTER_MS = 10 * 60 * 1000;
 const TRANSIENT_NETWORK_CODES = new Set([
   'ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH',
   'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT',
 ]);
 
-const manifestCache = new Map(); // targetUrl -> { body, expiresAt, staleUntil }
-const inFlightFetches = new Map(); // targetUrl -> Promise<string>
+const manifestCache = new Map(); // account/target -> body + immutable stale deadline, optional retry window
+const inFlightFetches = new Map(); // account/target -> Promise<cache entry>
 
 // Retain legacy session cache for backward compatibility / fallback
 const sessionCache = new Map();
 
+function storeManifestEntry(key, entry) {
+  if (!manifestCache.has(key) && manifestCache.size >= MAX_CACHE_ENTRIES) {
+    manifestCache.delete(manifestCache.keys().next().value);
+  }
+  manifestCache.set(key, entry);
+}
+
+function failureCode(error) {
+  return typeof error?.code === 'string' && /^[A-Z][A-Z0-9_]{1,80}$/.test(error.code)
+    ? error.code : 'ERR_LEAF_UPSTREAM';
+}
+
+function sendFailure(res, error, invalidState = false) {
+  const temporary = isTransientFetchFailure(error);
+  const status = error.statusCode || (temporary ? 503 : 502);
+  const delay = error.retryAfterMs || (temporary ? RETRY_BACKOFF_MS : 0);
+  if (delay) res.setHeader('Retry-After', String(Math.ceil(Math.max(1000, Math.min(MAX_RETRY_AFTER_MS, delay)) / 1000)));
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  return res.status(status).send(invalidState && status === 400 ? 'Invalid leaf state' : 'Failed to resolve Leaf playlist');
+}
+
 function isTransientFetchFailure(error) {
-  return error?.leafTransient === true || error?.name === 'TimeoutError' ||
-    TRANSIENT_NETWORK_CODES.has(error?.code) ||
-    error?.upstreamStatus === 429 || error?.rateLimit === true ||
-    error?.cooldown === true ||
-    error?.code === 'ERR_LEAF_MINT_RATE_LIMIT' ||
-    error?.code === 'ERR_LEAF_MINT_COOLDOWN';
+  // A timeout/capacity wrapper must not hide a guard refusal or invalid body.
+  const chain = [];
+  try {
+    for (let item = error; item && typeof item === 'object'; item = item.cause) {
+      if (chain.includes(item) || chain.length >= 8) return false;
+      chain.push(item);
+    }
+    const capacity = item => item.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(item.code || '');
+    if (chain.some(item => item.code === 'ERR_OUTBOUND_BLOCKED' ||
+        /^ERR_(?:LEAF_(?:MANIFEST_(?:URL|REDIRECT|BODY)|BODY_LIMIT|UPSTREAM_DENIED|TOKEN_EXPIRED)|OUTBOUND_BODY_LIMIT)$/.test(item.code || '') ||
+        (item.isFatal === true && !capacity(item)) ||
+        (Number.isInteger(item.upstreamStatus) && item.upstreamStatus > 0 && !isTransientStatus(item.upstreamStatus)))) return false;
+    return isInconclusiveResolutionError(error) || chain.some(item => item.leafTransient === true ||
+      TRANSIENT_NETWORK_CODES.has(item.code) || isTransientStatus(item.upstreamStatus) ||
+      item.rateLimit === true || item.cooldown === true ||
+      item.code === 'ERR_LEAF_MINT_RATE_LIMIT' || item.code === 'ERR_LEAF_MINT_COOLDOWN');
+  } catch (_) { return false; }
+}
+
+function isTransientStatus(status) {
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
+}
+
+function retryAfterMs(headers, fallback = RETRY_BACKOFF_MS) {
+  const value = typeof headers?.get === 'function' ? headers.get('retry-after') : headers?.['retry-after'];
+  let delay = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim())
+    ? Number(value) * 1000 : Date.parse(value) - Date.now();
+  if (!Number.isFinite(delay)) delay = fallback;
+  return Math.max(1000, Math.min(MAX_RETRY_AFTER_MS, delay));
+}
+
+function tokenExpiresAt(targetUrl) {
+  try {
+    const parts = new URL(targetUrl).searchParams.get('ft')?.split('.');
+    if (parts?.length !== 3) return Infinity;
+    const exp = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')).exp;
+    return typeof exp === 'number' && Number.isFinite(exp) && Math.abs(exp * 1000) <= Number.MAX_SAFE_INTEGER
+      ? exp * 1000 : Infinity;
+  } catch (_) { return Infinity; }
+}
+
+function expiredTokenError() {
+  return Object.assign(new Error('Leaf manifest credential has expired'), { code: 'ERR_LEAF_TOKEN_EXPIRED' });
+}
+
+function installFingerprint(install) {
+  return crypto.createHash('sha256').update(install.apiBase).digest('base64url').slice(0, 20);
+}
+
+function rawManifestAuth(url) {
+  return url.search.slice(1).split('&').find(part => {
+    try { return decodeURIComponent(part.split('=')[0]) === 'ft'; } catch (_) { return false; }
+  });
+}
+
+function withStateContext(body, context, sourceUrl) {
+  if (!context.stateToken) return body;
+  const parent = new URL(sourceUrl);
+  const minted = new URL(context.mintedUrl || sourceUrl);
+  const directory = minted.pathname.slice(0, minted.pathname.lastIndexOf('/') + 1);
+  const auth = parent.searchParams.get('ft');
+  // Preserve the legacy nested child URL representation, and bind each child
+  // to the account that produced this parent playlist.
+  return body.replace(/(^|\n|URI=")\/api\/leaf\/manifest\.m3u8\?url=([^\s"]+)/g, (match, prefix, encoded) => {
+    let child;
+    try { child = new URL(decodeURIComponent(encoded)); } catch (_) { return match; }
+    // Preserve the existing guarded URL route for CDN splits or redirects
+    // outside the minted channel directory. Such a child cannot be refreshed
+    // safely from this channel's mint, so do not emit a state link that fails.
+    if (child.origin !== minted.origin || !child.pathname.startsWith(directory) ||
+        /%(?:2f|5c|2e)/i.test(child.pathname)) return match;
+    const inherited = auth && child.origin === parent.origin && child.searchParams.get('ft') === auth;
+    return `${prefix}/api/leaf/m3u8/${encodeURIComponent(context.stateToken)}/index.m3u8?url=${encoded}` +
+      `&i=${installFingerprint(context.install)}${inherited ? '&f=1' : ''}`;
+  });
 }
 
 /**
  * Sanitize and ensure all segment lines in upstream m3u8 body have absolute CDN URLs.
  */
-function sanitizeManifestBody(body, targetUrl) {
+function sanitizeManifestBody(body, targetUrl = 'https://w1.papacito.cfd/') {
   if (!body || !body.includes('#EXT')) {
     throw new Error('Upstream returned non-m3u8 body');
   }
@@ -65,32 +161,29 @@ function sanitizeManifestBody(body, targetUrl) {
     throw Object.assign(new Error('Upstream returned denied media'), { code: 'ERR_LEAF_UPSTREAM_DENIED' });
   }
 
-  let defaultCdnBase = 'https://w1.papacito.cfd';
-  if (targetUrl) {
-    try {
-      const u = new URL(targetUrl);
-      if (!u.hostname.includes('papacito.cfd')) {
-        defaultCdnBase = u.origin;
-      }
-    } catch (_) {}
-  }
-
   const lines = body.split('\n');
-
-  // Derive cdnBase from actual media segments (lines not starting with #), avoid matching comments/metadata
-  let cdnBase = defaultCdnBase;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#') && (trimmed.startsWith('http://') || trimmed.startsWith('https://'))) {
-      try {
-        cdnBase = new URL(trimmed).origin;
-        break;
-      } catch (_) {}
+  const resolveUri = uri => /^[a-z][a-z0-9+.-]*:/i.test(uri) ? uri : new URL(uri, targetUrl).href;
+  const playlistUri = uri => {
+    let absolute = resolveUri(uri);
+    const parent = new URL(targetUrl);
+    const child = new URL(absolute);
+    // Leaf's ft credential is scoped to the manifest origin. Preserve its raw
+    // query bytes, and never replace an explicitly signed child credential.
+    if (child.origin === parent.origin && !child.searchParams.has('ft')) {
+      const auth = rawManifestAuth(parent);
+      if (auth) {
+        const hashAt = absolute.indexOf('#');
+        const hash = hashAt < 0 ? '' : absolute.slice(hashAt);
+        absolute = hashAt < 0 ? absolute : absolute.slice(0, hashAt);
+        absolute += `${child.search ? '&' : '?'}${auth}${hash}`;
+      }
     }
-  }
+    return `/api/leaf/manifest.m3u8?url=${encodeURIComponent(absolute)}`;
+  };
 
   const sanitizedLines = [];
   let isNextLineVariant = false;
+  let isNextLineMedia = false;
 
   for (let line of lines) {
     const trimmed = line.trim();
@@ -98,36 +191,29 @@ function sanitizeManifestBody(body, targetUrl) {
 
     // Directives and comments
     if (trimmed.startsWith('#')) {
-      if (trimmed.startsWith('#EXT-X-STREAM-INF:') || trimmed.startsWith('#EXT-X-I-FRAME-STREAM-INF:')) {
+      if (trimmed.startsWith('#EXT-X-STREAM-INF:')) {
         isNextLineVariant = true;
       }
-      sanitizedLines.push(trimmed);
+      if (trimmed.startsWith('#EXTINF:')) isNextLineMedia = true;
+      const childDirective = /^#EXT-X-(?:MEDIA|I-FRAME-STREAM-INF|IMAGE-STREAM-INF|RENDITION-REPORT):/.test(trimmed);
+      sanitizedLines.push(trimmed.replace(/\bURI="([^"]*)"/g, (_match, uri) =>
+        `URI="${childDirective ? playlistUri(uri) : resolveUri(uri)}"`));
       continue;
     }
 
     // Master playlist child variant playlist line
-    if (isNextLineVariant || /\.m3u8(?:[?#]|$)/i.test(trimmed)) {
+    const absoluteUri = resolveUri(trimmed);
+    const playlistPath = /\.m3u8$/i.test(new URL(absoluteUri).pathname);
+    if (isNextLineVariant || (!isNextLineMedia && playlistPath)) {
       isNextLineVariant = false;
-      let absoluteVariant = trimmed;
-      if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-        try {
-          absoluteVariant = new URL(trimmed, targetUrl).href;
-        } catch (_) {
-          absoluteVariant = trimmed.startsWith('/') ? `${cdnBase}${trimmed}` : `${cdnBase}/${trimmed}`;
-        }
-      }
-      sanitizedLines.push(`/api/leaf/manifest.m3u8?url=${encodeURIComponent(absoluteVariant)}`);
+      isNextLineMedia = false;
+      sanitizedLines.push(playlistUri(trimmed));
       continue;
     }
 
     // Media segment URL: ensure absolute URL while preserving all query parameters (?a=..., ?t=...)
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      sanitizedLines.push(trimmed);
-    } else if (trimmed.startsWith('/')) {
-      sanitizedLines.push(`${cdnBase}${trimmed}`);
-    } else {
-      sanitizedLines.push(`${cdnBase}/${trimmed}`);
-    }
+    isNextLineMedia = false;
+    sanitizedLines.push(absoluteUri);
   }
 
   return sanitizedLines.join('\n') + '\n';
@@ -136,17 +222,42 @@ function sanitizeManifestBody(body, targetUrl) {
 /**
  * Fetch live upstream manifest with single-flight request coalescing and micro-caching.
  */
-async function getOrFetchLiveManifest(targetUrl) {
+async function getOrFetchLiveManifest(targetUrl, context = {}) {
   validateTargetUrl(targetUrl);
+  const install = context.install || resolveLeafInstallConfig();
+  context = { ...context, install };
+  const key = install.configured || install.apiBase !== 'https://sports.highfly.to'
+    ? JSON.stringify([install.apiBase, targetUrl]) : targetUrl;
   const now = Date.now();
-  const cached = manifestCache.get(targetUrl);
+  const credentialExpiresAt = tokenExpiresAt(targetUrl);
+  if (now >= credentialExpiresAt) {
+    manifestCache.delete(key);
+    throw expiredTokenError();
+  }
+  const cached = manifestCache.get(key);
 
-  if (cached && now < cached.expiresAt) {
-    return cached.body;
+  if (cached?.retryUntil > now) {
+    if (cached.body && now < cached.staleUntil) {
+      return withStateContext(cached.body, context, cached.sourceUrl || targetUrl);
+    }
+    throw Object.assign(new Error('Leaf manifest is temporarily unavailable'), cached.retryFailure, {
+      leafTransient: true, statusCode: 503, retryAfterMs: cached.retryUntil - now
+    });
+  }
+  if (cached && now < cached.expiresAt && now < cached.staleUntil) {
+    return withStateContext(cached.body, context, cached.sourceUrl || targetUrl);
   }
 
-  let fetchPromise = inFlightFetches.get(targetUrl);
+  let fetchPromise = inFlightFetches.get(key);
   if (!fetchPromise) {
+    if (inFlightFetches.size >= MAX_IN_FLIGHT_FETCHES) {
+      const error = Object.assign(new Error('Leaf manifest capacity is busy'), {
+        code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503,
+        retryAfterMs: RETRY_BACKOFF_MS, leafTransient: true
+      });
+      if (cached && now < cached.staleUntil) return withStateContext(cached.body, context, cached.sourceUrl || targetUrl);
+      throw error;
+    }
     // Install the in-flight entry before a synchronous dependency failure can
     // clear it, so a failed request cannot leave a permanently rejected entry.
     fetchPromise = Promise.resolve().then(async () => {
@@ -154,8 +265,8 @@ async function getOrFetchLiveManifest(targetUrl) {
         const res = await providerOutbound.safeFetch(targetUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36',
-            'Referer': 'https://sports.highfly.to/',
-            'Origin': 'https://sports.highfly.to',
+            'Referer': `${install.origin}/`,
+            'Origin': install.origin,
             'Accept': '*/*'
           },
           timeoutMs: 6000,
@@ -163,63 +274,80 @@ async function getOrFetchLiveManifest(targetUrl) {
           diagnosticOwner: 'manifest'
         });
 
-        if (!res || !res.ok) {
-          throw Object.assign(new Error(`HTTP ${res ? res.status : 'No response'}`), {
-            code: 'ERR_LEAF_UPSTREAM_STATUS',
-            upstreamStatus: res ? res.status : 0,
-            leafTransient: Boolean(res && TRANSIENT_HTTP_STATUSES.has(res.status))
-          });
-        }
-        // Guarded outbound validates DNS/IP and every redirect before dialing.
-        // Also reject a final redirect outside Leaf's intended host scope.
-        if (res.url) {
+        // Check hard metadata boundaries before interpreting an HTTP failure as
+        // transient, including when a transport supplies a redirected response.
+        if (res?.url) {
           try { validateTargetUrl(res.url); }
           catch (_) {
             throw Object.assign(new Error('Invalid Leaf manifest redirect'), { code: 'ERR_LEAF_MANIFEST_REDIRECT' });
           }
         }
-        if (res.bodyTruncated) {
+        if (res?.bodyTruncated) {
           throw Object.assign(new Error('Leaf manifest exceeds its body limit'), { code: 'ERR_LEAF_BODY_LIMIT' });
         }
-
+        if (!res || !res.ok) {
+          throw Object.assign(new Error(`HTTP ${res ? res.status : 'No response'}`), {
+            code: 'ERR_LEAF_UPSTREAM_STATUS',
+            upstreamStatus: res ? res.status : 0,
+            leafTransient: Boolean(res && isTransientStatus(res.status)),
+            ...(res && isTransientStatus(res.status) ? {
+              statusCode: 503,
+              retryAfterMs: retryAfterMs(res.headers, res.status === 429 ? 30000 : RETRY_BACKOFF_MS)
+            } : {})
+          });
+        }
         const rawBody = await res.text();
         if (typeof rawBody !== 'string' || !/^\uFEFF?#EXTM3U(?:\r?\n|$)/.test(rawBody)) {
           throw Object.assign(new Error('Upstream returned non-m3u8 body'), { code: 'ERR_LEAF_MANIFEST_BODY' });
         }
+        // Store a neutral body so every viewer of this account shares one
+        // upstream fetch even when their signed application states differ.
         const sanitizedBody = sanitizeManifestBody(rawBody, res.url || targetUrl);
+        const completedAt = Date.now();
+        const hardExpiry = Math.min(credentialExpiresAt, tokenExpiresAt(res.url || targetUrl));
+        if (completedAt >= hardExpiry) throw expiredTokenError();
 
-        // LRU-style map eviction if cache grows beyond 1000 items
-        if (manifestCache.size >= 1000) {
-          const oldestKey = manifestCache.keys().next().value;
-          manifestCache.delete(oldestKey);
-        }
-
-        manifestCache.set(targetUrl, {
+        const entry = {
           body: sanitizedBody,
-          expiresAt: Date.now() + MANIFEST_CACHE_TTL_MS,
-          staleUntil: Date.now() + FALLBACK_TTL_MS
-        });
+          sourceUrl: res.url || targetUrl,
+          expiresAt: Math.min(completedAt + MANIFEST_CACHE_TTL_MS, hardExpiry),
+          staleUntil: Math.min(completedAt + FALLBACK_TTL_MS, hardExpiry)
+        };
+        storeManifestEntry(key, entry);
 
-        return sanitizedBody;
+        return entry;
       } catch (err) {
+        const failedAt = Date.now();
+        const temporary = isTransientFetchFailure(err);
+        const throttled = temporary && err.upstreamStatus === 429;
+        if (temporary) {
+          const delay = throttled
+            ? Math.max(1000, Math.min(MAX_RETRY_AFTER_MS, err.retryAfterMs || 30000)) : RETRY_BACKOFF_MS;
+          const entry = cached || { body: null, expiresAt: 0, staleUntil: 0 };
+          entry.retryUntil = failedAt + delay;
+          entry.retryFailure = { code: failureCode(err),
+            ...(Number.isInteger(err.upstreamStatus) ? { upstreamStatus: err.upstreamStatus } : {}) };
+          storeManifestEntry(key, entry);
+        }
         // Only transient transport/server failures may reuse a short-lived
         // window. Authorization, guard and malformed-body failures stay errors.
-        if (cached && isTransientFetchFailure(err) && Date.now() < cached.staleUntil) {
+        if (cached?.body && temporary && failedAt < cached.staleUntil) {
           // Extend cache expiration by 2s backoff to avoid immediate retry stampede
-          cached.expiresAt = Date.now() + 2000;
-          return cached.body;
+          cached.expiresAt = Math.min(failedAt + RETRY_BACKOFF_MS, cached.staleUntil, credentialExpiresAt);
+          return cached;
         }
-        manifestCache.delete(targetUrl);
+        if (!temporary) manifestCache.delete(key);
         throw err;
       } finally {
-        inFlightFetches.delete(targetUrl);
+        if (inFlightFetches.get(key) === fetchPromise) inFlightFetches.delete(key);
       }
     });
 
-    inFlightFetches.set(targetUrl, fetchPromise);
+    inFlightFetches.set(key, fetchPromise);
   }
 
-  return fetchPromise;
+  const result = await fetchPromise;
+  return withStateContext(result.body, context, result.sourceUrl || targetUrl);
 }
 
 /**
@@ -347,9 +475,8 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
     return res.status(200).send(playlist);
   } catch (err) {
     // Fetch errors can contain signed URLs; log only the failure class.
-    console.error('[LeafManifest] Failed to resolve Leaf playlist:', err.code || 'ERR_LEAF_UPSTREAM');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(err.code === 'ERR_LEAF_MANIFEST_URL' ? 400 : 502).send('Failed to resolve Leaf playlist');
+    console.error('[LeafManifest] Failed to resolve Leaf playlist:', failureCode(err));
+    return sendFailure(res, err);
   }
 });
 
@@ -361,7 +488,7 @@ router.get(['/api/leaf/manifest.m3u8', '/api/leaf/live.m3u8'], async (req, res) 
  * is rejected and backed off. The route never generates a replacement identity or
  * retries an upstream denial with a cache buster.
  */
-async function resolveViaState(stateToken) {
+async function resolveViaState(stateToken, query = {}) {
   const payload = leafState.verify(stateToken);
   if (!payload) {
     throw Object.assign(new Error('Invalid or expired leaf state'), {
@@ -369,16 +496,47 @@ async function resolveViaState(stateToken) {
     });
   }
 
+  const install = resolveLeafInstallConfig();
+  let childUrl = query.url;
+  if (childUrl !== undefined) {
+    validateTargetUrl(childUrl);
+    if (query.i !== installFingerprint(install)) {
+      throw Object.assign(new Error('Leaf child playlist account changed'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
+    }
+  }
   const minted = await leafMint.mintUrl(payload.m, payload.s);
+  if (childUrl !== undefined) {
+    const parent = new URL(minted);
+    const child = new URL(childUrl);
+    const directory = parent.pathname.slice(0, parent.pathname.lastIndexOf('/') + 1);
+    // A state child must never mint or select a different channel. Other
+    // upstream layouts retain the existing guarded URL route when emitted.
+    if (child.origin !== parent.origin || !child.pathname.startsWith(directory) ||
+        /%(?:2f|5c|2e)/i.test(child.pathname)) {
+      throw Object.assign(new Error('Invalid Leaf child playlist context'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
+    }
+    if (query.f === '1') {
+      const auth = rawManifestAuth(parent);
+      if (!auth) throw Object.assign(new Error('Leaf child playlist credential changed'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
+      const hashAt = childUrl.indexOf('#');
+      const hash = hashAt < 0 ? '' : childUrl.slice(hashAt);
+      const withoutHash = hashAt < 0 ? childUrl : childUrl.slice(0, hashAt);
+      const queryAt = withoutHash.indexOf('?');
+      const rest = queryAt < 0 ? [] : withoutHash.slice(queryAt + 1).split('&').filter(part => {
+        try { return decodeURIComponent(part.split('=')[0]) !== 'ft'; } catch (_) { return true; }
+      });
+      childUrl = `${queryAt < 0 ? withoutHash : withoutHash.slice(0, queryAt)}?${[...rest, auth].join('&')}${hash}`;
+    }
+  }
   try {
-    return { playlist: await getOrFetchLiveManifest(minted), payload };
+    return { playlist: await getOrFetchLiveManifest(childUrl || minted, { install, stateToken, mintedUrl: minted }), payload };
   } catch (err) {
     // An upstream denial or invalid body is not permission to bypass it by
     // re-minting with a cache buster. Discard that credential and back off.
-    if (!isTransientFetchFailure(err)) {
-      leafMint.invalidate(payload.m, payload.s);
+    if (childUrl === undefined && !isTransientFetchFailure(err)) {
+      leafMint.invalidate(payload.m, payload.s, { base: install.apiBase });
       leafMint.noteFailure(payload.m, payload.s, {
-        reason: err?.code || 'ERR_LEAF_PLAYLIST'
+        reason: err?.code || 'ERR_LEAF_PLAYLIST', error: err, base: install.apiBase
       });
     }
     throw err;
@@ -387,18 +545,16 @@ async function resolveViaState(stateToken) {
 
 router.get(['/api/leaf/m3u8/:state/index.m3u8', '/api/leaf/m3u8/:state'], async (req, res) => {
   try {
-    const { playlist } = await resolveViaState(req.params.state);
+    const { playlist } = await resolveViaState(req.params.state, req.query);
     if (!playlist) throw new Error('empty playlist');
     res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     return res.status(200).send(playlist);
   } catch (err) {
-    const status = err.statusCode || 502;
-    if (status >= 500) console.warn('[LeafManifest] state route failed:', err.code || 'ERR_LEAF_UPSTREAM');
-    if (err.retryAfterMs) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(err.retryAfterMs / 1000))));
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    return res.status(status).send(status === 400 ? 'Invalid leaf state' : 'Failed to resolve Leaf playlist');
+    const status = err.statusCode || (isTransientFetchFailure(err) ? 503 : 502);
+    if (status >= 500) console.warn('[LeafManifest] state route failed:', failureCode(err));
+    return sendFailure(res, err, true);
   }
 });
 

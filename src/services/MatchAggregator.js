@@ -1922,10 +1922,19 @@ class MatchAggregator {
         const scheduleBrokeFor = (srcName) => this.providers.some((p) =>
           p && p.sourceName === srcName && p.lastScheduleOk === false);
 
-        if (usedProvider(provider) && !scheduleBrokeFor(provider)) continue; // provider answered fully; nothing to carry
+        // Leaf's live catalog is authoritative even when it is empty. Only a
+        // failed/unverified fetch may retain its previous sources.
+        const leafCatalogOk = provider === 'leaf'
+          ? this.providers.find((p) => p && p.sourceName === 'leaf')?.lastCatalogOk
+          : undefined;
+        if (leafCatalogOk === true) continue;
+
+        if (usedProvider(provider) && !scheduleBrokeFor(provider) && leafCatalogOk !== false) continue; // provider answered fully; nothing to carry
 
         if (scheduleBrokeFor(provider)) {
           console.warn(`[MatchAggregator] ${provider} schedule fetch failed this sync; carrying forward its previous entries.`);
+        } else if (leafCatalogOk === false) {
+          console.warn('[MatchAggregator] leaf catalog fetch failed this sync; carrying forward its previous entries.');
         }
 
         // Priority is pure per-entry data: decorate once (Schwartzian transform)

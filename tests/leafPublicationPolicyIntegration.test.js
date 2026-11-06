@@ -23,7 +23,7 @@ test.each([
   'https://papacito.cfd/m3u/fixture/live.m3u8#fragment?ft=fixture'
 ])('unsupported target does not publish a broken tile or discard an adjacent valid source: %s', async url => {
   const valid = 'https://papacito.cfd/m3u/valid/live.m3u8?ft=fixture%2Fone&x=two%2Bthree';
-  safeFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ streams: [
+  safeFetch.mockResolvedValue({ ok: true, status: 200, text: async () => '#EXTM3U\n#EXTINF:6,\nsegment.ts\n', json: async () => ({ streams: [
     { name: 'Unsupported', url }, { name: 'Valid', url: valid }
   ] }) });
   const streams = await new LeafProvider().resolveStream('fixture-id');
@@ -38,7 +38,7 @@ test.each([
 
 test('a permitted subdomain publishes application state without forwarding its upstream credential', async () => {
   const valid = 'https://gateway.papacito.cfd/m3u/fixture/live.m3u8?ft=one%2Ftwo&x=three%2Bfour';
-  safeFetch.mockResolvedValue({ ok: true, status: 200, json: async () => ({ streams: [{ name: 'Valid', url: valid }] }) });
+  safeFetch.mockResolvedValue({ ok: true, status: 200, text: async () => '#EXTM3U\n#EXTINF:6,\nsegment.ts\n', json: async () => ({ streams: [{ name: 'Valid', url: valid }] }) });
   const streams = await new LeafProvider().resolveStream('fixture-id');
   expect(streams).toHaveLength(1);
   const token = new URL(streams[0].url).pathname.split('/')[4];

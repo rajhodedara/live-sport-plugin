@@ -7,6 +7,7 @@ jest.mock('../src/services/StreamedWasmPool', () => ({
 'use strict';
 
 const leafMint = require('../src/services/LeafMint');
+const { resetAccountRateLimits } = require('../src/services/LeafRateLimitState');
 jest.mock('../src/services/ProviderOutbound', () => ({ safeFetch: jest.fn() }));
 const LeafRecapProvider = require('../src/providers/LeafRecapProvider');
 const impitClient = require('../src/services/ProviderOutbound');
@@ -23,6 +24,7 @@ describe('LeafRecapProvider Unit Tests', () => {
   let safeFetchSpy;
 
   beforeEach(() => {
+    resetAccountRateLimits();
     process.env.LEAF_INSTALL_CONFIG = TEST_CONFIG;
     delete process.env.LEAF_API_URL;
     provider = new LeafRecapProvider();

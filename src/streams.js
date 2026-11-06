@@ -309,7 +309,7 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'leaf') {
     const provider = container.resolve('leafProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, { ...opts, matchId: match.id });
   } else if (sourceName === 'leaf_recap') {
     const provider = container.resolve('leafRecapProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);

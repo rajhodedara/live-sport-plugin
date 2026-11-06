@@ -279,10 +279,18 @@ class CronService {
    * fixtures still use pruneStreamCache(), which removes every source.
    */
   _invalidateOverlayMatch(matchId) {
+    const target = String(matchId);
+    // Provider entries use upstream IDs, so let Leaf clear only entries that
+    // it associated with this canonical fixture and fence their pending work.
+    try {
+      const leaf = (this.matchAggregator?.providers || []).find((provider) =>
+        provider && provider.sourceName === 'leaf');
+      if (typeof leaf?.clearCacheForMatch === 'function') leaf.clearCacheForMatch(target);
+    } catch (_) { /* private-cache hygiene must not prevent outer eviction */ }
+
     try {
       const cache = this.streamResolveCache;
       if (!cache || !cache.entries || typeof cache.entries.delete !== 'function') return 0;
-      const target = String(matchId);
       let dropped = 0;
       for (const [key, entry] of cache.entries) {
         if (typeof key === 'string' && key.startsWith('leaf:') &&
