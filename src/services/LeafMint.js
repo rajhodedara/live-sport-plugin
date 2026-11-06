@@ -55,12 +55,18 @@ function toBase64Url(json) {
 
 function extractOrigin(rawInput) {
   if (!rawInput || typeof rawInput !== 'string') return null;
-  const trimmed = rawInput.trim();
+  let trimmed = rawInput.trim();
+  if (!/^https?:\/\//i.test(trimmed) && /(?:[a-z0-9-]+\.)*highfly\.(?:to|dev)/i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
   if (/^https?:\/\//i.test(trimmed)) {
     try {
       const u = new URL(trimmed);
       return u.origin;
     } catch (_) {}
+  }
+  if (UUID_REGEX.test(trimmed)) {
+    return 'https://premium.highfly.to';
   }
   return null;
 }
@@ -69,11 +75,11 @@ function extractOrigin(rawInput) {
  * Robust normalizer for LEAF_INSTALL_CONFIG / LEAF_FREE_USER_ID.
  * Handles:
  *  - Full URLs: https://sports.highfly.to/bbecb026-6920-4b62-b006-ddd3eeb31e8d.6bd757136d146439/manifest.json
- *  - Highfly Premium URLs: https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json
+ *  - Highfly Premium URLs: https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json
  *  - Raw JSON string: {"freeUserId":"..."}
  *  - Pre-encoded base64url JSON blob: eyJmcmVlVXNlcklkIjoi...
  *  - Bare token string: bbecb026-6920-4b62-b006-ddd3eeb31e8d.6bd757136d146439
- *  - Bare UUID token: bff8de7f-67bc-49e0-99e3-fefecee64abb
+ *  - Bare UUID token: a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d
  *
  * @param {string} rawInput
  * @returns {string} base64url or segment config string
@@ -97,7 +103,8 @@ function normalizeConfigBlob(rawInput) {
       }
     } catch (_) {}
   }
-  input = input.replace(/\/manifest\.json$/i, '').replace(/^\/+|\/+$/g, '');
+  input = input.replace(/(?:^|\/)manifest\.json$/i, '').replace(/^\/+|\/+$/g, '');
+  if (!input) return '';
 
   // Check if input is already base64url-encoded JSON with freeUserId
   try {
@@ -236,8 +243,12 @@ async function mintUrl(matchId, slug, opts = {}) {
   const base = apiBase();
   const key = keyOf(matchId, slug, base);
 
-  // If force is NOT set, honor active cooldown
+  // If force is NOT set, check cache first!
   if (!opts.force) {
+    const hit = mintCache.get(key);
+    if (hit && Date.now() - hit.at < MINT_TTL_MS) {
+      return hit.url;
+    }
     const remaining = cooldownRemaining(matchId, slug);
     if (remaining > 0) {
       const err = Object.assign(new Error('Leaf mint is cooling down'), { code: 'ERR_LEAF_MINT_COOLDOWN' });
@@ -245,8 +256,6 @@ async function mintUrl(matchId, slug, opts = {}) {
       err.retryAfterMs = remaining;
       throw err;
     }
-    const hit = mintCache.get(key);
-    if (hit && Date.now() - hit.at < MINT_TTL_MS) return hit.url;
   } else {
     // If forcing, clear prior failure state for this key
     fails.delete(key);
@@ -263,6 +272,7 @@ async function mintUrl(matchId, slug, opts = {}) {
         const hit = mintCache.get(key);
         if (hit && hit.url) {
           console.warn(`[LeafMint] Upstream rate limit hit for ${matchId}/${slug || ''}; preserving cached Papacito URL`);
+          hit.at = Date.now();
           return hit.url;
         }
       }

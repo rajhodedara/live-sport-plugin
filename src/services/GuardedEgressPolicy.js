@@ -15,7 +15,8 @@ function isLeafTarget(value) {
                     host === 'highfly.dev' || host.endsWith('.highfly.dev');
   return isHighfly ||
     ((host === 'papacito.cfd' || host.endsWith('.papacito.cfd')) &&
-      host !== 'w1.papacito.cfd' && !host.endsWith('.w1.papacito.cfd'));
+      host !== 'w1.papacito.cfd' && !host.endsWith('.w1.papacito.cfd') &&
+      host !== 'east.papacito.cfd' && !host.endsWith('.east.papacito.cfd'));
 }
 
 function isDamitvTarget(value) {

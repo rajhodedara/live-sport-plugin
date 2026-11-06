@@ -5,7 +5,8 @@ const LeafProvider = require('../src/providers/LeafProvider');
 const { isLeafTarget } = require('../src/services/GuardedEgressPolicy');
 const {
   sanitizeManifestBody,
-  parseUpstreamManifest
+  parseUpstreamManifest,
+  isTransientFetchFailure
 } = require('../src/routes/leafManifest');
 
 describe('Leaf Followup - Premium URL, Origin & Token Normalization', () => {
@@ -24,26 +25,26 @@ describe('Leaf Followup - Premium URL, Origin & Token Normalization', () => {
   });
 
   test('normalizes official Highfly Premium subscription URL', () => {
-    const premiumUrl = 'https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json';
+    const premiumUrl = 'https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json';
     const normalized = leafMint.normalizeConfigBlob(premiumUrl);
-    expect(normalized).toBe('bff8de7f-67bc-49e0-99e3-fefecee64abb');
+    expect(normalized).toBe('a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
   });
 
   test('normalizes regional Highfly subdomains (us2, eu1, dev)', () => {
     const urls = [
-      'https://premium-us2.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json',
-      'https://premium-eu1.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json',
-      'https://sports.highfly.dev/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json',
-      'https://highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb'
+      'https://premium-us2.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json',
+      'https://premium-eu1.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json',
+      'https://sports.highfly.dev/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json',
+      'https://highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'
     ];
 
     for (const url of urls) {
-      expect(leafMint.normalizeConfigBlob(url)).toBe('bff8de7f-67bc-49e0-99e3-fefecee64abb');
+      expect(leafMint.normalizeConfigBlob(url)).toBe('a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
     }
   });
 
   test('preserves bare UUID without wrapping into base64url freeUserId', () => {
-    const uuid = 'bff8de7f-67bc-49e0-99e3-fefecee64abb';
+    const uuid = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
     expect(leafMint.normalizeConfigBlob(uuid)).toBe(uuid);
   });
 
@@ -54,21 +55,41 @@ describe('Leaf Followup - Premium URL, Origin & Token Normalization', () => {
     expect(decoded).toEqual({ freeUserId: freeToken });
   });
 
+  test('normalizes root manifest.json to empty string', () => {
+    expect(leafMint.normalizeConfigBlob('https://sports.highfly.to/manifest.json')).toBe('');
+    expect(leafMint.normalizeConfigBlob('https://premium.highfly.to/manifest.json')).toBe('');
+    expect(leafMint.normalizeConfigBlob('manifest.json')).toBe('');
+  });
+
+  test('extractOrigin resolves origin from full URLs, schemeless domains, and bare UUIDs', () => {
+    expect(leafMint.extractOrigin('https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json')).toBe('https://premium.highfly.to');
+    expect(leafMint.extractOrigin('premium-us2.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d')).toBe('https://premium-us2.highfly.to');
+    expect(leafMint.extractOrigin('a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d')).toBe('https://premium.highfly.to');
+    expect(leafMint.extractOrigin('https://sports.highfly.to/')).toBe('https://sports.highfly.to');
+    expect(leafMint.extractOrigin('bbecb026-6920-4b62-b006-ddd3eeb31e8d.6bd757136d146439')).toBeNull();
+  });
+
   test('apiBase and LeafProvider.buildApiUrl automatically detect origin from full premium URL', () => {
-    process.env.LEAF_INSTALL_CONFIG = 'https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json';
-    expect(leafMint.apiBase()).toBe('https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb');
-    expect(LeafProvider.buildApiUrl()).toBe('https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb');
+    process.env.LEAF_INSTALL_CONFIG = 'https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json';
+    expect(leafMint.apiBase()).toBe('https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
+    expect(LeafProvider.buildApiUrl()).toBe('https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
+  });
+
+  test('apiBase automatically resolves bare UUID to premium origin', () => {
+    process.env.LEAF_INSTALL_CONFIG = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
+    expect(leafMint.apiBase()).toBe('https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
+    expect(LeafProvider.buildApiUrl()).toBe('https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
   });
 
   test('explicit LEAF_API_ORIGIN takes precedence over detected origin', () => {
-    process.env.LEAF_INSTALL_CONFIG = 'https://sports.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json';
+    process.env.LEAF_INSTALL_CONFIG = 'https://sports.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json';
     process.env.LEAF_API_ORIGIN = 'https://premium-dedicated.highfly.to';
-    expect(leafMint.apiBase()).toBe('https://premium-dedicated.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb');
+    expect(leafMint.apiBase()).toBe('https://premium-dedicated.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d');
   });
 
   test('LEAF_API_URL acts as complete override kill switch', () => {
     process.env.LEAF_API_URL = 'http://127.0.0.1:9/leaf-disabled/manifest.json';
-    process.env.LEAF_INSTALL_CONFIG = 'https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json';
+    process.env.LEAF_INSTALL_CONFIG = 'https://premium.highfly.to/a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d/manifest.json';
     expect(leafMint.apiBase()).toBe('http://127.0.0.1:9/leaf-disabled');
     expect(LeafProvider.buildApiUrl()).toBe('http://127.0.0.1:9/leaf-disabled');
   });
@@ -84,9 +105,10 @@ describe('Leaf Followup - Guarded Egress Policy', () => {
     expect(isLeafTarget('https://highfly.to/')).toBe(true);
   });
 
-  test('isLeafTarget recognizes papacito.cfd but excludes video CDN hosts (w1.papacito.cfd)', () => {
+  test('isLeafTarget recognizes papacito.cfd but excludes video CDN hosts (w1.papacito.cfd and east.papacito.cfd)', () => {
     expect(isLeafTarget('https://papacito.cfd/m3u/test/live.m3u8')).toBe(true);
     expect(isLeafTarget('https://w1.papacito.cfd/leaf/test/seg_1.ts')).toBe(false);
+    expect(isLeafTarget('https://east.papacito.cfd/leaf/test/seg_1.ts')).toBe(false);
     expect(isLeafTarget('https://unrelated-domain.com/')).toBe(false);
   });
 });
@@ -111,7 +133,7 @@ describe('Leaf Followup - Mint Cache TTL and Rate Limit Handling', () => {
   });
 
   test('mintUrl preserves existing cached Papacito URL when upstream rate limits', async () => {
-    process.env.LEAF_INSTALL_CONFIG = 'bff8de7f-67bc-49e0-99e3-fefecee64abb';
+    process.env.LEAF_INSTALL_CONFIG = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
     const matchId = 'streamed:test-rate-limit-match';
     const slug = 'test-slug-429';
     const cachedUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=initial-token-123`;
@@ -125,7 +147,7 @@ describe('Leaf Followup - Mint Cache TTL and Rate Limit Handling', () => {
   });
 
   test('mintUrl with force=true preserves cached URL if upstream responds with rate limit stub', async () => {
-    process.env.LEAF_INSTALL_CONFIG = 'bff8de7f-67bc-49e0-99e3-fefecee64abb';
+    process.env.LEAF_INSTALL_CONFIG = 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d';
     const matchId = 'streamed:test-force-rate-limit';
     const slug = 'test-slug-forced';
     const cachedUrl = `https://papacito.cfd/m3u/${slug}/live.m3u8?token=active-token`;
@@ -146,6 +168,12 @@ describe('Leaf Followup - Mint Cache TTL and Rate Limit Handling', () => {
     const result = await leafMint.mintUrl(matchId, slug, { force: true });
     expect(result).toBe(cachedUrl);
     spy.mockRestore();
+
+    // Verify that subsequent normal mintUrl call does NOT throw ERR_LEAF_MINT_COOLDOWN
+    // despite the active cooldown in fails map!
+    expect(leafMint.isCoolingDown(matchId, slug)).toBe(true);
+    const subsequentResult = await leafMint.mintUrl(matchId, slug);
+    expect(subsequentResult).toBe(cachedUrl);
   });
 });
 
@@ -204,5 +232,14 @@ https://w1.papacito.cfd/leaf/football-match/888/seg_51.ts?a=hash`;
     expect(cfParsed.slug).toBe('football-match');
     expect(cfParsed.session).toBe('888');
     expect(cfParsed.edge).toBe(51);
+  });
+
+  test('isTransientFetchFailure classifies rate limits and mint cooldowns as transient', () => {
+    expect(isTransientFetchFailure({ code: 'ERR_LEAF_MINT_RATE_LIMIT' })).toBe(true);
+    expect(isTransientFetchFailure({ code: 'ERR_LEAF_MINT_COOLDOWN' })).toBe(true);
+    expect(isTransientFetchFailure({ cooldown: true })).toBe(true);
+    expect(isTransientFetchFailure({ rateLimit: true })).toBe(true);
+    expect(isTransientFetchFailure({ upstreamStatus: 429 })).toBe(true);
+    expect(isTransientFetchFailure({ code: 'ERR_LEAF_UPSTREAM_DENIED' })).toBe(false);
   });
 });

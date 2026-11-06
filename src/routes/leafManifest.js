@@ -48,7 +48,9 @@ function isTransientFetchFailure(error) {
   return error?.leafTransient === true || error?.name === 'TimeoutError' ||
     TRANSIENT_NETWORK_CODES.has(error?.code) ||
     error?.upstreamStatus === 429 || error?.rateLimit === true ||
-    error?.code === 'ERR_LEAF_MINT_RATE_LIMIT';
+    error?.cooldown === true ||
+    error?.code === 'ERR_LEAF_MINT_RATE_LIMIT' ||
+    error?.code === 'ERR_LEAF_MINT_COOLDOWN';
 }
 
 /**
@@ -246,7 +248,16 @@ function parseUpstreamManifest(body, targetUrl) {
   }
 
   const firstMatch = matches[0];
-  const cdnBase = firstMatch[1] || (targetUrl ? new URL(targetUrl).origin : 'https://w1.papacito.cfd');
+  let defaultCdnBase = 'https://w1.papacito.cfd';
+  if (targetUrl) {
+    try {
+      const u = new URL(targetUrl);
+      if (!u.hostname.includes('papacito.cfd')) {
+        defaultCdnBase = u.origin;
+      }
+    } catch (_) {}
+  }
+  const cdnBase = firstMatch[1] || defaultCdnBase;
   const slug = firstMatch[2];
   const session = firstMatch[3];
   const edge = parseInt(firstMatch[4], 10);
@@ -397,4 +408,5 @@ module.exports.getOrFetchLiveManifest = getOrFetchLiveManifest;
 module.exports.parseUpstreamManifest = parseUpstreamManifest;
 module.exports.generateSlidingPlaylist = generateSlidingPlaylist;
 module.exports.manifestCache = manifestCache;
+module.exports.isTransientFetchFailure = isTransientFetchFailure;
 module.exports.sessionCache = sessionCache;
