@@ -226,10 +226,10 @@ describe('Leaf HLS URI and signed-state context', () => {
       '#EXTINF:6,\n//cdn.example.test/path.ts?a=direct\n';
     const output = route.sanitizeManifestBody(input, 'https://papacito.cfd/redirected/channel/live.m3u8?ft=private');
     expect(output).toContain('URI="https://papacito.cfd/redirected/keys/a.bin?k=one%2Ftwo"');
-    expect(output).toContain('URI="https://papacito.cfd/redirected/channel/init.mp4?a=one%2Btwo"');
-    expect(output).toContain('URI="https://papacito.cfd/redirected/channel/part.m4s?a=part"');
-    expect(output).toContain('https://papacito.cfd/redirected/channel/segment.ts?a=signed%2Fhash&t=123');
-    expect(output).toContain('https://papacito.cfd/root.ts?a=root');
+    expect(output).toContain('URI="https://w1.papacito.cfd/redirected/channel/init.mp4?a=one%2Btwo"');
+    expect(output).toContain('URI="https://w1.papacito.cfd/redirected/channel/part.m4s?a=part"');
+    expect(output).toContain('https://w1.papacito.cfd/redirected/channel/segment.ts?a=signed%2Fhash&t=123');
+    expect(output).toContain('https://w1.papacito.cfd/root.ts?a=root');
     expect(output).toContain('https://cdn.example.test/path.ts?a=direct');
     expect(output).not.toContain('ft=private');
     expect(output).not.toContain('/api/leaf/');
@@ -247,7 +247,50 @@ describe('Leaf HLS URI and signed-state context', () => {
     expect(output).toContain(proxy('https://papacito.cfd/m3u/channel/iframe.m3u8?ft=child%2Ftoken'));
     expect(output).toContain(proxy('https://papacito.cfd/m3u/channel/video.m3u8?x=one%2Btwo&ft=raw%2ftoken'));
     expect(output).toContain(proxy('https://other.papacito.cfd/foreign.m3u8?x=one'));
-    expect(output).toContain('\nhttps://papacito.cfd/m3u/channel/segment.ts?a=direct\n');
+    expect(output).toContain('\nhttps://w1.papacito.cfd/m3u/channel/segment.ts?a=direct\n');
+  });
+
+  test('apex relative media uses w1 while preserving raw signatures and playlist paths', () => {
+    const input = '#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI="key.bin?x=one%2Ftwo"\n' +
+      '#EXT-X-MAP:URI="init.mp4?x=one%2Btwo"\n#EXT-X-PART:URI="part.m4s?a=first%2Fpart"\n' +
+      '#EXT-X-PRELOAD-HINT:TYPE=PART,URI="future.m4s?a=next%2Bpart"\n' +
+      '#EXT-X-PRELOAD-HINT:TYPE=MAP,URI="next-init.mp4?x=next%2Fmap"\n' +
+      '#EXT-X-MAP:URI="https://edge.papacito.cfd/absolute-init.mp4?x=own"\n' +
+      '#EXT-X-MAP:URI="//other.papacito.cfd/network-init.mp4?x=own"\n' +
+      '#EXTINF:6,\n/leaf/channel/seg_1.ts?a=one%2Ftwo&t=x%2By\n' +
+      '#EXTINF:6,\nleaf/channel/seg_2.ts?a=two%2Fthree\n' +
+      '#EXTINF:6,\n../seg_3.ts?a=three%2Ffour\n' +
+      '#EXTINF:6,\nhttps://papacito.cfd/direct.ts?a=absolute\n' +
+      '#EXTINF:6,\n//edge.papacito.cfd/direct.ts?a=protocol\n' +
+      '#EXT-X-STREAM-INF:BANDWIDTH=1\nchild.m3u8?x=one%2Ftwo\n';
+    const body = route.sanitizeManifestBody(input, 'https://papacito.cfd/m3u/channel/live.m3u8?ft=parent%2Fcredential');
+    expect(body).toContain('URI="https://papacito.cfd/m3u/channel/key.bin?x=one%2Ftwo"');
+    expect(body).toContain('URI="https://w1.papacito.cfd/m3u/channel/init.mp4?x=one%2Btwo"');
+    expect(body).toContain('URI="https://w1.papacito.cfd/m3u/channel/part.m4s?a=first%2Fpart"');
+    expect(body).toContain('URI="https://w1.papacito.cfd/m3u/channel/future.m4s?a=next%2Bpart"');
+    expect(body).toContain('URI="https://w1.papacito.cfd/m3u/channel/next-init.mp4?x=next%2Fmap"');
+    expect(body).toContain('URI="https://edge.papacito.cfd/absolute-init.mp4?x=own"');
+    expect(body).toContain('URI="https://other.papacito.cfd/network-init.mp4?x=own"');
+    expect(body).toContain('https://w1.papacito.cfd/leaf/channel/seg_1.ts?a=one%2Ftwo&t=x%2By');
+    expect(body).toContain('https://w1.papacito.cfd/leaf/channel/seg_2.ts?a=two%2Fthree');
+    expect(body).toContain('https://w1.papacito.cfd/m3u/seg_3.ts?a=three%2Ffour');
+    expect(body).toContain('https://papacito.cfd/direct.ts?a=absolute');
+    expect(body).toContain('https://edge.papacito.cfd/direct.ts?a=protocol');
+    expect(body).toContain('/api/leaf/manifest.m3u8?url=' + encodeURIComponent('https://papacito.cfd/m3u/channel/child.m3u8?x=one%2Ftwo&ft=parent%2Fcredential'));
+  });
+
+  test.each([
+    'https://east.papacito.cfd/m3u/channel/live.m3u8',
+    'https://bunny.example.test/m3u/channel/live.m3u8',
+    'https://papacito.cfd.example.test/m3u/channel/live.m3u8',
+    'http://papacito.cfd/m3u/channel/live.m3u8',
+    'https://papacito.cfd:8443/m3u/channel/live.m3u8'
+  ])('a non-apex playlist retains its own relative media origin: %s', base => {
+    const body = route.sanitizeManifestBody('#EXTM3U\n#EXT-X-MAP:URI="init.mp4?x=map"\n#EXT-X-PRELOAD-HINT:TYPE=MAP,URI="future.mp4?x=next"\n#EXTINF:6,\nsegment.ts?a=one%2Ftwo\n', base);
+    expect(body).toContain(new URL('segment.ts?a=one%2Ftwo', base).href);
+    expect(body).toContain(new URL('init.mp4?x=map', base).href);
+    expect(body).toContain(new URL('future.mp4?x=next', base).href);
+    expect(body).not.toContain('w1.papacito.cfd');
   });
 
   test('child playlist proxies retain signed application state and direct media URLs', async () => {

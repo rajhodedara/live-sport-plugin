@@ -163,6 +163,19 @@ function sanitizeManifestBody(body, targetUrl = 'https://w1.papacito.cfd/') {
 
   const lines = body.split('\n');
   const resolveUri = uri => /^[a-z][a-z0-9+.-]*:/i.test(uri) ? uri : new URL(uri, targetUrl).href;
+  const resolveMediaUri = uri => {
+    // Papacito's apex serves playlists while its w1 host serves media. Only
+    // rewrite relative media from this exact HTTPS apex: absolute URLs,
+    // protocol-relative URLs and other playlist origins retain their hosts.
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(uri)) return resolveUri(uri);
+    const base = new URL(targetUrl);
+    if (base.protocol !== 'https:' || base.hostname !== 'papacito.cfd' || base.port || base.username || base.password) return resolveUri(uri);
+    base.hostname = 'w1.papacito.cfd';
+    // Older Papacito playlists supply `leaf/...` as a CDN-root path without
+    // the leading slash. Retain that upstream convention; other relative
+    // paths still resolve against the actual playlist directory.
+    return new URL(/^leaf\//.test(uri) ? '/' + uri : uri, base).href;
+  };
   const playlistUri = uri => {
     let absolute = resolveUri(uri);
     const parent = new URL(targetUrl);
@@ -196,8 +209,10 @@ function sanitizeManifestBody(body, targetUrl = 'https://w1.papacito.cfd/') {
       }
       if (trimmed.startsWith('#EXTINF:')) isNextLineMedia = true;
       const childDirective = /^#EXT-X-(?:MEDIA|I-FRAME-STREAM-INF|IMAGE-STREAM-INF|RENDITION-REPORT):/.test(trimmed);
+      const mediaDirective = /^#EXT-X-(?:PART|MAP):/.test(trimmed) ||
+        (/^#EXT-X-PRELOAD-HINT:/.test(trimmed) && /\bTYPE=(?:PART|MAP)(?:,|$)/.test(trimmed));
       sanitizedLines.push(trimmed.replace(/\bURI="([^"]*)"/g, (_match, uri) =>
-        `URI="${childDirective ? playlistUri(uri) : resolveUri(uri)}"`));
+        `URI="${childDirective ? playlistUri(uri) : mediaDirective ? resolveMediaUri(uri) : resolveUri(uri)}"`));
       continue;
     }
 
@@ -213,7 +228,7 @@ function sanitizeManifestBody(body, targetUrl = 'https://w1.papacito.cfd/') {
 
     // Media segment URL: ensure absolute URL while preserving all query parameters (?a=..., ?t=...)
     isNextLineMedia = false;
-    sanitizedLines.push(absoluteUri);
+    sanitizedLines.push(resolveMediaUri(trimmed));
   }
 
   return sanitizedLines.join('\n') + '\n';
