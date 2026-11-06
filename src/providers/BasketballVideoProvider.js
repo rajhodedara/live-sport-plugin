@@ -21,6 +21,23 @@ function isNbaOnTvUrl(value, baseUrl) {
   }
 }
 
+function isBridgeUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+      return false;
+    }
+    const h = url.hostname.toLowerCase();
+    return isNbaOnTvUrl(value, baseUrl) ||
+      h === 'nhlgamestoday.com' || h.endsWith('.nhlgamestoday.com') ||
+      h === 'guidedesgemmes.com' || h.endsWith('.guidedesgemmes.com') ||
+      h === 'guideanimaux.com' || h.endsWith('.guideanimaux.com') ||
+      h === 'nflontv.com' || h.endsWith('.nflontv.com');
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * BasketballVideoProvider
  *
@@ -178,6 +195,7 @@ class BasketballVideoProvider extends BaseProvider {
   async getMatches() {
     const endpoints = [
       `${this.baseUrl}/`,
+      `${this.baseUrl}/2026-27`,
       `${this.baseUrl}/2024-25`,
       `${this.baseUrl}/2025-26`,
       `${this.baseUrl}/wnba-video-fulll`,
@@ -225,41 +243,66 @@ class BasketballVideoProvider extends BaseProvider {
       // Extract watch, quarter, and part links
       const linkMatches = [...content.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
       const watchLinks = linkMatches.filter(l => {
-        const dest = l[1] || '';
-        const text = l[2].replace(/<[^>]+>/g, '').trim();
-        const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || isNbaOnTvUrl(dest, targetUrl) || /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
-        const isVideoText = /watch|part|server|quarter|half|replay|full game/i.test(text);
+        const dest = (l[1] || "").trim();
+        const text = l[2].replace(/<[^>]+>/g, "").trim();
+        if (!dest) return false;
+
+        // Skip internal navigation and season category links on basketball-video.com
+        if ((dest.startsWith("/") && !dest.startsWith("//")) || (dest.includes("basketball-video.com") && !dest.includes("#"))) {
+          if (!this._isByseUrl(dest) && !dest.includes("ok.ru") && !/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
+            return false;
+          }
+        }
+
+        const isVideoDest = this._isByseUrl(dest) || dest.includes("ok.ru") || isNbaOnTvUrl(dest, targetUrl) ||
+          /nhlgamestoday|guidedesgemmes|guideanimaux|nflontv|vidara|dailymotion|dai\.ly|d\.tube/i.test(dest) ||
+          /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+        const isVideoText = /watch|part|server|quarter|half|replay|full game|^ok$|^fm$|^dm$/i.test(text);
         return isVideoDest || isVideoText;
       });
 
       const iframeMatches = [...content.matchAll(/<iframe[^>]+src="([^"]+)"/gi)];
       for (const ifm of iframeMatches) {
-        watchLinks.push([null, ifm[1], 'Embed Player']);
+        watchLinks.push([null, ifm[1], "Embed Player"]);
       }
 
       const byseStreams = [];
       const okStreams = [];
       const directStreams = [];
+      const seenUrls = new Set();
 
       for (let i = 0; i < watchLinks.length; i++) {
         let dest = watchLinks[i][1];
-        const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
-        const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
+        const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+        let partName = rawPart ? rawPart.replace(/\s+/g, " ") : ("Part " + (i + 1));
+
+        // If partName is just generic "Watch", attempt to find preceding server heading in content HTML
+        if (/^watch$/i.test(partName)) {
+          const safeDest = dest.split("?")[0].split("#")[0];
+          const preIdx = content.indexOf(safeDest);
+          if (preIdx > 0) {
+            const snippet = content.slice(Math.max(0, preIdx - 500), preIdx);
+            const headingMatches = [...snippet.matchAll(/<b>([^<]*(?:server|part|half|quarter|condensed|full)[^<]*)<\/b>/gi)];
+            if (headingMatches.length > 0) {
+              partName = headingMatches[headingMatches.length - 1][1].trim();
+            }
+          }
+        }
 
         try {
           const parsed = new URL(dest, targetUrl);
-          if (!['http:', 'https:'].includes(parsed.protocol)) continue;
+          if (!["http:", "https:"].includes(parsed.protocol)) continue;
           dest = parsed.href;
         } catch (_) {
           continue;
         }
 
-        // Unwrap nbaontv.com bridge wrappers
-        if (isNbaOnTvUrl(dest)) {
+        // Bridge unwrap (supports nbaontv.com, nhlgamestoday.com, guidedesgemmes.com, etc.)
+        if (isBridgeUrl(dest, targetUrl)) {
           try {
             const bridgeHtml = await this.fetchPage.fire(dest);
             const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
-              /\.(m3u8|mp4)$/i.test(url.pathname) || isByseHost(url.hostname) || matchesHost(url.hostname, 'ok.ru'));
+              /\.(m3u8|mp4)$/i.test(url.pathname) || isByseHost(url.hostname) || matchesHost(url.hostname, "ok.ru"));
             if (iframeUrl) dest = iframeUrl;
           } catch (_) {}
         }
@@ -268,29 +311,42 @@ class BasketballVideoProvider extends BaseProvider {
         if (this._isByseUrl(dest)) {
           const extracted = await this._extractByse(dest, partName);
           if (extracted && extracted.length > 0) {
-            byseStreams.push(...extracted);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                byseStreams.push(s);
+              }
+            }
             continue;
           }
         }
 
         // 2. OK.ru Direct Video Extraction (1080p, 720p, 480p, Auto HLS)
-        if (matchesHost(playerHostname(dest), 'ok.ru')) {
+        if (matchesHost(playerHostname(dest), "ok.ru")) {
           const extracted = await this._extractOkRu(dest, partName);
           if (extracted && extracted.length > 0) {
-            okStreams.push(...extracted);
+            for (const s of extracted) {
+              if (!seenUrls.has(s.url)) {
+                seenUrls.add(s.url);
+                okStreams.push(s);
+              }
+            }
             continue;
           }
         }
 
         // 3. Direct Media File
         if (/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
-          directStreams.push(new StreamEntity({
-            name: this.name,
-            title: `${partName} (Direct)`,
-            resolution: '1080p',
-            url: dest,
-            behaviorHints: { notWebReady: false }
-          }));
+          if (!seenUrls.has(dest)) {
+            seenUrls.add(dest);
+            directStreams.push(new StreamEntity({
+              name: this.name,
+              title: partName + " (Direct)",
+              resolution: "1080p",
+              url: dest,
+              behaviorHints: { notWebReady: false }
+            }));
+          }
         }
       }
 
