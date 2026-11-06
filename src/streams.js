@@ -13,6 +13,7 @@ const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream, isBlockedStream } = require('./services/StreamPolicy');
+const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
 
 let _liveOverlayRef;
 /**
@@ -1012,6 +1013,14 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           }
         } catch (_) {}
       }
+
+      // Verify and filter only a *known* low-tier PPV.st rendition. The
+      // provider catalog already removes its explicitly labelled SD/540p
+      // sources; a parsed HLS master may reveal a lower tier later.
+      // Unknown quality and every other provider remain untouched.
+      if (s._source === 'ppvst' && isLowPpvSourceMetadata({
+        resolution: s.resolution, quality: s.quality
+      })) return null;
 
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
