@@ -11,8 +11,71 @@ const cheerio = require('cheerio');
 const os = require('os');
 const { BREAKER_TIMEOUT_MS } = require('../services/CircuitBreakerService');
 const { createHash } = require('node:crypto');
+const { checkDaddyLiveMedia } = require('../services/DaddyLiveMediaCheck');
+const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
+const MEDIA_CHECK_BUDGET_MS = 1200;
+
+function throwIfStopped(control = {}) {
+  control.signal?.throwIfAborted();
+  control.mediaController?.signal.throwIfAborted();
+}
+
+function discoverySignal(control = {}) {
+  return AbortSignal.any([
+    AbortSignal.timeout(6000),
+    ...(control.signal ? [control.signal] : []),
+    ...(control.mediaController ? [control.mediaController.signal] : [])
+  ]);
+}
+
+function hardResolutionFailure(error) {
+  if (inconclusiveErrorReason(error)) return false;
+  try {
+    const seen = new Set();
+    for (let item = error; item && typeof item === 'object'; item = item.cause) {
+      if (seen.has(item) || seen.size >= 8) return true;
+      seen.add(item);
+      if (item.code === 'ERR_OUTBOUND_BLOCKED' || item.isFatal === true) return true;
+    }
+    return false;
+  } catch (_) { return true; }
+}
+
+function preserveResolutionFailure(error, control) {
+  control.signal?.throwIfAborted();
+  if (hardResolutionFailure(error)) throw error;
+  throwIfStopped(control);
+  if (inconclusiveErrorReason(error)) throw error;
+}
+
+async function boundedDiscovery(run, signal) {
+  signal.throwIfAborted();
+  let abort;
+  try {
+    return await Promise.race([Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return run();
+    }), new Promise((_, reject) => {
+      abort = () => reject(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    })]);
+  } finally { signal.removeEventListener('abort', abort); }
+}
+
+function discoveryRequest(provider, url, options, control) {
+  const signal = discoverySignal(control);
+  return boundedDiscovery(() => provider.proxyFetch(url, { ...options, signal }), signal);
+}
+
+function discoveryText(response, control) {
+  return boundedDiscovery(
+    () => typeof response.text === 'function' ? response.text() : response.text,
+    discoverySignal(control)
+  );
+}
 
 // A channel broadcasts many events, and one event can have many channels. Its
 // first feed therefore cannot identify the fixture. Retain that old ID as a
@@ -391,7 +454,8 @@ class DaddyLiveProvider extends BaseProvider {
    * @returns {{url: string, referer: string}|null} referer is the page the
    *          manifest was served from, so the caller can set Referer correctly.
    */
-  async _resolveFromHtml(html, pageUrl, depth = 0) {
+  async _resolveFromHtml(html, pageUrl, depth = 0, control = {}) {
+    throwIfStopped(control);
     if (!html || typeof html !== 'string') return null;
 
     // 1. DaddyLive _econfig
@@ -455,12 +519,11 @@ class DaddyLiveProvider extends BaseProvider {
       const sep = phpUrl.includes('?') ? '&' : '?';
       const callUrl = /[?&]id=/.test(phpUrl) ? phpUrl : phpUrl + sep + 'id=' + channelId;
       try {
-        const pr = await this.proxyFetch(callUrl, {
+        const pr = await discoveryRequest(this, callUrl, {
           headers: { 'User-Agent': UA, 'Referer': pageUrl, 'Accept': 'application/json,text/plain,*/*' },
-          signal: AbortSignal.timeout(6000)
-        });
+        }, control);
         if (pr.ok) {
-          const body = await pr.text();
+          const body = await discoveryText(pr, control);
           let target = null;
           try {
             const j = JSON.parse(body);
@@ -470,7 +533,7 @@ class DaddyLiveProvider extends BaseProvider {
             if (m) target = m[1];
           }
           if (target) {
-            const nested = await this._resolveFromUrl(target, pageUrl, depth + 1);
+            const nested = await this._resolveFromUrl(target, pageUrl, depth + 1, control);
             if (nested) {
               // This page needed the JSON hop; remember that about THIS host so a
               // newly-rotated wrapper is recognised next time.
@@ -479,7 +542,7 @@ class DaddyLiveProvider extends BaseProvider {
             }
           }
         }
-      } catch (_) {}
+      } catch (error) { preserveResolutionFailure(error, control); }
     }
 
     // 5. Nested iframe (recursive, bounded).
@@ -509,7 +572,7 @@ class DaddyLiveProvider extends BaseProvider {
       }
 
       for (const nestedUrl of ordered.slice(0, 3)) {
-        const nested = await this._resolveFromUrl(nestedUrl, pageUrl, depth + 1);
+        const nested = await this._resolveFromUrl(nestedUrl, pageUrl, depth + 1, control);
         if (nested) {
           this._learnHostStrategy(pageUrl, 'nested', 'wrapper');
           return nested;
@@ -525,10 +588,11 @@ class DaddyLiveProvider extends BaseProvider {
    * _resolveFromHtml so the JSON hop and the nested-iframe hop recurse through a
    * single code path with one shared depth counter.
    */
-  async _resolveFromUrl(embedUrl, referer, depth = 0) {
+  async _resolveFromUrl(embedUrl, referer, depth = 0, control = {}) {
+    throwIfStopped(control);
     if (!embedUrl || !/^https?:/i.test(embedUrl)) return null;
     try {
-      const res = await this.proxyFetch(embedUrl, {
+      const res = await discoveryRequest(this, embedUrl, {
         headers: {
           'User-Agent': UA,
           'Referer': referer,
@@ -537,11 +601,10 @@ class DaddyLiveProvider extends BaseProvider {
           'Sec-Fetch-Site': 'cross-site',
           'Accept': 'text/html,application/xhtml+xml,application/json,*/*;q=0.8'
         },
-        signal: AbortSignal.timeout(6000)
-      });
+      }, control);
       if (!res.ok) return null;
-      const html = await res.text();
-      const result = await this._resolveFromHtml(html, embedUrl, depth);
+      const html = await discoveryText(res, control);
+      const result = await this._resolveFromHtml(html, embedUrl, depth, control);
 
       // Self-healing: when THIS page supplied the manifest directly, the strategy
       // that worked is a fact about THIS host - remember it. Recursive strategies
@@ -551,7 +614,8 @@ class DaddyLiveProvider extends BaseProvider {
       }
 
       return result;
-    } catch (_) {
+    } catch (error) {
+      preserveResolutionFailure(error, control);
       return null;
     }
   }
@@ -952,7 +1016,18 @@ class DaddyLiveProvider extends BaseProvider {
     return matches;
   }
 
-  async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
+  async resolveStream(sourceId, matchCategory, matchTitle, src = {}, opts = {}) {
+    const control = { signal: opts?.signal };
+    try {
+      throwIfStopped(control);
+      return await this._resolveStreamWithMediaCheck(sourceId, matchCategory, matchTitle, src, control);
+    } finally {
+      clearTimeout(control.mediaTimer);
+      control.mediaController?.abort();
+    }
+  }
+
+  async _resolveStreamWithMediaCheck(sourceId, matchCategory, matchTitle, src, control) {
     const sId = String(sourceId);
     if (src && (src.forceRefresh || src.skipCache)) {
       this._decoded.delete(sId);
@@ -966,44 +1041,41 @@ class DaddyLiveProvider extends BaseProvider {
     const streams = [];
     const channelName = decodeHtmlEntities(src.channelName || '');
     let foundDirect = false;
+    let retryReason = null;
     // The folder probes are NOT interchangeable: for one channel they reach six
     // different iframe hosts, and only some of those families are on the segment
-    // CDN's Referer allow-list. A manifest whose terminal host the registry knows
-    // is therefore accepted immediately, while the first manifest that merely
-    // decodes is held as a fallback.
+    // CDN's Referer allow-list. After a media check succeeds, a registered
+    // terminal host is accepted; an unknown one remains a bounded fallback.
     //
-    // The scan is deliberately BOUNDED to that first decodable manifest: the
-    // folders are alternatives for the same channel, not a matrix to exhaust.
-    // Walking all of them costs 2 domains x 6 folders x (player + embed) fetches
-    // at a 6s timeout each, which stalls resolution for a minute on any channel
-    // whose terminal host the registry does not know. Later folders stay
-    // reachable for when a path stops serving — a rotated or 404ing folder
-    // yields no manifest, so the scan simply continues past it.
+    // Stop at the first checked candidate. Definitive media misses can reach
+    // later folders within one shared 1200ms validation phase. An inconclusive
+    // result stops the scan and keeps the web fallback briefly retryable.
     let fallbackStream = null;
 
     // Probe folders across mirror domains
     for (const base of this.baseDomains) {
-      if (foundDirect || fallbackStream) break;
+      if (foundDirect || fallbackStream || retryReason) break;
 
       for (const folder of this.folders) {
         // Stop at the first manifest rather than hunting the rest of the matrix
         // for a registry-known terminal host (see the bound explained above).
-        if (foundDirect || fallbackStream) break;
+        if (foundDirect || fallbackStream || retryReason) break;
 
         const playerUrl = `${base}/${folder}/stream-${sourceId}.php`;
         try {
-          const res = await this.proxyFetch(playerUrl, {
+          throwIfStopped(control);
+          const res = await discoveryRequest(this, playerUrl, {
             headers: {
               'User-Agent': UA,
               'Referer': `${base}/`,
               'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             },
-            signal: AbortSignal.timeout(6000)
-          });
+          }, control);
 
           if (!res.ok) continue;
 
-          const html = await res.text();
+          const html = await discoveryText(res, control);
+          throwIfStopped(control);
           const allIframeMatches = [...html.matchAll(/<iframe[^>]+src=["']?([^"'\s>]+)["']?/gi)].map((m) => m[1]);
           if (!allIframeMatches.length) continue;
 
@@ -1042,7 +1114,7 @@ class DaddyLiveProvider extends BaseProvider {
               let embedReferer = `${embedOrigin}/`;
 
               // Fetch the embed page
-              const embedRes = await this.proxyFetch(iframeUrl, {
+              const embedRes = await discoveryRequest(this, iframeUrl, {
                 headers: {
                   'User-Agent': UA,
                   'Referer': playerUrl,
@@ -1051,17 +1123,17 @@ class DaddyLiveProvider extends BaseProvider {
                   'Sec-Fetch-Site': 'cross-site',
                   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
                 },
-                signal: AbortSignal.timeout(6000)
-              });
+              }, control);
 
               if (!embedRes || !embedRes.ok) continue;
 
-              const embedHtml = typeof embedRes.text === 'function' ? await embedRes.text() : embedRes.text;
+              const embedHtml = await discoveryText(embedRes, control);
+              throwIfStopped(control);
               let m3u8Url = null;
 
               // Resolve via the shared helper: _econfig -> chain -> direct m3u8
               // -> JSON player hop -> nested iframe (recursive, up to 2 levels).
-              const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0);
+              const resolved = await this._resolveFromHtml(embedHtml, iframeUrl, 0, control);
               if (resolved && resolved.url && !isTikTokCloakedStream(resolved.url)) {
                 m3u8Url = resolved.url;
                 try {
@@ -1074,9 +1146,33 @@ class DaddyLiveProvider extends BaseProvider {
 
               if (m3u8Url) {
                 const registryReferer = this._terminalRefererFor(m3u8Url);
+                const referer = registryReferer || embedReferer;
+                if (!control.mediaController) {
+                  // One validation phase for all candidate checks. Later folder
+                  // and nested-page requests share its remaining budget too.
+                  control.mediaController = new AbortController();
+                  control.mediaDeadline = performance.now() + MEDIA_CHECK_BUDGET_MS;
+                  control.mediaTimer = setTimeout(() => control.mediaController.abort(
+                    new DOMException('DaddyLive media check deadline', 'TimeoutError')
+                  ), MEDIA_CHECK_BUDGET_MS);
+                }
+                throwIfStopped(control);
+                const checked = await checkDaddyLiveMedia(m3u8Url, {
+                  referer,
+                  origin: new URL(referer).origin,
+                  userAgent: UA,
+                  signal: discoverySignal(control),
+                  timeoutMs: Math.max(1, Math.ceil(control.mediaDeadline - performance.now()))
+                });
+                throwIfStopped(control);
+                if (checked.status === 'rejected') continue;
+                if (checked.status !== 'ok') {
+                  retryReason = checked.reason || 'unavailable';
+                  break;
+                }
                 const candidate = this._buildManifestStream(
                   m3u8Url,
-                  registryReferer || embedReferer,
+                  referer,
                   sourceId,
                   channelName
                 );
@@ -1088,12 +1184,20 @@ class DaddyLiveProvider extends BaseProvider {
                 }
                 if (!fallbackStream) fallbackStream = candidate;
               }
-            } catch (_) {
+            } catch (error) {
+              control.signal?.throwIfAborted();
+              if (hardResolutionFailure(error)) throw error;
+              const reason = inconclusiveErrorReason(error);
+              if (reason) { retryReason = reason; break; }
               // A single iframe failure must not skip the other candidates.
               continue;
             }
           }
-        } catch (_) {
+        } catch (error) {
+          control.signal?.throwIfAborted();
+          if (hardResolutionFailure(error)) throw error;
+          const reason = inconclusiveErrorReason(error);
+          if (reason) { retryReason = reason; break; }
           // Continue trying next folder/domain
         }
       }
@@ -1101,7 +1205,7 @@ class DaddyLiveProvider extends BaseProvider {
 
     if (!foundDirect && fallbackStream) streams.push(fallbackStream);
 
-    // Web player fallback if no direct stream was decrypted
+    // Web player fallback if no usable direct stream was found.
     if (streams.length === 0) {
       const fallbackUrl = `${this.baseDomains[0]}/stream/stream-${sourceId}.php`;
       const label = channelName ? `DaddyLive (${channelName}) (Web Player)` : `DaddyLive Stream ${sourceId} (Web Player)`;
@@ -1126,7 +1230,10 @@ class DaddyLiveProvider extends BaseProvider {
         tokenExp = extractTokenExpiry(target);
       } catch (_) {}
     }
-    const defaultTtl = 150 * 1000;
+    const retryableWeb = retryReason && !streams.some(row => row && row.url);
+    if (retryableWeb) markInconclusiveStreams(streams, retryReason);
+    control.signal?.throwIfAborted();
+    const defaultTtl = retryableWeb ? 2000 : 150 * 1000;
     const expiresAt = tokenExp && tokenExp > Date.now()
       ? Math.min(tokenExp - 45000, Date.now() + defaultTtl)
       : Date.now() + defaultTtl;

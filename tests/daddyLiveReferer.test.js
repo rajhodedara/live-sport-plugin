@@ -1,5 +1,9 @@
 'use strict';
 
+jest.mock('../src/services/DaddyLiveMediaCheck', () => ({
+  checkDaddyLiveMedia: jest.fn(async () => ({ status: 'ok' }))
+}));
+
 // The regression being pinned: when a decoded manifest lives on a host the
 // iframe-domain registry knows as a TERMINAL host, the Referer emitted for it
 // must be the registry's — not one derived from whichever iframe happened to

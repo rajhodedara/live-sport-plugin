@@ -226,7 +226,7 @@ function selectSources(matchSources, config, match = null) {
 
 // Ask one provider for its streams. Extracted from resolveSource so the whole
 // dispatch can be retried as a unit without duplicating the chain.
-async function dispatchToProvider(sourceName, src, match) {
+async function dispatchToProvider(sourceName, src, match, opts = {}) {
   let resStreams = [];
 
   if (sourceName === 'timstreams') {
@@ -273,7 +273,7 @@ async function dispatchToProvider(sourceName, src, match) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'daddylive') {
     const provider = container.resolve('daddyLiveProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
   } else if (sourceName === 'ppvst') {
     const provider = container.resolve('ppvStProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
@@ -349,7 +349,7 @@ async function resolveSource(src, match, config, opts = {}) {
     const deadlineAt = Date.now() + RESOLVE_TOTAL_BUDGET_MS;
     resStreams = await withRetry(() => {
       opts?.signal?.throwIfAborted();
-      return dispatchToProvider(sourceName, src, match);
+      return dispatchToProvider(sourceName, src, match, opts);
     }, {
       attempts: RESOLVE_ATTEMPTS,
       baseDelayMs: 300,

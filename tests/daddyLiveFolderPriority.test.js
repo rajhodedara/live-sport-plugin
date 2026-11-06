@@ -1,5 +1,9 @@
 'use strict';
 
+jest.mock('../src/services/DaddyLiveMediaCheck', () => ({
+  checkDaddyLiveMedia: jest.fn(async () => ({ status: 'ok' }))
+}));
+
 jest.mock('../src/services/ProviderOutbound', () => ({
   safeFetch: jest.fn(async () => { throw new Error('Unexpected outbound request in folder-priority fixture'); })
 }));
