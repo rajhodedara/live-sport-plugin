@@ -1,5 +1,6 @@
 const { safeFetch } = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
+const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
 const MatchEntity = require('../domain/MatchEntity');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
@@ -213,6 +214,10 @@ class TimStreamsProvider extends BaseProvider {
       const embedDomain = new URL(embedUrl).origin;
       return { m3u8: m3u8Url, referer: embedDomain };
     } catch (e) {
+      // A local capacity/timeout failure did NOT establish that the embed has
+      // no playable HLS. Let streams.js defer its cache verdict and retry soon.
+      // Definite extraction failures retain the existing web-player fallback.
+      if (isInconclusiveResolutionError(e)) throw e;
       console.warn(`[${this.name}] m3u8 extraction failed for ${embedUrl}:`, e.message);
       return null;
     }
@@ -270,9 +275,24 @@ class TimStreamsProvider extends BaseProvider {
 
       // Each feed is an independent embed -> m3u8 -> quality chain. Running them
       // together keeps the added probe cost at one probe, not one per feed.
-      const perEmbed = await Promise.all(embeds.map(embed => this.buildRowsForEmbed(embed, rowTitle)));
-      for (const rows of perEmbed) streams.push(...rows);
+      const perEmbed = await Promise.allSettled(embeds.map(embed => this.buildRowsForEmbed(embed, rowTitle)));
+      let inconclusive = null;
+      for (const result of perEmbed) {
+        if (result.status === 'fulfilled') {
+          streams.push(...result.value);
+        } else if (isInconclusiveResolutionError(result.reason)) {
+          // One bad embed must not discard other verified direct feeds.
+          inconclusive ||= result.reason;
+        } else {
+          console.warn(`[${this.name}] embed resolution failed:`, result.reason?.message);
+        }
+      }
+      // When only web fallback(s) survived a temporary transport failure,
+      // caching them as a complete success hides the missing direct feed for
+      // the entire positive TTL. Propagate only if no direct feed succeeded.
+      if (inconclusive && !streams.some(row => row && row.url)) throw inconclusive;
     } catch (err) {
+      if (isInconclusiveResolutionError(err)) throw err;
       console.error(`[${this.name}] resolveStream failed for ${sourceId}:`, err.message);
     }
     return streams;
