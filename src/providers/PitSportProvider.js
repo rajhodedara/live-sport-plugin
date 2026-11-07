@@ -5,6 +5,8 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
+const { isTransientStatus, isTransientError } = require('../services/retry');
+const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 
@@ -171,6 +173,15 @@ class PitSportProvider extends BaseProvider {
     let programId = (src && src.programId) || sourceId;
     if (!programId) return streams;
 
+    // A failed provider hop is not evidence that a previously advertised HLS
+    // feed disappeared. Report incomplete work through the existing local
+    // cache outcome channel without losing a usable web-player fallback.
+    let inconclusiveReason = null;
+    const noteTransient = error => {
+      const reason = inconclusiveErrorReason(error) || (isTransientError(error) ? 'unavailable' : null);
+      if (reason && !inconclusiveReason) inconclusiveReason = reason;
+    };
+
     if (typeof programId === 'string' && programId.startsWith('pitsport_')) {
       const parts = programId.split('_');
       if (parts[1]) programId = parts[1];
@@ -189,13 +200,18 @@ class PitSportProvider extends BaseProvider {
       });
 
       if (!playRes || !playRes.ok) {
-        return streams;
+        // A genuine 404 remains a definitive empty result. An upstream 408,
+        // 429 or 5xx is a temporary missing answer and should not be cached as
+        // a dead source for the normal negative-cache window.
+        return playRes && isTransientStatus(playRes.status)
+          ? markInconclusiveStreams(streams, 'unavailable') : streams;
       }
 
       playData = typeof playRes.json === 'function' ? await playRes.json() : JSON.parse(playRes.text || '{}');
     } catch (err) {
       console.warn(`[${this.name}] Play API request failed for ${programId}: ${err.message}`);
-      return streams;
+      noteTransient(err);
+      return inconclusiveReason ? markInconclusiveStreams(streams, inconclusiveReason) : streams;
     }
 
     const videos = [];
@@ -246,6 +262,9 @@ class PitSportProvider extends BaseProvider {
             timeoutMs: 10000
           });
 
+          if (watchRes && !watchRes.ok && isTransientStatus(watchRes.status)) {
+            inconclusiveReason ||= 'unavailable';
+          }
           if (watchRes && watchRes.ok) {
             const watchJson = typeof watchRes.json === 'function' ? await watchRes.json() : JSON.parse(watchRes.text || '{}');
             if (watchJson && typeof watchJson.url === 'string' && watchJson.url.trim()) {
@@ -280,6 +299,7 @@ class PitSportProvider extends BaseProvider {
           }
         } catch (watchErr) {
           console.warn(`[${this.name}] Watch resolver failed for ${watchId}: ${watchErr.message}`);
+          noteTransient(watchErr);
         }
       }
 
@@ -295,7 +315,10 @@ class PitSportProvider extends BaseProvider {
       streams.push(webStream);
     }
 
-    return streams;
+    // The stream resolver preserves the web option, but shortens its TTL when
+    // no direct feed survives an inconclusive hop. This hint is internal to
+    // this array; the public stream response remains unchanged.
+    return inconclusiveReason ? markInconclusiveStreams(streams, inconclusiveReason) : streams;
   }
 }
 
