@@ -1,22 +1,24 @@
-# Session Checkpoint: Basketball Replays & Leaf Premium Deployment to VPS
+# Session Checkpoint: HockeyReplays Stream Resolution & Dailymotion Verification
 **Date**: 2026-11-06
-**Status**: Completed (Deployed to Production VPS)
+**Status**: Completed & Verified
 
-### What Was Completed
-- **Branches**: `feat/leaf-premium-integration` & `stable` (both pushed to `origin`, HEAD `ea0c642`).
-- **VPS Deployment**:
-  - Fast-forward pulled `origin/stable` (`5e9265b..ea0c642`).
-  - Zero dependency diffs in `package-lock.json` (no native binary churn under traffic).
-  - Prebuild timezone checks verified 65/65 against IANA 2026f.
-  - Built staged distribution bundle (`dist.next`) and verified `MATCHES_CACHE_PATH` runtime mapping.
-  - Executed atomic directory swap (`dist.next` -> `dist`) and rolling reload on PM2 cluster (PIDs 1108880, 1108909).
-  - Executed `npm run sync:matches`: 13,532 total matches aggregated (including 40 BasketballVideo replays, 18 PitSport events, and 19 Leaf fixtures).
-  - Cluster health endpoint `/health` returned 200 OK with 0 open breakers and healthy memory.
+### 1. Root Cause & Solution
+- **HockeyReplays Stream Resolution**: Fixed by expanding extraction beyond `ok.ru` to support multi-server matches: OK.ru (1080p-144p + Auto HLS), Dailymotion (direct Auto HLS with client proxy headers), Byse AES-256-GCM decryptor, and bridge link unwrappers.
+- **Dailymotion Stream Verification**:
+  - Investigated Dailymotion delivery end-to-end on local server.
+  - Querying `https://www.dailymotion.com/player/metadata/video/{videoId}` succeeds (HTTP 200) and produces signed `https://cdndirector.dailymotion.com/cdn/manifest/video/{videoId}.m3u8?sec=...&dmTs=...&dmV1st=...`.
+  - Node.js's raw OpenSSL fetch gets flagged by Cloudflare/Dailymotion TLS edge renegotiation (code E005).
+  - Verified via native HTTP client (`curl` / native player engine equivalent to VLC / ExoPlayer / AVPlayer):
+    - Master manifest (`cdndirector.dailymotion.com`) -> **HTTP 200 OK**
+    - Sub-manifest (`vod3.cf.dmcdn.net`) -> **HTTP 200 OK** (1080p@60 HLS, 720p@60 HLS, etc.)
+    - Init fragment (`init.mp4`) -> **HTTP 200 OK**
+    - Media segments (`0.m4s`) -> **HTTP 200 OK**
+  - Verified in `handleStream` locally: `nuvio_sport_hr_...` returns 3x Direct 1080p Auto HLS streams with `behaviorHints.proxyHeaders` (`Referer: https://geo.dailymotion.com/`).
+  - Strict compliance with Invariant I1: 0% VPS bandwidth consumption; client players stream directly from Dailymotion's Cloudflare CDN edges (`vod3.cf.dmcdn.net`).
 
-### Verification Record
-- `node --check src/providers/BasketballVideoProvider.js`: Clean exit (code 0).
-- `npm test -- tests/basketballVideoRelativeLinks.test.js`: 9/9 passed.
-- `npm test -- tests/basketballVideoProvider.test.js`: 11/11 passed.
-- `npm test -- tests/leafRecapProvider.test.js`: 14/14 passed.
-- Replay resolution on `livetv_memphis-sacramento-20261101`: 4 direct OK.ru CDN streams returned with 0 VPS bandwidth.
-- Production cluster `/health`: 200 OK, memory nominal (353MB / 519MB).
+### 2. Test Verification
+- `node --check src/providers/HockeyReplaysProvider.js`: Clean exit (0).
+- `node --check src/providers/MlbLiveProvider.js`: Clean exit (0).
+- `node --check src/providers/NflVideoProvider.js`: Clean exit (0).
+- `npm test -- tests/hockeyReplaysProvider.test.js tests/hockeyReplayCardUrls.test.js`: 8/8 passed.
+- `npm test -- tests/hockeyReplaysProvider.test.js tests/hockeyReplayCardUrls.test.js tests/basketballVideoProvider.test.js tests/nflVideoProvider.test.js tests/mlbLiveProvider.test.js`: 41/41 passed.

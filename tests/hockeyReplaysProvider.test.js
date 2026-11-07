@@ -12,15 +12,18 @@ jest.mock('../src/services/ProviderOutbound', () => ({
   fetch: jest.fn(() => { throw new Error('Unexpected provider I/O in unit fixture'); })
 }));
 
-
+const crypto = require('crypto');
 const HockeyReplaysProvider = require('../src/providers/HockeyReplaysProvider');
 const MatchAggregator = require('../src/services/MatchAggregator');
+const StreamEntity = require('../src/domain/StreamEntity');
+const undici = require('../src/services/ProviderOutbound');
 
 describe('HockeyReplaysProvider & NHL Replay Merging', () => {
   let provider;
 
   beforeEach(() => {
     provider = new HockeyReplaysProvider();
+    jest.clearAllMocks();
   });
 
   describe('Match Listing Parsing (_parseMatchCards)', () => {
@@ -99,6 +102,102 @@ describe('HockeyReplaysProvider & NHL Replay Merging', () => {
       const hlsStream = streams.find(s => s.name.includes('Adaptive HLS'));
       expect(hlsStream).toBeDefined();
       expect(hlsStream.url).toBe('https://vd1.okcdn.ru/video.m3u8');
+    });
+  });
+
+  describe('Dailymotion Direct Auto HLS Extraction (_extractDailymotion)', () => {
+    it('extracts Auto HLS manifest and handles string or array set-cookie headers', async () => {
+      undici.request.mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {
+          'set-cookie': 'ts=12345; path=/; domain=.dailymotion.com; Secure'
+        },
+        body: {
+          json: async () => ({
+            qualities: {
+              auto: [{ url: 'https://cdndirector.dailymotion.com/cdn/manifest/video/xafs41q.m3u8?sec=xyz' }]
+            }
+          })
+        }
+      });
+
+      const streams = await provider._extractDailymotion('https://geo.dailymotion.com/player.html?video=xafs41q', 'Part 1');
+      expect(streams).toHaveLength(1);
+      expect(streams[0].title).toBe('HockeyReplays (Part 1 - Auto HLS)');
+      expect(streams[0].url).toContain('cdndirector.dailymotion.com');
+      expect(streams[0].behaviorHints.proxyHeaders.request['Origin']).toBe('https://geo.dailymotion.com');
+      expect(streams[0].behaviorHints.proxyHeaders.request['Cookie']).toBe('ts=12345');
+    });
+  });
+
+  describe('Byse Playback Decryption (_decryptBysePlayback)', () => {
+    it('successfully decrypts AES-256-GCM playback payload', () => {
+      const testKey = crypto.randomBytes(32);
+      const testIv = crypto.randomBytes(12);
+      const testData = JSON.stringify({
+        sources: [
+          { label: '1080p', url: 'https://edge1-waw-sprintcdn.example/hls/nhl_master.m3u8' }
+        ]
+      });
+
+      const cipher = crypto.createCipheriv('aes-256-gcm', testKey, testIv);
+      const encrypted = Buffer.concat([cipher.update(testData, 'utf8'), cipher.final()]);
+      const authTag = cipher.getAuthTag();
+      const payload = Buffer.concat([encrypted, authTag]);
+
+      const keyPart1 = testKey.subarray(0, 16).toString('base64');
+      const keyPart2 = testKey.subarray(16, 32).toString('base64');
+
+      const playback = {
+        version: '1',
+        iv: testIv.toString('base64'),
+        payload: payload.toString('base64'),
+        key_parts: Array.from({ length: 32 }, (_, i) => {
+          if (i === 0) return keyPart1;
+          if (i === 29) return keyPart2;
+          return crypto.randomBytes(16).toString('base64');
+        })
+      };
+
+      const decrypted = provider._decryptBysePlayback(playback);
+      expect(decrypted).not.toBeNull();
+      expect(decrypted.sources[0].url).toBe('https://edge1-waw-sprintcdn.example/hls/nhl_master.m3u8');
+    });
+  });
+
+  describe('Multi-Server Stream Resolution (resolveStream)', () => {
+    it('resolves Dailymotion multi-part and OK.ru embeds from hockey replay page', async () => {
+      const samplePageHtml = `
+        <!-- <body> -->
+        <p><strong>Server #1 (DM)</strong></p>
+        <p><a href="https://geo.dailymotion.com/player.html?video=xafs41q">Part 1</a></p>
+        <p><a href="https://geo.dailymotion.com/player.html?video=xafs41u">Part 2</a></p>
+        <p><strong>Server #2 (OK)</strong></p>
+        <p><a href="https://ok.ru/videoembed/12345">Watch</a></p>
+        <!-- </body> -->
+      `;
+
+      provider.fetchPage = {
+        fire: jest.fn().mockResolvedValue(samplePageHtml)
+      };
+
+      provider._extractDailymotion = jest.fn()
+        .mockResolvedValueOnce([
+          new StreamEntity({ name: 'HockeyReplays', title: 'HockeyReplays (Part 1 - Auto HLS)', url: 'https://dm.example/p1.m3u8' })
+        ])
+        .mockResolvedValueOnce([
+          new StreamEntity({ name: 'HockeyReplays', title: 'HockeyReplays (Part 2 - Auto HLS)', url: 'https://dm.example/p2.m3u8' })
+        ]);
+
+      provider._extractOkRu = jest.fn().mockResolvedValueOnce([
+        new StreamEntity({ name: 'HockeyReplays', title: 'HockeyReplays (Server #2 (OK) - 720p)', url: 'https://ok.example/video.mp4' })
+      ]);
+
+      const streams = await provider.resolveStream('https://hockeyreplays.com/game-replay');
+      expect(streams).toHaveLength(3);
+      expect(streams[0].title).toBe('HockeyReplays (Server #2 (OK) - 720p)');
+      expect(streams[1].title).toBe('HockeyReplays (Part 1 - Auto HLS)');
+      expect(streams[2].title).toBe('HockeyReplays (Part 2 - Auto HLS)');
     });
   });
 

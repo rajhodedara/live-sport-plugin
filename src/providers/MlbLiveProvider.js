@@ -714,7 +714,9 @@ class MlbLiveProvider extends BaseProvider {
       });
 
       if (res.statusCode !== 200) return [];
-      const cookies = (res.headers['set-cookie'] || []).map(c => c.split(';')[0]).join('; ');
+      const rawCookies = res.headers['set-cookie'];
+      const cookieArr = Array.isArray(rawCookies) ? rawCookies : (typeof rawCookies === 'string' ? [rawCookies] : []);
+      const cookies = cookieArr.map(c => c.split(';')[0]).join('; ');
       const meta = await res.body.json();
       if (!meta || meta.error) return [];
 
