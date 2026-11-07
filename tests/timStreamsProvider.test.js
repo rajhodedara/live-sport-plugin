@@ -36,6 +36,7 @@ describe('TimStreamsProvider Robust Date and Live Status Handling', () => {
         wrapSync: (name, fn) => ({ fire: fn })
       }
     });
+    provider.fetchChannels = { fire: async () => ({ channels: [] }) };
   });
 
   test('future event is classified as upcoming with popular=0 and is not live', async () => {
@@ -208,6 +209,9 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
       if (url === 'https://tim-streams.com/api/live-upcoming') {
         return { ok: true, json: async () => ({ events: [] }) };
       }
+      if (url === 'https://tim-streams.com/api/channels') {
+        return { ok: true, json: async () => ({ channels: [] }) };
+      }
       if (url === embedUrl) {
         return {
           ok: true,
@@ -226,10 +230,10 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
     await provider.getMatches();
     const result = await provider.extractM3u8(embedUrl);
     expect(provider.proxyFetch.mock.calls.map(([url]) => url)).toEqual([
-      'https://tim-streams.com/api/live-upcoming', embedUrl, tokenUrl
+      'https://tim-streams.com/api/live-upcoming', 'https://tim-streams.com/api/channels', embedUrl, tokenUrl
     ]);
-    expect(provider.proxyFetch.mock.calls[1][1].headers.Referer).toBe('https://tim-streams.com/');
-    expect(provider.proxyFetch.mock.calls[2][1].headers).toMatchObject({
+    expect(provider.proxyFetch.mock.calls[2][1].headers.Referer).toBe('https://tim-streams.com/');
+    expect(provider.proxyFetch.mock.calls[3][1].headers).toMatchObject({
       Referer: embedUrl, Origin: new URL(embedUrl).origin
     });
     expect(result).not.toBeNull();

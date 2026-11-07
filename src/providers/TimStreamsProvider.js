@@ -2,6 +2,7 @@ const { safeFetch } = require('../services/ProviderOutbound');
 const BaseProvider = require('./BaseProvider');
 const { isInconclusiveResolutionError, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 const MatchEntity = require('../domain/MatchEntity');
+const ChannelIdentityService = require('../services/ChannelIdentityService');
 const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
 
@@ -19,8 +20,16 @@ class TimStreamsProvider extends BaseProvider {
     // path and payload shape are unchanged, so only the host changes here.
     this.apiUrl = 'https://tim-streams.com/api/live-upcoming';
     
+    this.channelsUrl = 'https://tim-streams.com/api/channels';
+
     this.fetchData = this.circuitBreaker.wrapSync(`${this.name}_fetch`, async () => {
       const res = await this.proxyFetch(this.apiUrl, { signal: AbortSignal.timeout(15000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    });
+
+    this.fetchChannels = this.circuitBreaker.wrapSync(`${this.name}_fetch_channels`, async () => {
+      const res = await this.proxyFetch(this.channelsUrl, { signal: AbortSignal.timeout(15000) });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     });
@@ -29,8 +38,16 @@ class TimStreamsProvider extends BaseProvider {
   async getMatches() {
     const matches = [];
     try {
-      const data = await this.fetchData.fire();
-      if (!data || !Array.isArray(data.events)) return [];
+      const results = await Promise.allSettled([
+        this.fetchData.fire(),
+        this.fetchChannels.fire()
+      ]);
+
+      const eventsResult = results[0];
+      const channelsResult = results[1];
+
+      if (eventsResult.status === 'fulfilled' && eventsResult.value && Array.isArray(eventsResult.value.events)) {
+        const data = eventsResult.value;
 
       const genres = data.genres || {};
       
@@ -114,6 +131,67 @@ class TimStreamsProvider extends BaseProvider {
           }));
         }
       });
+      }
+
+      if (channelsResult.status === 'fulfilled' && channelsResult.value && Array.isArray(channelsResult.value.channels)) {
+        const chData = channelsResult.value;
+        const chGenres = chData.genres || [];
+        chData.channels.forEach((c, index) => {
+          if (!c || typeof c !== 'object' || c.vip) return;
+          const validStreams = (Array.isArray(c.streams) ? c.streams : [])
+            .filter(st => st && typeof st === 'object' && !st.vip && typeof st.url === 'string' && st.url.trim());
+          if (validStreams.length === 0) return;
+
+          let genreName = 'Live TV';
+          if (Array.isArray(chGenres)) {
+            const g = chGenres.find(x => x && x.id === c.genre);
+            if (g && g.name) genreName = g.name;
+          } else if (typeof c.genre === 'string') {
+            genreName = c.genre;
+          }
+
+          const rawTitle = typeof c.name === 'string' && c.name.trim() ? c.name.trim() : `Channel ${index}`;
+          const ident = ChannelIdentityService.parseChannel(rawTitle, { group: genreName });
+          const canonicalTitle = ident.canonicalTitle || rawTitle;
+          const slug = (c.url || rawTitle).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+          const sources = validStreams.map(st => ({
+            source: 'timstreams',
+            id: Buffer.from(st.url).toString('hex'),
+            name: rawTitle,
+            channelName: rawTitle,
+            canonicalChannel: canonicalTitle,
+            country: ident.country || '',
+            countryCode: ident.countryCode || (c.flag ? String(c.flag).toUpperCase() : ''),
+            countryFlag: ident.countryFlag || '',
+            language: ident.language || '',
+            resolution: ident.resolution || 'HD',
+            url: st.url,
+            type: 'channel'
+          }));
+
+          const entity = new MatchEntity({
+            id: `ts_ch_${c.url || slug}`,
+            title: canonicalTitle,
+            baseTitle: canonicalTitle,
+            category: 'networks',
+            date: '0',
+            popular: '1',
+            league: genreName,
+            logo: c.logo || undefined,
+            thumbnail_url: c.logo || undefined,
+            sources: sources
+          });
+
+          entity.channelIdentityKey = ident.identityKey;
+          entity.channelNumber = ident.channelNumber;
+          entity.canonicalTitle = canonicalTitle;
+          entity.isChannel = true;
+          entity.is247 = true;
+
+          matches.push(entity);
+        });
+      }
     } catch (error) {
       console.error(`[${this.name}] Error fetching matches:`, error.stack);
     }
