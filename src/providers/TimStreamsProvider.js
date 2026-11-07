@@ -327,7 +327,15 @@ class TimStreamsProvider extends BaseProvider {
         try {
           const decoded = Buffer.from(sourceId, 'hex').toString('utf-8');
           if (decoded.startsWith('http')) {
-            embeds = [{ name: 'Stream', channel: srcChannel, url: decoded }];
+            const isNetworks = matchCategory === 'networks';
+            const fallbackLabel = isNetworks && matchTitle ? matchTitle : 'Stream';
+            const fallbackChannel = srcChannel || (isNetworks && matchTitle ? matchTitle : '');
+            embeds = [{
+              name: fallbackLabel,
+              channel: fallbackChannel,
+              url: decoded,
+              type: isNetworks ? 'channel' : srcObj.type
+            }];
           }
         } catch (e) {}
       }

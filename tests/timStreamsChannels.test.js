@@ -119,6 +119,22 @@ describe('TimStreamsProvider 24/7 Live TV Channels', () => {
     expect(web.title).toBe('TimStreams (ABC) (Web)');
   });
 
+  test('retains channel title when resolveStream is called without src object', async () => {
+    const embedUrl = 'https://ehgembxe.cfd/nhmzkzez-3028';
+    const sourceId = Buffer.from(embedUrl).toString('hex');
+
+    provider.extractM3u8 = jest.fn().mockResolvedValue({
+      m3u8: 'https://tims-001.sytes.net/main/secure/abc.m3u8',
+      referer: 'https://ehgembxe.cfd'
+    });
+
+    const streams = await provider.resolveStream(sourceId, 'networks', 'ABC');
+    expect(streams).toHaveLength(2);
+    const direct = streams[0];
+    expect(direct.title).toBe('(ABC)');
+    expect(direct.channelName).toBe('ABC');
+  });
+
   test('merges TimStreams channels with DaddyLive channels sharing the same identityKey', () => {
     const aggregator = new MatchAggregator();
 
