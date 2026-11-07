@@ -3,6 +3,8 @@
 process.env.NODE_ENV = 'test';
 
 const TimStreamsProvider = require('../src/providers/TimStreamsProvider');
+const MatchAggregator = require('../src/services/MatchAggregator');
+const MatchEntity = require('../src/domain/MatchEntity');
 
 describe('TimStreamsProvider 24/7 Live TV Channels', () => {
   let provider;
@@ -115,5 +117,39 @@ describe('TimStreamsProvider 24/7 Live TV Channels', () => {
 
     const web = streams[1];
     expect(web.title).toBe('TimStreams (ABC) (Web)');
+  });
+
+  test('merges TimStreams channels with DaddyLive channels sharing the same identityKey', () => {
+    const aggregator = new MatchAggregator();
+
+    const dlv = new MatchEntity({
+      id: 'dlv_ch_101_abc',
+      title: 'ABC',
+      category: 'networks',
+      date: '0',
+      sources: [{ source: 'daddylive', id: '101', channelName: 'ABC' }]
+    });
+    dlv.channelIdentityKey = 'abc';
+    dlv.isChannel = true;
+    dlv.is247 = true;
+
+    const ts = new MatchEntity({
+      id: 'ts_ch_abc-usa',
+      title: 'ABC',
+      category: 'networks',
+      date: '0',
+      sources: [{ source: 'timstreams', id: 'ts_feed_abc', channelName: 'ABC' }]
+    });
+    ts.channelIdentityKey = 'abc';
+    ts.isChannel = true;
+    ts.is247 = true;
+
+    const preDlv = aggregator._precompute(dlv);
+    const preTs = aggregator._precompute(ts);
+    expect(aggregator._sameEventPre(preDlv, preTs)).toBe(true);
+
+    const merged = aggregator.mergeMatches(dlv, ts);
+    expect(merged.sources).toHaveLength(2);
+    expect(merged.sources.map(s => s.source)).toEqual(expect.arrayContaining(['daddylive', 'timstreams']));
   });
 });

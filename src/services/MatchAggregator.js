@@ -745,7 +745,7 @@ class MatchAggregator {
     const id = e && e.id != null ? String(e.id) : '';
     const isChannel = Boolean(
       (e && (e.category === 'networks' || e.rawCategory === '24/7 TV Channels' || String(e.id || '').includes('_ch_'))) ||
-      id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_') || id.startsWith('scorezone_ch_')
+      id.startsWith('dlv_ch_') || id.startsWith('cdn_ch_') || id.startsWith('sktech_ch_') || id.startsWith('vavoo_ch_') || id.startsWith('scorezone_ch_') || id.startsWith('ts_ch_')
     );
     const title = e && e.title ? canonicalizeAge(_foldText(e.title)) : '';
     // Fold the title ONCE and thread the folded + lowercased forms through
@@ -1947,7 +1947,7 @@ class MatchAggregator {
         // the O(N log N) comparator calls.
         const _priority = (m) => {
           const rawDate = m.date;
-          const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_') || m.id.startsWith('scorezone_ch_')));
+          const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_') || m.id.startsWith('scorezone_ch_') || m.id.startsWith('ts_ch_')));
           const isEvergreen = isChannelOrNetwork && (rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim()));
           if (isEvergreen) return { bucket: 2, kickoff: 0 };
           const kickoff = _parseEventDate(rawDate);
@@ -1969,7 +1969,7 @@ class MatchAggregator {
           // the sentinel explicitly, exactly as catalog.getKickoff does, and only
           // then consult the parser.
           const rawDate = m.date;
-          const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_') || m.id.startsWith('scorezone_ch_')));
+          const isChannelOrNetwork = m.category === 'networks' || Boolean(m.isChannel) || Boolean(m.is247) || (typeof m.id === 'string' && (m.id.startsWith('cdn_ch_') || m.id.startsWith('dlv_ch_') || m.id.startsWith('sktech_ch_') || m.id.startsWith('vavoo_ch_') || m.id.startsWith('scorezone_ch_') || m.id.startsWith('ts_ch_')));
           const isEvergreen = isChannelOrNetwork && (rawDate == null || rawDate === '' || /^0+$/.test(String(rawDate).trim()));
           if (isEvergreen) return true;
           const kickoff = _parseEventDate(rawDate);
