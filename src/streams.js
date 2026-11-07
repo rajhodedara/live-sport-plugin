@@ -5,7 +5,7 @@ const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutErro
 const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
   inconclusiveStreamsReason } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
-const { parseLanguagePriority, compareStreams } = require('./services/LanguagePriorityService');
+const { parseLanguagePriority, compareStreams, canonicalLanguage } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
@@ -13,6 +13,7 @@ const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream, isBlockedStream } = require('./services/StreamPolicy');
+const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
 
 let _liveOverlayRef;
 /**
@@ -1013,6 +1014,14 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         } catch (_) {}
       }
 
+      // Verify and filter only a *known* low-tier PPV.st rendition. The
+      // provider catalog already removes its explicitly labelled SD/540p
+      // sources; a parsed HLS master may reveal a lower tier later.
+      // Unknown quality and every other provider remain untouched.
+      if (s._source === 'ppvst' && isLowPpvSourceMetadata({
+        resolution: s.resolution, quality: s.quality
+      })) return null;
+
       if (cacheKey) resolveCache.noteSuccess(cacheKey);
       return s;
     } catch (err) {
@@ -1689,15 +1698,22 @@ async function handleStream(type, id, config) {
     else if (s._source === 'pitsport' || sTitleLower.includes('pitsport')) providerName = 'PitSport';
 
     let originalTitle = s.title || '';
-    let channelName = '';
+    // The provider's explicit broadcaster is stronger evidence than the first
+    // parenthesized title fragment, which is often the event name (PitSport
+    // and PPV.st both put the fixture inside parentheses).
+    const explicitChannel = [s.canonicalChannel, s.channelName]
+      .find(value => typeof value === 'string' && value.trim() &&
+        ![match?.title, match?.baseTitle].some(event => typeof event === 'string' &&
+          event.trim().toLowerCase() === value.trim().toLowerCase())) || '';
+    let channelName = explicitChannel.trim();
     let viewersText = '';
     if (originalTitle) {
       const vMatch = originalTitle.match(/👥\s*\d+\s*Viewers/);
       if (vMatch) viewersText = `\n${vMatch[0]}`;
 
-      const match = originalTitle.match(/\(([^)]+)\)/);
-      if (match && match[1]) {
-        const inner = match[1];
+      const titleChannelMatch = !channelName && originalTitle.match(/\(([^)]+)\)/);
+      if (titleChannelMatch && titleChannelMatch[1]) {
+        const inner = titleChannelMatch[1];
         // Skip resolution/bitrate placeholders and Auto/stream markers — they
         // are quality tags, not channel names (e.g. Leaf's "(FHD)").
         if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
@@ -1713,7 +1729,7 @@ async function handleStream(type, id, config) {
             channelName = bracketName[1].trim();
           }
         }
-      } else if (!originalTitle.includes('Stream') && !originalTitle.includes('Auto')) {
+      } else if (!channelName && !originalTitle.includes('Stream') && !originalTitle.includes('Auto')) {
         channelName = originalTitle;
       }
     }
@@ -1762,6 +1778,11 @@ async function handleStream(type, id, config) {
       if (!s.countryFlag) s.countryFlag = countryInfo.flag;
     }
 
+    // Do not mislabel an event as its broadcaster. Retain the real fixture
+    // text in the event card, not on every alternative playback row.
+    if (!isChannelCard && match?.title && channelName.toLowerCase() === match.title.trim().toLowerCase()) {
+      channelName = '';
+    }
     if (channelName) {
       channelName = channelName
         .replace(/\s*[-–—]{1,3}\s*(?:Poland|Germany|UK|USA?|France|Spain|Italy|Portugal|Turkey|Netherlands|Canada|Australia|Austria|Switzerland|India|Argentina|Chile|Brazil|[A-Za-z]{2,})\s*$/i, '')
@@ -1772,7 +1793,9 @@ async function handleStream(type, id, config) {
 
     const flag = s.countryFlag || (countryInfo && countryInfo.flag) || '';
     const code = s.countryCode || (s.country && s.country.length === 2 ? s.country.toUpperCase() : '') || (countryInfo && countryInfo.name) || (countryInfo && countryInfo.country) || '';
-    const lang = s.language || (countryInfo && countryInfo.language) || '';
+    const rawLang = s.language || (countryInfo && countryInfo.language) || '';
+    const canonicalLang = canonicalLanguage(rawLang);
+    const lang = canonicalLang ? canonicalLang[0].toUpperCase() + canonicalLang.slice(1) : rawLang;
     let countryTag = '';
     if (code && lang) {
       countryTag = ` ${flag ? flag + ' ' : ''}[${code} • ${lang}]`;
@@ -1780,6 +1803,10 @@ async function handleStream(type, id, config) {
       countryTag = ` ${flag} [${lang}]`;
     } else if (flag) {
       countryTag = ` ${flag}`;
+    } else if (lang) {
+      // Explicit provider language is useful even when no country can be
+      // inferred. An unknown locale never implies a country or flag.
+      countryTag = ` [${lang}]`;
     }
 
     let partLabel = '';
