@@ -26,6 +26,9 @@ class PitSportProvider extends BaseProvider {
    */
   async getMatches() {
     const matches = [];
+    // The aggregator only retains prior PitSport fixtures after an actually
+    // failed catalog sync, never after a valid (possibly empty) home schedule.
+    this.lastScheduleOk = false;
     try {
       const res = await this.proxyFetch(`${this.baseUrl}/api/v1/home`, {
         headers: {
@@ -43,7 +46,8 @@ class PitSportProvider extends BaseProvider {
       }
 
       const json = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text || '{}');
-      if (!json || !json.data) {
+      if (!json || !json.data || typeof json.data !== 'object' ||
+          !['live', 'upcoming', 'carousel'].some(key => Array.isArray(json.data[key]))) {
         return matches;
       }
 
@@ -153,6 +157,7 @@ class PitSportProvider extends BaseProvider {
           ]
         }));
       }
+      this.lastScheduleOk = true;
     } catch (err) {
       console.error(`[${this.name}] Failed to get matches:`, err.message);
     }
