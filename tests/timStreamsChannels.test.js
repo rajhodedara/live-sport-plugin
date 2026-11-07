@@ -86,4 +86,34 @@ describe('TimStreamsProvider 24/7 Live TV Channels', () => {
     expect(matches[0].title).toBe('Arsenal vs Chelsea');
     expect(matches[0].category).toBe('football');
   });
+
+  test('formats clean stream title on 24/7 channel cards', async () => {
+    const embedUrl = 'https://ehgembxe.cfd/nhmzkzez-3028';
+    const sourceId = Buffer.from(embedUrl).toString('hex');
+    const src = {
+      source: 'timstreams',
+      id: sourceId,
+      name: 'ABC',
+      channelName: 'ABC',
+      url: embedUrl,
+      type: 'channel'
+    };
+
+    provider.extractM3u8 = jest.fn().mockResolvedValue({
+      m3u8: 'https://tims-001.sytes.net/main/secure/abc.m3u8',
+      referer: 'https://ehgembxe.cfd'
+    });
+
+    const streams = await provider.resolveStream(sourceId, 'networks', 'ABC', src);
+    expect(streams).toHaveLength(2);
+    const direct = streams[0];
+    expect(direct.name).toBe('TimStreams');
+    // On networks cards, title must be (ABC), not (ABC) ABC
+    expect(direct.title).toBe('(ABC)');
+    expect(direct.channelName).toBe('ABC');
+    expect(direct._source).toBe('timstreams');
+
+    const web = streams[1];
+    expect(web.title).toBe('TimStreams (ABC) (Web)');
+  });
 });

@@ -320,7 +320,7 @@ class TimStreamsProvider extends BaseProvider {
       const srcUrl = typeof srcObj.url === 'string' ? srcObj.url
         : (typeof srcObj.embedUrl === 'string' ? srcObj.embedUrl : '');
       if (/^https?:\/\//i.test(srcUrl)) {
-        embeds = [{ name: srcChannel || 'Stream', channel: srcChannel, url: srcUrl }];
+        embeds = [{ name: srcChannel || 'Stream', channel: srcChannel, url: srcUrl, type: srcObj.type }];
       }
 
       if (embeds.length === 0) {
@@ -353,7 +353,7 @@ class TimStreamsProvider extends BaseProvider {
 
       // Each feed is an independent embed -> m3u8 -> quality chain. Running them
       // together keeps the added probe cost at one probe, not one per feed.
-      const perEmbed = await Promise.allSettled(embeds.map(embed => this.buildRowsForEmbed(embed, rowTitle)));
+      const perEmbed = await Promise.allSettled(embeds.map(embed => this.buildRowsForEmbed(embed, rowTitle, matchCategory)));
       let inconclusive = null;
       for (const result of perEmbed) {
         if (result.status === 'fulfilled') {
@@ -380,10 +380,11 @@ class TimStreamsProvider extends BaseProvider {
   /**
    * One embed URL -> the player rows for that feed (direct + web fallback).
    */
-  async buildRowsForEmbed(embed, matchTitle) {
+  async buildRowsForEmbed(embed, matchTitle, matchCategory = '') {
     const StreamEntity = require('../domain/StreamEntity');
     const rows = [];
     const channel = this.formatChannelLabel(embed.channel || embed.name);
+    const isChannelCard = matchCategory === 'networks' || embed.type === 'channel' || (Boolean(channel) && Boolean(matchTitle) && channel.toLowerCase() === matchTitle.toLowerCase());
 
     let referer = '';
     try { referer = new URL(embed.url).origin; } catch (e) { referer = ''; }
@@ -404,7 +405,7 @@ class TimStreamsProvider extends BaseProvider {
         name: 'TimStreams',
         // The parenthesised channel is what streams.js lifts into the row label
         // (same shape Leaf uses). Without it the row showed no broadcaster at all.
-        title: channel ? `(${channel}) ${matchTitle}` : `TimStreams ${matchTitle}`,
+        title: isChannelCard ? (channel ? `(${channel})` : 'TimStreams') : (channel ? `(${channel}) ${matchTitle}` : `TimStreams ${matchTitle}`),
         url: proxyUrl,
         channelName: channel || undefined,
         canonicalChannel: channel || undefined,
