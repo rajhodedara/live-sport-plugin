@@ -45,6 +45,7 @@
     .icon-btn [hidden] { display: none; }
     :root { --discord: #5865f2; --kofi: #ff5e5b; }
 
+    [hidden] { display: none !important; }
     html { -webkit-text-size-adjust: 100%; }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; min-height: 100vh; }
@@ -100,27 +101,40 @@
     .prov-icon .mono { font: 700 11px/1 var(--font-sans); letter-spacing: 0.02em; color: var(--text); }
 
     /* ---------- Navigation toggle (hamburger) ---------- */
-    .nav-toggle { margin-right: var(--space-2); }
+    .nav-toggle { margin-right: 0; }
     @media (min-width: 1180px) {
       :root[data-sidebar="collapsed"] .layout { grid-template-columns: minmax(0, 1fr) 340px; }
       :root[data-sidebar="collapsed"] .sidebar { display: none; }
     }
-    @media (max-width: 1179px) { .nav-toggle.desktop-only { display: none; } }
+    .icon-btn:disabled { opacity: .4; cursor: not-allowed; }
+    .icon-btn:disabled:hover { background: var(--surface-2); }
     .drawer-scrim { display: none; }
 
     @media (max-width: 1179px) {
       .layout { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); gap: var(--space-4); }
-      .rail { position: static; max-height: none; overflow: visible; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+      .rail { position: static; max-height: none; overflow: visible; padding: 0; margin: 0; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
     }
     @media (max-width: 720px) {
       .topbar { padding: 0 var(--space-4); }
       .topnav { margin-left: var(--space-2); }
       .topnav .hide-sm, .btn .label { display: none; }
-      .btn.icon-only { padding: 0; width: 44px; }
+      .brand span { display: none; }
+      .btn.icon-only { padding: 0; width: 44px; flex: none; }
       .page-head { padding: var(--space-4); border-radius: var(--radius-md); }
       .page-head h1 { font-size: 26px; line-height: 32px; }
       .rail { grid-template-columns: minmax(0, 1fr); }
     }
-    @media (max-width: 560px) { .topnav a { padding: 0 12px; } .topnav .nav-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } }
-    @media (max-width: 480px) { .brand span { display: none; } }
+    @media (max-width: 1179px) { .btn .label { display: none; } .btn.icon-only { padding: 0; width: 44px; flex: none; } }
+    @media (max-width: 1179px) { .topnav a { padding: 0 12px; } .topnav .nav-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } }
+    @media (max-width: 480px) {
+      .topbar { gap: var(--space-1); padding: 0 var(--space-3); }
+      .brand { display: none; }
+      .topnav { margin-left: 0; gap: 0; }
+      .topnav a { padding: 0 9px; }
+    }
+    @media (max-width: 360px) {
+      .topbar { padding: 0 var(--space-2); }
+      .topnav a { padding: 0 6px; }
+      .topbar .icon-btn, .topbar .btn.icon-only { width: 40px; height: 40px; min-height: 40px; }
+    }
     @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }
