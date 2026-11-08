@@ -4,229 +4,272 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Nuvio Live Sports</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Outfit:wght@400;700;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+  <link rel="stylesheet" href="/ui.css">
   <style>
-    :root {
-      --bg: #09090b;
-      --card-bg: rgba(28, 28, 30, 0.4);
-      --card-border: rgba(255, 255, 255, 0.05);
-      --text: #f8fafc;
-      --text-muted: #94a3b8;
-      --accent: #ef4444;
-      --accent-glow: rgba(239, 68, 68, 0.3);
-      --glass: rgba(15, 15, 17, 0.7);
-    }
-    * { box-sizing: border-box; }
-    body { font-family: 'Inter', sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 0; min-height: 100vh; }
-    header { position: sticky; top: 0; z-index: 50; background: var(--glass); backdrop-filter: blur(16px); padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); flex-wrap: wrap; gap: 15px; }
-    .header-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .brand { display: flex; align-items: center; gap: 12px; font-family: 'Outfit', sans-serif; font-size: 1.8rem; font-weight: 900; }
-    .brand span { background: linear-gradient(to right, #fff, #94a3b8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-    .brand img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; border: 1px solid rgba(255,255,255,0.2); box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3); }
-    main { padding: 40px; max-width: 1600px; margin: 0 auto; }
-    @media (max-width: 768px) {
-      header { padding: 15px 20px; flex-direction: column; align-items: flex-start; }
-      main { padding: 20px; }
-      .header-actions { width: 100%; }
-      .header-actions a { flex: 1; justify-content: center; text-align: center; }
-    }
-    
-    .tabs { display: flex; gap: 15px; margin-bottom: 30px; overflow-x: auto; padding-bottom: 10px; }
-    .tab { padding: 10px 20px; border-radius: 30px; background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: var(--text-muted); cursor: pointer; font-weight: 600; transition: all 0.2s; white-space: nowrap; }
-    .tab:hover { background: rgba(255,255,255,0.1); color: white; }
-    .tab.active { background: var(--accent); color: white; border-color: var(--accent); box-shadow: 0 4px 15px var(--accent-glow); }
-    
-    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 30px; }
-    .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 20px; overflow: hidden; cursor: pointer; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); position: relative; }
-    .card:hover { transform: translateY(-8px) scale(1.02); border-color: var(--accent); box-shadow: 0 20px 40px rgba(0,0,0,0.6), 0 0 20px var(--accent-glow); z-index: 10; }
-    .poster-container { position: relative; width: 100%; aspect-ratio: 16/9; background: #111; overflow: hidden; }
-    .background { width: 100%; height: 100%; object-fit: cover; filter: blur(20px) brightness(0.5); transform: scale(1.2); transition: all 0.4s; }
-    .card:hover .background { filter: blur(15px) brightness(0.7); transform: scale(1.1); }
-    .poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; padding: 10px; transition: transform 0.4s; }
-    .card:hover .poster { transform: scale(1.05); }
-    .logo { position: absolute; top: 15px; left: 15px; width: 48px; height: 48px; z-index: 3; border-radius: 12px; background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); object-fit: contain; padding: 6px; border: 1px solid rgba(255,255,255,0.1); }
-    .live-badge { position: absolute; top: 15px; right: 15px; z-index: 3; background: var(--accent); color: white; font-size: 0.75rem; font-weight: 800; padding: 4px 10px; border-radius: 20px; animation: pulse 2s infinite; }
-    @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
-    .info { position: absolute; bottom: 0; left: 0; right: 0; padding: 30px 20px 20px 20px; z-index: 3; background: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.7) 60%, transparent 100%); transition: all 0.4s; }
-    .card:hover .info { padding-bottom: 25px; }
-    .title { font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 1.25rem; margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
-    .desc { font-size: 0.85rem; color: var(--text-muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
-    
-    #player-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.95); backdrop-filter: blur(20px); z-index: 100; flex-direction: column; }
-    #close-btn { position: absolute; top: 30px; right: 40px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 12px 24px; border-radius: 30px; cursor: pointer; z-index: 101; font-weight: 600; }
+
+    /* ---------- Top bar ---------- */
+
+    /* ---------- Buttons ---------- */
+    .btn-chip { min-height: 32px; padding: 0 var(--space-3); font-size: 12px; }
+    .btn-block { width: 100%; }
+
+    /* ---------- Layout ---------- */
+
+    /* ---------- Catalog navigation (sidebar) ---------- */
+    .catnav { display: grid; gap: 2px; }
+    .cat-item { display: flex; align-items: center; width: 100%; min-height: 38px; padding: 0 var(--space-3); border: 2px solid transparent; border-radius: var(--radius-md); background: none; color: var(--muted); font: 600 14px/1.3 var(--font-sans); text-align: left; cursor: pointer; }
+    .cat-item { gap: var(--space-3); }
+    .cat-item svg, .cat-group > summary svg { width: 18px; height: 18px; flex: none; color: var(--faint); }
+    .cat-item.active svg, .cat-item:hover svg, .cat-group > summary:hover svg { color: var(--accent); }
+    .cat-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cat-group > summary .cat-text { flex: 1; }
+    .cat-item:hover { background: var(--surface); color: var(--text); }
+    .cat-item.active { background: var(--surface); color: var(--text); border-color: var(--accent-fill); }
+    .cat-group { border-top: 1px solid var(--line); margin-top: var(--space-1); padding-top: 2px; }
+    .cat-group > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 38px; padding: 0 calc(var(--space-3) + 2px); list-style: none; cursor: pointer; font: 600 12px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); border-radius: var(--radius-md); }
+    .cat-group > summary::-webkit-details-marker { display: none; }
+    .cat-group > summary::after { content: ""; width: 7px; height: 7px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(45deg); margin-top: -3px; flex: none; }
+    .cat-group[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+    .cat-group > summary:hover { color: var(--text); }
+    .card-info { padding: var(--space-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); font-size: 14px; color: var(--muted); }
+    .card-info p { margin: 0 0 var(--space-4); }
+    .card-info { border-radius: var(--radius-lg); padding: var(--space-5); }
+
+    /* ---------- Content header ---------- */
+    .search { width: 100%; max-width: 360px; min-height: 48px; padding: 0 var(--space-4); border-radius: var(--radius-md); background: var(--surface-2); border: 2px solid var(--line-strong); color: var(--text); font: 400 15px var(--font-sans); }
+    .search::placeholder { color: var(--faint); }
+    .state-msg { color: var(--muted); }
+    .state-msg.is-error { color: var(--danger); }
+
+    /* Compact catalog picker, shown instead of the sidebar on small screens. */
+    .mobile-cats { display: none; margin-bottom: var(--space-4); }
+    .tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-2); }
+    .tabs .state-msg { grid-column: 1 / -1; }
+    .tab, .catalog-select { font: 600 15px/1 var(--font-sans); display: inline-flex; align-items: center; justify-content: center; min-height: 48px; padding: 0 var(--space-3); border-radius: var(--radius-pill); background: var(--surface-2); border: 2px solid var(--line-strong); color: var(--text); cursor: pointer; white-space: nowrap; }
+    .tab.active, .catalog-select.active { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+    .catalog-select { appearance: none; grid-column: 1 / -1; justify-content: flex-start; padding-left: var(--space-5); -webkit-appearance: none; padding-right: 40px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%2371717a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 16px center; max-width: 100%; }
+    .catalog-select option, .catalog-select optgroup { background: var(--surface); color: var(--text); }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: var(--space-6); }
+    .card { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; cursor: pointer; position: relative; box-shadow: var(--shadow-card); }
+    .card:hover, .card:focus-visible { border-color: var(--accent-fill); box-shadow: var(--shadow-lift); }
+    .card:focus-visible { transform: scale(1.02); }
+    .poster-container { position: relative; width: 100%; aspect-ratio: 16/9; background: var(--surface-2); overflow: hidden; }
+    .background { width: 100%; height: 100%; object-fit: cover; filter: blur(20px) brightness(0.6); transform: scale(1.2); }
+    .poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 1; padding: var(--space-3); }
+    .logo { width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--surface-2); object-fit: contain; padding: 3px; border: 1px solid var(--line); }
+    .meta { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+    .live-badge { display: inline-flex; align-items: center; gap: 6px; background: var(--accent-fill); color: var(--on-accent); font: 600 13px/18px var(--font-sans); letter-spacing: 0.04em; padding: 4px 10px; border-radius: var(--radius-pill); }
+    .live-badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .info { padding: var(--space-4) var(--space-5) var(--space-5); background: var(--surface); }
+    .title { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; line-height: 1.3; margin-bottom: var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .desc { font-size: 0.9rem; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
+
+    #player-overlay { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 100; flex-direction: column; }
+    #close-btn { position: absolute; top: var(--space-6); right: var(--space-10); z-index: 101; }
     #video-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
-    video { width: 100%; max-width: 1400px; max-height: 85vh; border-radius: 16px; background: #000; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
-    
-    #source-selector { display: none; position: absolute; z-index: 102; background: rgba(20,20,20,0.9); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); backdrop-filter: blur(10px); flex-direction: column; gap: 10px; }
-    .source-btn { background: rgba(255,255,255,0.1); color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-weight: 600; transition: background 0.2s; }
-    .source-btn:hover { background: var(--accent); }
-    
-    .loader { position: absolute; display: flex; flex-direction: column; align-items: center; gap: 15px; }
-    .spinner { width: 40px; height: 40px; border: 3px solid rgba(255,255,255,0.1); border-top-color: var(--accent); border-radius: 50%; animation: spin 1s linear infinite; }
+    video { width: 100%; max-width: 1400px; max-height: 85vh; border-radius: var(--radius-md); background: #000; }
+
+    #source-selector { display: none; position: absolute; z-index: 102; background: var(--surface); padding: var(--space-5); border-radius: var(--radius-md); border: 1px solid var(--line-strong); flex-direction: column; gap: var(--space-3); }
+    #source-selector h3 { margin: 0; color: var(--text); font-family: var(--font-display); }
+    .source-btn { min-height: 44px; padding: 0 var(--space-5); background: var(--surface-2); color: var(--text); border: 2px solid var(--line-strong); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 15px; }
+    .source-btn:hover { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+
+    .loader { position: absolute; display: flex; flex-direction: column; align-items: center; gap: var(--space-4); color: var(--text); }
+    .spinner { width: 40px; height: 40px; border: 3px solid var(--line-strong); border-top-color: var(--accent-fill); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    .home-layout { display: flex; align-items: flex-start; gap: 24px; }
-    .catalog-content { flex: 1; min-width: 0; }
-    .provider-health {
-      position: sticky;
-      top: 108px;
-      width: 320px;
-      max-height: calc(100vh - 132px);
-      overflow-y: auto;
-      flex: none;
-      padding: 20px;
-      border: 1px solid var(--card-border);
-      border-radius: 18px;
-      background: rgba(20, 20, 23, 0.75);
-      backdrop-filter: blur(14px);
+    /* Donation modal */
+    .modal { display: none; position: fixed; inset: 0; background: var(--scrim); z-index: 200; align-items: center; justify-content: center; padding: var(--space-5); }
+    .modal-card { background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--radius-lg); padding: var(--space-6); width: 100%; max-width: 420px; max-height: 90vh; overflow-y: auto; position: relative; }
+    .modal-close { position: absolute; top: var(--space-3); right: var(--space-3); }
+    .modal-title { margin: 0 0 var(--space-1); font: 600 22px/28px var(--font-display); color: var(--text); text-align: center; }
+    .modal-sub { margin: 0 0 var(--space-5); font-size: 13px; color: var(--muted); text-align: center; line-height: 1.5; }
+    .divider { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-4) 0; font-size: 13px; color: var(--muted); }
+    .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+    .crypto-list { display: grid; gap: var(--space-3); font-size: 13px; color: var(--muted); }
+    .crypto-item { background: var(--surface-2); padding: var(--space-3); border-radius: var(--radius-md); text-align: center; border: 1px solid var(--line); }
+    .crypto-item img { width: 90px; height: 90px; border-radius: var(--radius-sm); margin-bottom: var(--space-2); border: 1px solid var(--line-strong); }
+    .crypto-name { margin-bottom: var(--space-1); font-weight: 600; color: var(--text); }
+    .crypto-addr { font-family: var(--font-mono); user-select: all; color: var(--text); word-break: break-all; font-size: 12px; margin-bottom: var(--space-2); padding: var(--space-1) 6px; background: var(--surface); border-radius: 6px; }
+    .btn.is-copied { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+
+    /* ---------- View switcher and view modes ---------- */
+    .view-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); flex-wrap: wrap; }
+    .view-label { font: 600 13px/18px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .seg { display: inline-flex; border: 2px solid var(--line-strong); border-radius: var(--radius-md); overflow: hidden; background: var(--surface-2); }
+    .seg button { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 var(--space-3); border: 0; background: none; color: var(--muted); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--line-strong); }
+    .seg button:hover { color: var(--text); background: var(--surface); }
+    .seg button[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); }
+    .seg button:focus-visible { outline-offset: -3px; }
+    .seg svg { width: 18px; height: 18px; flex: none; }
+
+    .sport-chip { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font: 600 12px/18px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; }
+    .sport-chip svg, .cell svg { width: 18px; height: 18px; flex: none; color: var(--accent); }
+    .cells, .table-head { display: none; }
+
+    .grid[data-view="small"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: var(--space-4); }
+    .grid[data-view="small"] .info { padding: var(--space-3); }
+    .grid[data-view="small"] .title { font-size: 1rem; margin-bottom: 0; }
+    .grid[data-view="small"] .desc, .grid[data-view="small"] .logo, .grid[data-view="small"] .sport-chip .txt { display: none; }
+    .grid[data-view="small"] .card { border-radius: var(--radius-md); }
+    .grid[data-view="small"] .poster { padding: 6px; }
+
+    .grid[data-view="large"] { grid-template-columns: repeat(auto-fill, minmax(min(100%, 460px), 1fr)); gap: var(--space-8); }
+    .grid[data-view="large"] .info { padding: var(--space-6); }
+    .grid[data-view="large"] .title { font-size: 1.5rem; }
+    .grid[data-view="large"] .desc { font-size: 1rem; -webkit-line-clamp: 4; }
+    .grid[data-view="large"] .logo { width: 36px; height: 36px; }
+
+    .grid[data-view="table"] { --cols: 120px minmax(0, 2.4fr) minmax(0, 1.3fr) minmax(0, 1.2fr) minmax(0, 1fr) 40px; display: flex; flex-direction: column; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+    .grid[data-view="table"] .table-head { display: grid; grid-template-columns: var(--cols); gap: var(--space-4); padding: var(--space-3) var(--space-4); background: var(--surface-2); border-bottom: 1px solid var(--line); font: 600 12px/1 var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+    .grid[data-view="table"] .card { display: grid; grid-template-columns: var(--cols); gap: var(--space-4); align-items: center; max-width: none; padding: var(--space-2) var(--space-4); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none; background: var(--surface); }
+    .grid[data-view="table"] .card:last-child { border-bottom: 0; }
+    .grid[data-view="table"] .card:hover, .grid[data-view="table"] .card:focus-visible { background: var(--surface-2); transform: none; box-shadow: none; }
+    .grid[data-view="table"] .poster-container { border-radius: var(--radius-sm); }
+    .grid[data-view="table"] .background, .grid[data-view="table"] .desc, .grid[data-view="table"] .meta .sport-chip, .grid[data-view="table"] .meta .logo { display: none; }
+    .grid[data-view="table"] .poster { padding: 2px; }
+    .grid[data-view="table"] .info { display: flex; align-items: center; gap: var(--space-3); min-width: 0; padding: 0; background: none; }
+    .grid[data-view="table"] .meta { margin: 0; flex: none; }
+    .grid[data-view="table"] .title { flex: 1; min-width: 0; margin: 0; font-size: 1rem; }
+    .grid[data-view="table"] .cells { display: contents; }
+    .cell { display: flex; align-items: center; gap: var(--space-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 14px; }
+    .cell-play { justify-content: center; color: var(--text); }
+    .cell-play svg { color: var(--text); }
+    @media (max-width: 900px) {
+      .grid[data-view="table"] { --cols: 96px minmax(0, 1fr) 40px; }
+      .grid[data-view="table"] .table-head span:nth-child(n+3):nth-child(-n+5), .grid[data-view="table"] .cell-league, .grid[data-view="table"] .cell-sport, .grid[data-view="table"] .cell-status { display: none; }
     }
-    .provider-health[hidden] { display: none; }
-    .health-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
-    .health-heading h2 { margin: 0 0 4px; font-family: 'Outfit', sans-serif; font-size: 1.05rem; }
-    .health-heading p { margin: 0; color: var(--text-muted); font-size: 0.72rem; line-height: 1.45; }
-    .health-refresh {
-      padding: 7px 11px;
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
-      background: rgba(255,255,255,0.06);
-      color: var(--text);
-      cursor: pointer;
-      font-size: 0.72rem;
-      font-weight: 600;
+    @media (max-width: 560px) { .seg .t { display: none; } .seg button { padding: 0 var(--space-4); } }
+
+    @media (max-width: 1179px) {
+      .sidebar { display: none; }
+      .mobile-cats { display: block; }
     }
-    .health-refresh:hover { background: rgba(255,255,255,0.12); }
-    .health-refresh:disabled { opacity: 0.55; cursor: wait; }
-    .health-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; }
-    .health-summary-item { padding: 9px 10px; border-radius: 10px; background: rgba(255,255,255,0.045); }
-    .health-summary-item span { display: block; color: var(--text-muted); font-size: 0.65rem; }
-    .health-summary-item strong { display: block; margin-top: 2px; font-size: 0.82rem; font-weight: 600; }
-    .health-list { display: flex; flex-direction: column; gap: 8px; }
-    .health-provider-card { padding: 10px 11px; border: 1px solid var(--card-border); border-radius: 11px; background: rgba(255,255,255,0.025); }
-    .health-provider-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .health-provider-name { min-width: 0; overflow: hidden; color: var(--text); font-size: 0.78rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-    .health-state { display: inline-flex; align-items: center; gap: 5px; flex: none; color: var(--text-muted); font-size: 0.67rem; text-transform: capitalize; }
-    .health-state::before { width: 7px; height: 7px; border-radius: 50%; background: #64748b; content: ""; }
-    .health-state.is-healthy::before, .health-state.is-cached::before { background: #22c55e; }
-    .health-state.is-empty::before, .health-state.is-degraded::before { background: #f59e0b; }
-    .health-state.is-error::before { background: var(--accent); }
-    .health-provider-meta { display: flex; gap: 10px; margin-top: 6px; color: var(--text-muted); font-size: 0.66rem; }
-    .health-note { margin: 6px 0 0; color: #f59e0b; font-size: 0.65rem; line-height: 1.35; overflow-wrap: anywhere; }
-    .health-updated { margin: 12px 0 0; color: var(--text-muted); font-size: 0.65rem; text-align: right; }
-    @media (max-width: 1100px) {
-      .home-layout { flex-direction: column; }
-      .provider-health { position: static; width: 100%; max-height: none; order: 2; }
-      .catalog-content { width: 100%; }
-      .health-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    @media (max-width: 720px) {
+      .search { max-width: none; }
+      #close-btn { right: var(--space-4); top: var(--space-4); }
     }
-  </style>
+    @media (max-width: 480px) { .brand span { display: none; } }
+    </style>
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
 </head>
 <body>
 
-  <header>
-    <div class="brand">
-      <img src="/logo.png" alt="Nuvio Live Sports">
-      <span>Nuvio Live Sports</span>
-    </div>
-    <div class="header-actions">
-      <button onclick="document.getElementById('donate-modal').style.display='flex'" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 94, 91, 0.15); border: 1px solid rgba(255, 94, 91, 0.3); color: #FF5E5B; padding: 8px 16px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 13px; cursor: pointer; transition: all 0.2s;">
-        <svg height="14" viewBox="0 0 24 24" width="14" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
-        Donate ❤️
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
+    <nav class="topnav" aria-label="Site">
+      <a href="/" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
+      <a href="/configure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
+      <a href="/status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
+      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg><span class="nav-label">Discord</span></a>
+      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span></a>
+    </nav>
+    <span class="spacer"></span>
+    <button class="btn icon-only" aria-label="Donate" onclick="document.getElementById('donate-modal').style.display='flex'">
+      <svg height="14" viewBox="0 0 24 24" width="14" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
+      <span class="label">Donate</span>
+    </button>
+    <button type="button" class="icon-btn" id="themeToggle" aria-label="Switch theme">
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
-      <a href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 8px 16px; border-radius: 30px; text-decoration: none; font-weight: 700; font-size: 13px; transition: all 0.2s;">
-        <svg height="14" viewBox="0 0 16 16" width="14" fill="currentColor"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
-        GitHub
-      </a>
-      <a href="/configure" style="background: var(--accent); color: white; padding: 10px 20px; border-radius: 30px; text-decoration: none; font-weight: 700; font-family: 'Outfit', sans-serif; transition: all 0.2s; box-shadow: 0 4px 15px var(--accent-glow);">Configure Plugin</a>
-    </div>
   </header>
 
   <!-- Donation Modal -->
-  <div id="donate-modal" onclick="if(event.target===this)this.style.display='none'" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(12px); z-index:200; align-items:center; justify-content:center; padding:20px;">
-    <div style="background:#111; border:1px solid rgba(255,95,95,0.25); border-radius:20px; padding:28px; width:100%; max-width:420px; max-height:90vh; overflow-y:auto; position:relative;">
-      <button onclick="document.getElementById('donate-modal').style.display='none'" style="position:absolute; top:14px; right:14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.12); color:#fff; padding:6px 14px; border-radius:20px; cursor:pointer; font-size:13px; font-weight:600;">✕ Close</button>
+  <div id="donate-modal" class="modal" onclick="if(event.target===this)this.style.display='none'">
+    <div class="modal-card" role="dialog" aria-labelledby="donate-h">
+      <button type="button" class="btn btn-chip modal-close" onclick="document.getElementById('donate-modal').style.display='none'">Close</button>
+      <h2 class="modal-title" id="donate-h">Keep the server running</h2>
+      <p class="modal-sub">Support covers the public server and the scrapers behind it.</p>
 
-      <p style="margin:0 0 6px 0; font-size:16px; font-weight:700; color:#fff; text-align:center;">❤️ Donation Center</p>
-      <p style="margin:0 0 18px 0; font-size:12px; color:var(--text-muted); text-align:center; line-height:1.6;">Help keep the public server and scrapers alive!</p>
-
-      <!-- Ko-fi -->
-      <a href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer" style="display:inline-flex; align-items:center; justify-content:center; gap:8px; background:#FF5E5B; color:white; padding:13px 20px; border-radius:30px; text-decoration:none; font-weight:700; font-size:14px; box-shadow:0 4px 12px rgba(255,94,91,0.35); width:100%; box-sizing:border-box; margin-bottom:16px;">
+      <a class="btn btn-primary btn-block" href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer">
         <svg height="16" viewBox="0 0 24 24" width="16" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
-        Support on Ko-fi (Card / PayPal)
+        Support on Ko-fi
       </a>
 
-      <!-- Divider -->
-      <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
-        <div style="flex:1; height:1px; background:rgba(255,255,255,0.08);"></div>
-        <span style="font-size:11px; color:var(--text-muted); white-space:nowrap;">or send crypto</span>
-        <div style="flex:1; height:1px; background:rgba(255,255,255,0.08);"></div>
-      </div>
+      <div class="divider">or send crypto</div>
 
-      <!-- Crypto -->
-      <div style="display:grid; grid-template-columns:1fr; gap:10px; font-size:12px; color:var(--text-muted);">
-        <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:12px; text-align:center; border:1px solid rgba(255,255,255,0.06);">
-          <img src="/Ethereum.png" alt="ETH QR" style="width:90px; height:90px; border-radius:8px; margin-bottom:8px; border:2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom:4px; font-weight:600; color:#fff;">ETH / Polygon / Arbitrum / Base</div>
-          <div style="font-family:monospace; user-select:all; color:#ccc; word-break:break-all; font-size:11px; margin-bottom:8px; padding:4px 6px; background:rgba(255,255,255,0.04); border-radius:6px;">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
-          <button onclick="copyCryptoAddress('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)" style="display:inline-flex; align-items:center; justify-content:center; gap:5px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:20px; padding:4px 14px; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.2s;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            <span>Copy Address</span>
+      <div class="crypto-list">
+        <div class="crypto-item">
+          <img src="/Ethereum.png" alt="ETH QR">
+          <div class="crypto-name">ETH / Polygon / Arbitrum / Base</div>
+          <div class="crypto-addr">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
+          <button type="button" class="btn btn-chip" onclick="copyCryptoAddress('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy address</span>
           </button>
         </div>
-        <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:12px; text-align:center; border:1px solid rgba(255,255,255,0.06);">
-          <img src="/solana.png" alt="SOL QR" style="width:90px; height:90px; border-radius:8px; margin-bottom:8px; border:2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom:4px; font-weight:600; color:#fff;">Solana (SOL)</div>
-          <div style="font-family:monospace; user-select:all; color:#ccc; word-break:break-all; font-size:11px; margin-bottom:8px; padding:4px 6px; background:rgba(255,255,255,0.04); border-radius:6px;">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
-          <button onclick="copyCryptoAddress('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)" style="display:inline-flex; align-items:center; justify-content:center; gap:5px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:20px; padding:4px 14px; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.2s;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            <span>Copy Address</span>
+        <div class="crypto-item">
+          <img src="/solana.png" alt="SOL QR">
+          <div class="crypto-name">Solana (SOL)</div>
+          <div class="crypto-addr">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
+          <button type="button" class="btn btn-chip" onclick="copyCryptoAddress('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy address</span>
           </button>
         </div>
-        <div style="background:rgba(0,0,0,0.4); padding:12px; border-radius:12px; text-align:center; border:1px solid rgba(255,255,255,0.06);">
-          <img src="/bitcoin.png" alt="BTC QR" style="width:90px; height:90px; border-radius:8px; margin-bottom:8px; border:2px solid rgba(255,255,255,0.1);">
-          <div style="margin-bottom:4px; font-weight:600; color:#fff;">Bitcoin (BTC)</div>
-          <div style="font-family:monospace; user-select:all; color:#ccc; word-break:break-all; font-size:11px; margin-bottom:8px; padding:4px 6px; background:rgba(255,255,255,0.04); border-radius:6px;">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
-          <button onclick="copyCryptoAddress('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)" style="display:inline-flex; align-items:center; justify-content:center; gap:5px; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); color:#fff; border-radius:20px; padding:4px 14px; font-size:11px; font-weight:600; cursor:pointer; transition:all 0.2s;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            <span>Copy Address</span>
+        <div class="crypto-item">
+          <img src="/bitcoin.png" alt="BTC QR">
+          <div class="crypto-name">Bitcoin (BTC)</div>
+          <div class="crypto-addr">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
+          <button type="button" class="btn btn-chip" onclick="copyCryptoAddress('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span>Copy address</span>
           </button>
         </div>
       </div>
     </div>
   </div>
 
-  <main>
-    <div class="home-layout">
-      <section class="catalog-content" aria-label="Sports catalogs">
-        <div style="display: flex; gap: 15px; margin-bottom: 30px; align-items: center; flex-wrap: wrap;">
-          <div class="tabs" id="tabs" style="flex: 1; margin-bottom: 0;">
-            <div style="color:var(--text-muted);">Loading catalogs...</div>
-          </div>
-          <input type="text" id="searchInput" placeholder="Search matches..." style="padding: 10px 20px; border-radius: 30px; background: rgba(255,255,255,0.05); border: 1px solid var(--card-border); color: white; outline: none; min-width: 200px; font-family: 'Inter', sans-serif;">
-        </div>
-        <div class="grid" id="grid"></div>
-      </section>
+  <div class="layout">
+    <aside class="sidebar" aria-label="Catalogs">
+      <nav class="catnav" id="catalogNav" aria-label="Catalogs"><div class="state-msg">Loading catalogs...</div></nav>
+      <div class="side-card"><strong>Keep the server running</strong>Support covers the public server and the scrapers behind it. <a href="#donate" onclick="document.getElementById('donate-modal').style.display='flex';return false;">Ways to help</a></div>
+    </aside>
 
-      <aside class="provider-health" id="providerHealthPanel" aria-labelledby="providerHealthHeading" hidden>
-        <div class="health-heading">
-          <div>
-            <h2 id="providerHealthHeading">Provider health</h2>
-            <p>Catalog sync status for this instance.</p>
-          </div>
-          <button type="button" class="health-refresh" id="refreshProviderHealth">Refresh</button>
+    <main class="content">
+      <div class="page-head">
+        <div>
+          <p class="eyebrow">Now showing</p>
+          <h1 id="catalogTitle">Live matches</h1>
+          <p class="lede" id="catalogCount" aria-live="polite"></p>
         </div>
-        <div class="health-summary" id="providerHealthSummary" aria-live="polite"></div>
-        <div class="health-list" id="providerHealthList"></div>
-        <p class="health-updated" id="providerHealthUpdated"></p>
-      </aside>
+        <input type="text" id="searchInput" class="search" placeholder="Search matches..." aria-label="Search matches">
+      </div>
+      <div class="mobile-cats"><div class="tabs" id="tabs"><div class="state-msg">Loading catalogs...</div></div></div>
+      <div class="view-bar">
+        <span class="view-label" id="viewLabel">View</span>
+        <div class="seg" role="radiogroup" aria-labelledby="viewLabel">
+          <button type="button" role="radio" aria-checked="false" data-view="small" title="Small cards"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="5" height="5" rx="1"/><rect x="9.5" y="3" width="5" height="5" rx="1"/><rect x="16" y="3" width="5" height="5" rx="1"/><rect x="3" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><rect x="16" y="9.5" width="5" height="5" rx="1"/><rect x="3" y="16" width="5" height="5" rx="1"/><rect x="9.5" y="16" width="5" height="5" rx="1"/><rect x="16" y="16" width="5" height="5" rx="1"/></svg><span class="t">Small</span></button>
+          <button type="button" role="radio" aria-checked="false" data-view="medium" title="Medium cards"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg><span class="t">Medium</span></button>
+          <button type="button" role="radio" aria-checked="false" data-view="large" title="Large cards"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="18" height="11" rx="1.5"/><rect x="3" y="16" width="12" height="2.5" rx="1"/><rect x="3" y="20" width="8" height="1.5" rx=".75"/></svg><span class="t">Large</span></button>
+          <button type="button" role="radio" aria-checked="false" data-view="table" title="Table"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M3 6h18M3 12h18M3 18h18"/><path d="M3 6h.01M3 12h.01M3 18h.01" stroke-width="3"/></svg><span class="t">Table</span></button>
+        </div>
+      </div>
+      <section aria-label="Matches"><div class="grid" id="grid" data-view="medium"></div></section>
+    </main>
+
+    <div class="rail">
+      <section class="card-info" aria-labelledby="tv-h">
+        <h2 id="tv-h">Get it on your TV</h2>
+        <p>Choose your sports and sources, then install the add-on in Nuvio.</p>
+        <a class="btn btn-primary btn-block" href="/configure">Configure add-on</a>
+      </section>
     </div>
-  </main>
+  </div>
+
 
   <div id="player-overlay">
-    <button id="close-btn" onclick="closePlayer()">Close Player</button>
+    <button id="close-btn" class="btn" onclick="closePlayer()">Close Player</button>
     
     <div id="source-selector">
-      <h3 style="margin-top:0; color:white; font-family:'Outfit',sans-serif;">Select Stream Source</h3>
+      <h3>Select Stream Source</h3>
       <div id="source-buttons" style="display:flex; flex-direction:column; gap:10px;"></div>
     </div>
 
@@ -243,50 +286,152 @@
     let hls = null;
     let currentMatches = [];
 
+    // Catalog names come from the server with decorative emoji; the interface shows words only.
+    const stripEmoji = (v) => String(v || '')
+      .replace(/[\p{Extended_Pictographic}\p{Regional_Indicator}\uFE0F\u200D\u{E0020}-\u{E007F}]/gu, '')
+      .replace(/[ \t]+/g, ' ')
+      .trim();
+    const escapeHtml = (v) => String(v || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const FEATURED = /live now|24\/7|upcoming/i;
+    const BUCKET = /^(today's|yesterday's|this week's|older|recent)\b/i;
+
+    const catalogNames = {};
+    function catalogLabel(catalog) {
+      return stripEmoji(catalog.name).replace(/^nuvio /i, '');
+    }
+
+    // Splits non-featured catalogs into groups: a league followed by its date buckets
+    // becomes its own group, single catalogs are pooled under Sports and leagues / Replays.
+    function groupCatalogs(rest) {
+      const pools = { 'Sports and leagues': [], 'Replays': [] };
+      const groups = [];
+      let current = null;
+      rest.forEach((c) => {
+        if (BUCKET.test(catalogLabel(c))) {
+          if (current) current.items.push(c); else pools['Sports and leagues'].push(c);
+        } else {
+          current = { label: catalogLabel(c), items: [c] };
+          groups.push(current);
+        }
+      });
+      const multi = [];
+      groups.forEach((g) => {
+        if (g.items.length > 1) multi.push(g);
+        else pools[/replays/i.test(g.label) ? 'Replays' : 'Sports and leagues'].push(g.items[0]);
+      });
+      const out = [];
+      Object.keys(pools).forEach((label) => { if (pools[label].length) out.push({ label, items: pools[label] }); });
+      return out.concat(multi);
+    }
+
+    function catButton(catalog) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'cat-item';
+      b.dataset.catalog = catalog.id;
+      const label = catalogLabel(catalog);
+      b.insertAdjacentHTML('beforeend', iconFor(label));
+      const t = document.createElement('span');
+      t.className = 'cat-text';
+      t.textContent = label;
+      b.appendChild(t);
+      b.addEventListener('click', () => loadCatalog(catalog.id));
+      return b;
+    }
+
+    function buildCatalogSelect(groups) {
+      const select = document.createElement('select');
+      select.className = 'catalog-select';
+      select.setAttribute('aria-label', 'More catalogs');
+      select.appendChild(new Option('More catalogs', ''));
+      groups.forEach((g) => {
+        const og = document.createElement('optgroup');
+        og.label = g.label;
+        g.items.forEach((c) => og.appendChild(new Option(catalogLabel(c), c.id)));
+        select.appendChild(og);
+      });
+      select.addEventListener('change', () => { if (select.value) loadCatalog(select.value); });
+      return select;
+    }
+
     async function loadTabs() {
       try {
         const res = await fetch('/manifest.json');
         const manifest = await res.json();
+        const nav = document.getElementById('catalogNav');
         const tabsContainer = document.getElementById('tabs');
-        tabsContainer.innerHTML = '';
-        
-        let firstCatalog = null;
-        let firstTab = null;
+        nav.textContent = '';
+        tabsContainer.textContent = '';
 
-        manifest.catalogs.forEach((catalog) => {
-          // Skip non-TV catalogs or internal ones
-          if (catalog.type !== 'tv' || catalog.id === 'nuvio_sports_teams') return;
-          
-          if (!firstCatalog) firstCatalog = catalog.id;
-          
-          const tab = document.createElement('div');
-          tab.className = 'tab';
-          tab.innerText = catalog.name.replace('nuvio ', '').replace('Nuvio ', '');
-          tab.onclick = () => loadCatalog(catalog.id, tab);
-          tabsContainer.appendChild(tab);
-          
-          if (!firstTab) firstTab = tab;
+        // Skip non-TV catalogs and internal ones.
+        const catalogs = manifest.catalogs.filter((c) => c.type === 'tv' && c.id !== 'nuvio_sports_teams');
+        catalogs.forEach((c) => { catalogNames[c.id] = catalogLabel(c); });
+        const featured = catalogs.filter((c) => FEATURED.test(catalogLabel(c)));
+        const groups = groupCatalogs(catalogs.filter((c) => !featured.includes(c)));
+
+        // Sidebar: featured items first, then collapsible groups.
+        featured.forEach((c) => nav.appendChild(catButton(c)));
+        groups.forEach((g) => {
+          const d = document.createElement('details');
+          d.className = 'cat-group';
+          const sum = document.createElement('summary');
+          sum.insertAdjacentHTML('beforeend', iconFor(g.label));
+          const gl = document.createElement('span');
+          gl.className = 'cat-text';
+          gl.textContent = g.label;
+          sum.appendChild(gl);
+          d.appendChild(sum);
+          g.items.forEach((c) => d.appendChild(catButton(c)));
+          nav.appendChild(d);
         });
 
-        if (firstCatalog && firstTab) {
-          loadCatalog(firstCatalog, firstTab);
-        }
+        // Small screens: featured tabs plus one grouped picker.
+        featured.forEach((c) => {
+          const tab = document.createElement('button');
+          tab.type = 'button';
+          tab.className = 'tab';
+          tab.dataset.catalog = c.id;
+          tab.textContent = catalogLabel(c);
+          tab.addEventListener('click', () => loadCatalog(c.id));
+          tabsContainer.appendChild(tab);
+        });
+        if (groups.length) tabsContainer.appendChild(buildCatalogSelect(groups));
+
+        const first = featured[0] || (groups[0] && groups[0].items[0]);
+        if (first) loadCatalog(first.id);
       } catch (err) {
         console.error('Failed to load manifest', err);
-        document.getElementById('tabs').innerHTML = '<div style="color:var(--accent);">Failed to load catalogs. Ensure server is running.</div>';
+        const msg = '<div class="state-msg is-error">Failed to load catalogs. Ensure server is running.</div>';
+        document.getElementById('catalogNav').innerHTML = msg;
+        document.getElementById('tabs').innerHTML = msg;
       }
     }
 
-    async function loadCatalog(catalogId, tabElement) {
-      if (tabElement) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        tabElement.classList.add('active');
+    function setActiveCatalog(id) {
+      document.querySelectorAll('[data-catalog]').forEach((el) => {
+        const on = el.dataset.catalog === id;
+        el.classList.toggle('active', on);
+        if (on) el.setAttribute('aria-current', 'true'); else el.removeAttribute('aria-current');
+      });
+      const sel = document.querySelector('.catalog-select');
+      if (sel) {
+        const has = Array.from(sel.options).some((o) => o.value === id);
+        sel.value = has ? id : '';
+        sel.classList.toggle('active', has);
       }
+      const item = document.querySelector('.cat-item.active');
+      const group = item && item.closest('details');
+      if (group) group.open = true;
+      document.getElementById('catalogTitle').textContent = catalogNames[id] || 'Live matches';
+    }
 
+    async function loadCatalog(catalogId) {
+      setActiveCatalog(catalogId);
       const grid = document.getElementById('grid');
-      grid.innerHTML = '<div style="color:var(--text-muted);">Fetching matches...</div>';
-      document.getElementById('searchInput').value = ''; // Reset search on tab change
-      
+      grid.innerHTML = '<div class="state-msg">Fetching matches...</div>';
+      document.getElementById('catalogCount').textContent = '';
+      document.getElementById('searchInput').value = ''; // Reset search on catalog change
+
       try {
         const res = await fetch(`/catalog/tv/${catalogId}.json`);
         const data = await res.json();
@@ -294,7 +439,7 @@
         renderGrid(currentMatches);
       } catch (err) {
         console.error(err);
-        grid.innerHTML = '<div style="color:var(--accent);">Failed to load catalog. Ensure the Nuvio plugin is running.</div>';
+        grid.innerHTML = '<div class="state-msg is-error">Failed to load catalog. Ensure the Nuvio plugin is running.</div>';
       }
     }
 
@@ -307,33 +452,115 @@
       renderGrid(filtered);
     });
 
+    // ---- Sport icons (24px outline glyphs) and view modes ----
+    const svg = (inner) => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+    const ICONS = {
+      football: svg('<circle cx="12" cy="12" r="9"/><path d="M12 8.5l3.2 2.3-1.2 3.7h-4l-1.2-3.7z"/><path d="M12 8.5V3.2M15.2 10.8l5-1.6M14 14.5l3 4.2M10 14.5l-3 4.2M8.8 10.8l-5-1.6"/>'),
+      basketball: svg('<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18M5.6 5.6c3.6 3.6 3.6 9.2 0 12.8M18.4 5.6c-3.6 3.6-3.6 9.2 0 12.8"/>'),
+      motorsport: svg('<path d="M5 21V4"/><path d="M5 4h13l-2 4 2 4H5"/><path d="M9 4v8M13 4v8"/>'),
+      tennis: svg('<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6c3.4 3.4 3.4 9.4 0 12.8M18.4 5.6c-3.4 3.4-3.4 9.4 0 12.8"/>'),
+      baseball: svg('<circle cx="12" cy="12" r="9"/><path d="M7 4.5c2 2.2 2 12.8 0 15M17 4.5c-2 2.2-2 12.8 0 15"/>'),
+      afootball: svg('<path d="M4 20C4 11 11 4 20 4c0 9-7 16-16 16z"/><path d="M9 15l6-6M10.5 10.5l3 3"/>'),
+      hockey: svg('<path d="M5 3l8 14h6"/><ellipse cx="9" cy="20" rx="4" ry="1.5"/>'),
+      live: svg('<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>'),
+      tv: svg('<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>'),
+      clock: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+      cricket: svg('<path d="M15 3l6 6-10.5 10.5a2 2 0 0 1-2.8 0l-3.2-3.2a2 2 0 0 1 0-2.8z"/><circle cx="5.5" cy="19.5" r="1.8"/>'),
+      rugby: svg('<ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-35 12 12)"/><path d="M9.5 14.5l5-5M11 11l2 2"/>'),
+      mma: svg('<path d="M7 11V7a3 3 0 0 1 3-3h3a4 4 0 0 1 4 4v3a5 5 0 0 1-5 5H9a2 2 0 0 1-2-2z"/><path d="M8 20h6"/>'),
+      golf: svg('<path d="M12 3v14"/><path d="M12 3l7 3-7 3"/><ellipse cx="12" cy="20" rx="6" ry="1.5"/>'),
+      college: svg('<path d="M2 9l10-5 10 5-10 5z"/><path d="M6 11v5c0 1.5 3 3 6 3s6-1.5 6-3v-5"/>'),
+      replay: svg('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 8v4l3 2"/>'),
+      calendar: svg('<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>'),
+      trophy: svg('<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M12 13v4M9 20h6"/>')
+    };
+    function iconFor(label) {
+      const c = String(label || '').toLowerCase();
+      if (/live now/.test(c)) return ICONS.live;
+      if (/24\/7|\btv\b/.test(c)) return ICONS.tv;
+      if (/upcoming/.test(c)) return ICONS.clock;
+      if (/american|nfl/.test(c)) return ICONS.afootball;
+      if (/college/.test(c)) return ICONS.college;
+      if (/foot|soccer|premier|champions|la liga|serie a|bundesliga/.test(c)) return ICONS.football;
+      if (/cricket/.test(c)) return ICONS.cricket;
+      if (/rugby/.test(c)) return ICONS.rugby;
+      if (/basket|nba/.test(c)) return ICONS.basketball;
+      if (/motor|racing|f1|formula/.test(c)) return ICONS.motorsport;
+      if (/tennis|atp|wta/.test(c)) return ICONS.tennis;
+      if (/baseball|mlb/.test(c)) return ICONS.baseball;
+      if (/hockey|nhl/.test(c)) return ICONS.hockey;
+      if (/mma|ufc|boxing|fight/.test(c)) return ICONS.mma;
+      if (/golf/.test(c)) return ICONS.golf;
+      if (/replay|older/.test(c)) return ICONS.replay;
+      if (/today|yesterday|week|recent/.test(c)) return ICONS.calendar;
+      return ICONS.trophy;
+    }
+    function prettyCategory(value) {
+      return String(value || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (ch) => ch.toUpperCase()).trim();
+    }
+
+    const VIEWS = ['small', 'medium', 'large', 'table'];
+    function storedView() {
+      try { const v = localStorage.getItem('nuvio-view'); if (VIEWS.includes(v)) return v; } catch (e) {}
+      return 'medium';
+    }
+    function applyView(view, persist) {
+      document.getElementById('grid').dataset.view = view;
+      document.querySelectorAll('.seg button').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.view === view)));
+      if (persist) { try { localStorage.setItem('nuvio-view', view); } catch (e) {} }
+    }
+    document.querySelectorAll('.seg button').forEach((b) => b.addEventListener('click', () => applyView(b.dataset.view, true)));
+    applyView(storedView(), false);
+
     function renderGrid(metas) {
       const grid = document.getElementById('grid');
       grid.innerHTML = '';
-      
+      grid.insertAdjacentHTML('afterbegin', '<div class="table-head" aria-hidden="true"><span></span><span>Match</span><span>League</span><span>Sport</span><span>Status</span><span></span></div>');
+      const total = currentMatches.length;
+      document.getElementById('catalogCount').textContent = (metas && metas.length !== total ? metas.length + ' of ' + total : total) + (total === 1 ? ' match' : ' matches');
+
       if (!metas || metas.length === 0) {
-        grid.innerHTML = '<div style="color:var(--text-muted);">No live matches found matching your criteria right now.</div>';
+        grid.innerHTML = '<div class="state-msg">No live matches found matching your criteria right now.</div>';
         return;
       }
 
       metas.forEach(meta => {
         const card = document.createElement('div');
         card.className = 'card';
+        card.tabIndex = 0;
+        card.setAttribute('role', 'button');
+        card.setAttribute('aria-label', 'Play ' + stripEmoji(meta.name));
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
         card.onclick = () => fetchAndPlay(meta.id);
         
-        const isLive = meta.name.includes('🔴');
-        const cleanName = meta.name.replace('🔴 [LIVE] ', '');
-        
+        const isLive = meta.name.includes('\u{1F534}');
+        let cleanName = stripEmoji(meta.name).replace(/^\[?LIVE\]?:?\s*/i, '');
+        if (!isLive) cleanName = stripEmoji(meta.name);
+        const rawLines = (meta.description || '').split('\n').map(stripEmoji).filter(Boolean);
+        const descLines = rawLines.map(escapeHtml);
+        const fields = {};
+        rawLines.forEach((l) => { const m = /^([^:]+):\s*(.+)$/.exec(l); if (m) fields[m[1].trim().toLowerCase()] = m[2].trim(); });
+        const category = prettyCategory(fields.category);
+        const league = fields.league || '';
+        const status = fields.status || (isLive ? 'Live now' : '');
+        const sportIcon = iconFor(fields.category || '');
+        const hasLogo = meta.logo && meta.logo !== meta.poster;
+
         card.innerHTML = `
           <div class="poster-container">
-            <img class="background" src="${meta.background}" onerror="this.style.display='none'" loading="lazy">
-            <img class="poster" src="${meta.poster}" onerror="this.src='https://raw.githubusercontent.com/stremio/stremio-addon-sdk/master/docs/api/images/stremio-logo.png'" loading="lazy">
-            ${meta.logo && meta.logo !== meta.poster ? `<img class="logo" src="${meta.logo}">` : ''}
-            ${isLive ? '<div class="live-badge">LIVE</div>' : ''}
+            <img class="background" src="${meta.background}" alt="" onerror="this.style.display='none'" loading="lazy">
+            <img class="poster" src="${meta.poster}" alt="" onerror="this.src='https://raw.githubusercontent.com/stremio/stremio-addon-sdk/master/docs/api/images/stremio-logo.png'" loading="lazy">
           </div>
           <div class="info">
-            <div class="title">${cleanName}</div>
-            <div class="desc">${(meta.description || '').replace(/\n/g, '<br>')}</div>
+            <div class="meta">${isLive ? '<span class="live-badge">Live</span>' : ''}${category ? `<span class="sport-chip">${sportIcon}<span class="txt">${escapeHtml(category)}</span></span>` : ''}${hasLogo ? `<img class="logo" src="${meta.logo}" alt="">` : ''}</div>
+            <div class="title">${escapeHtml(cleanName)}</div>
+            <div class="desc">${descLines.join('<br>')}</div>
+          </div>
+          <div class="cells" aria-hidden="true">
+            <span class="cell cell-league">${ICONS.trophy}<span>${escapeHtml(league)}</span></span>
+            <span class="cell cell-sport">${sportIcon}<span>${escapeHtml(category)}</span></span>
+            <span class="cell cell-status">${escapeHtml(status)}</span>
+            <span class="cell cell-play"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg></span>
           </div>
         `;
         grid.appendChild(card);
@@ -438,13 +665,11 @@
     function copyCryptoAddress(text, btn) {
       const showSuccess = () => {
         const origHtml = btn.innerHTML;
-        btn.innerHTML = '<span>✓ Copied!</span>';
-        btn.style.background = '#10b981';
-        btn.style.borderColor = '#10b981';
+        btn.innerHTML = '<span>✓ Copied</span>';
+        btn.classList.add('is-copied');
         setTimeout(() => {
           btn.innerHTML = origHtml;
-          btn.style.background = 'rgba(255,255,255,0.1)';
-          btn.style.borderColor = 'rgba(255,255,255,0.15)';
+          btn.classList.remove('is-copied');
         }, 2000);
       };
 
@@ -470,108 +695,29 @@
       }
     }
 
-    const providerHealthPanel = document.getElementById('providerHealthPanel');
-    const providerHealthSummary = document.getElementById('providerHealthSummary');
-    const providerHealthList = document.getElementById('providerHealthList');
-    const providerHealthUpdated = document.getElementById('providerHealthUpdated');
-    const refreshProviderHealth = document.getElementById('refreshProviderHealth');
-
-    function formatHealthAge(value) {
-      if (!value) return 'Never';
-      const time = new Date(value).getTime();
-      if (!Number.isFinite(time)) return 'Unknown';
-      const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
-      if (seconds < 60) return seconds + 's ago';
-      if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
-      if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
-      return Math.round(seconds / 86400) + 'd ago';
-    }
-
-    function addHealthSummary(label, value) {
-      const item = document.createElement('div');
-      item.className = 'health-summary-item';
-      const key = document.createElement('span');
-      key.textContent = label;
-      const result = document.createElement('strong');
-      result.textContent = value;
-      item.append(key, result);
-      providerHealthSummary.appendChild(item);
-    }
-
-    function renderProviderHealth(data) {
-      const providers = Array.isArray(data.providers) ? data.providers : [];
-      const sync = data.sync || {};
-      const breakers = data.circuitBreakers && typeof data.circuitBreakers === 'object'
-        ? Object.values(data.circuitBreakers)
-        : [];
-      const openBreakers = breakers.filter((breaker) => breaker && breaker.state === 'open').length;
-
-      providerHealthPanel.hidden = false;
-      providerHealthSummary.replaceChildren();
-      addHealthSummary('Sync', sync.state || 'unknown');
-      addHealthSummary('Catalog', Number.isFinite(sync.matchCount) ? String(sync.matchCount) : 'Not synced');
-      addHealthSummary('Duration', Number.isFinite(sync.durationMs) ? (sync.durationMs / 1000).toFixed(1) + 's' : 'n/a');
-      addHealthSummary('Open breakers', String(openBreakers));
-
-      providerHealthList.replaceChildren();
-      for (const provider of providers) {
-        const card = document.createElement('div');
-        card.className = 'health-provider-card';
-        const head = document.createElement('div');
-        head.className = 'health-provider-head';
-        const name = document.createElement('span');
-        name.className = 'health-provider-name';
-        name.textContent = provider.name || provider.id || 'Unknown';
-        const stateName = provider.state || 'unknown';
-        const state = document.createElement('span');
-        state.className = 'health-state is-' + stateName;
-        state.textContent = stateName;
-        head.append(name, state);
-
-        const meta = document.createElement('div');
-        meta.className = 'health-provider-meta';
-        const fixtures = document.createElement('span');
-        fixtures.textContent = Number.isFinite(provider.matchCount) ? provider.matchCount + ' fixtures' : 'No fixture data';
-        const latency = document.createElement('span');
-        latency.textContent = Number.isFinite(provider.durationMs) ? provider.durationMs + ' ms' : 'Not checked';
-        const checked = document.createElement('span');
-        checked.textContent = formatHealthAge(provider.lastAttemptAt);
-        meta.append(fixtures, latency, checked);
-        card.append(head, meta);
-
-        const noteText = provider.error || provider.note ||
-          (provider.carriedForwardCount > 0 ? provider.carriedForwardCount + ' fixtures carried forward' : '');
-        if (noteText) {
-          const note = document.createElement('p');
-          note.className = 'health-note';
-          note.textContent = noteText;
-          card.appendChild(note);
-        }
-        providerHealthList.appendChild(card);
-      }
-      providerHealthUpdated.textContent = 'Updated ' + formatHealthAge(data.generatedAt);
-    }
-
-    async function loadProviderHealth() {
-      refreshProviderHealth.disabled = true;
-      try {
-        const response = await fetch('/api/provider-health', { cache: 'no-store' });
-        if (!response.ok) return;
-        renderProviderHealth(await response.json());
-      } catch (_) {
-        if (!providerHealthPanel.hidden) providerHealthUpdated.textContent = 'Refresh failed';
-      } finally {
-        refreshProviderHealth.disabled = false;
-      }
-    }
-
-    refreshProviderHealth.addEventListener('click', loadProviderHealth);
-    loadProviderHealth();
-    setInterval(() => {
-      if (!providerHealthPanel.hidden && !document.hidden) loadProviderHealth();
-    }, 30000);
-
     loadTabs();
+  
+    (function () {
+      var b = document.getElementById('themeToggle');
+      if (!b) return;
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      var root = document.documentElement;
+      function eff() { return root.getAttribute('data-theme') || (mq.matches ? 'light' : 'dark'); }
+      function paint() {
+        var light = eff() === 'light';
+        b.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
+        b.querySelector('.ico-sun').toggleAttribute('hidden', light);
+        b.querySelector('.ico-moon').toggleAttribute('hidden', !light);
+      }
+      b.addEventListener('click', function () {
+        var next = eff() === 'light' ? 'dark' : 'light';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem('nuvio-theme', next); } catch (e) {}
+        paint();
+      });
+      if (mq.addEventListener) mq.addEventListener('change', paint);
+      paint();
+    })();
   </script>
 </body>
 </html>

@@ -1,0 +1,110 @@
+
+
+    /* Nuvio Live Sports shared UI: design tokens plus the chrome both pages use (top bar, layout, buttons, page head, footer).
+       Design tokens: Nuvio Live Sports design system.
+       Dark by default; follows the system setting; the toggle sets data-theme to override. */
+    :root {
+      --bg: #0a0a0c; --surface: #131318; --surface-2: #191920;
+      --line: #2a2a33; --line-strong: #71717f;
+      --text: #f4f4f5; --muted: #a1a1aa; --faint: #8e8e99;
+      --accent: #f87171; --accent-fill: #dc2626; --on-accent: #ffffff; --brand: #ef4444;
+      --ok: #22c55e; --warn: #f59e0b; --danger: #f87171; --focus: #ffffff;
+      --scrim: #0a0a0ccc;
+      --shadow-card: 0 8px 24px #00000066; --shadow-lift: 0 16px 40px #000000b3;
+      --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px; --space-5: 20px;
+      --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px; --space-16: 64px;
+      --radius-sm: 8px; --radius-md: 12px; --radius-lg: 20px; --radius-pill: 999px;
+      --font-display: "Outfit", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+      color-scheme: dark;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg: #f4f4f6; --surface: #ffffff; --surface-2: #ebebf0;
+        --line: #d4d4dc; --line-strong: #71717a;
+        --text: #18181b; --muted: #52525b; --faint: #63636d;
+        --accent: #b91c1c; --ok: #166534; --warn: #92400e; --danger: #b91c1c; --focus: #18181b;
+        --scrim: #18181b99;
+        --shadow-card: 0 4px 16px #18181b1f; --shadow-lift: 0 12px 32px #18181b40;
+        color-scheme: light;
+      }
+    }
+    :root[data-theme="light"] {
+        --bg: #f4f4f6; --surface: #ffffff; --surface-2: #ebebf0;
+        --line: #d4d4dc; --line-strong: #71717a;
+        --text: #18181b; --muted: #52525b; --faint: #63636d;
+        --accent: #b91c1c; --ok: #166534; --warn: #92400e; --danger: #b91c1c; --focus: #18181b;
+        --scrim: #18181b99;
+        --shadow-card: 0 4px 16px #18181b1f; --shadow-lift: 0 12px 32px #18181b40;
+        color-scheme: light;
+    }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); cursor: pointer; }
+    .icon-btn svg { width: 20px; height: 20px; }
+    .icon-btn [hidden] { display: none; }
+    :root { --discord: #5865f2; --kofi: #ff5e5b; }
+
+    html { -webkit-text-size-adjust: 100%; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 var(--font-sans); -webkit-font-smoothing: antialiased; min-height: 100vh; }
+    h1, h2, h3 { font-family: var(--font-display); }
+    a { color: var(--accent); }
+
+    /* ---------- Top bar ---------- */
+    .topbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: var(--space-2); min-height: 64px; padding: 0 var(--space-6); background: var(--surface); border-bottom: 1px solid var(--line); }
+    .brand { display: inline-flex; align-items: center; gap: var(--space-3); font: 700 20px/1 var(--font-display); color: var(--text); text-decoration: none; letter-spacing: -0.01em; white-space: nowrap; }
+    .brand img { width: 36px; height: 36px; border-radius: var(--radius-sm); object-fit: cover; border: 1px solid var(--line); }
+    .topnav { display: flex; gap: var(--space-1); margin-left: var(--space-6); }
+    .topnav a { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 14px; color: var(--muted); font-weight: 600; text-decoration: none; border-radius: var(--radius-md); }
+    .topnav a svg { width: 18px; height: 18px; flex: none; }
+    .topnav a:hover { color: var(--text); }
+    .topnav a[aria-current="page"] { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent-fill); border-radius: 0; }
+    .spacer { flex: 1; }
+
+    /* ---------- Buttons: compact by default; pages enlarge them for form actions ---------- */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: 44px; padding: 0 var(--space-5); border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font: 600 14px/1 var(--font-sans); text-decoration: none; cursor: pointer; }
+    .btn:hover { background: var(--surface); }
+    .btn:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .btn-primary { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); font-family: var(--font-display); }
+    .btn-primary:hover { background: var(--accent-fill); border-color: var(--focus); }
+    .btn-block { width: 100%; }
+    .btn svg { flex: none; }
+
+    /* ---------- Three-column layout: sidebar, content, rail ---------- */
+    .layout { display: grid; grid-template-columns: 248px minmax(0, 1fr) 340px; gap: var(--space-6); max-width: none; margin: 0; padding: var(--space-6); align-items: start; }
+    .sidebar, .rail { position: sticky; top: 88px; min-width: 0; max-height: calc(100vh - 104px); overflow-y: auto; display: grid; gap: var(--space-4); align-content: start; padding: 4px; margin: -4px; }
+    .content { min-width: 0; }
+    .side-card { padding: var(--space-4); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-md); font-size: 14px; color: var(--muted); }
+    .side-card strong { display: block; margin: 0 0 4px; color: var(--text); font: 600 16px/22px var(--font-display); }
+    .side-card a { font-weight: 600; }
+    .rail h2 { margin: 0 0 var(--space-4); font: 600 18px/24px var(--font-display); }
+
+    /* ---------- Page head ---------- */
+    .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; margin-bottom: var(--space-5); padding: var(--space-6); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+    .eyebrow { margin: 0 0 var(--space-1); font: 600 13px/18px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+    .page-head h1 { margin: 0; font-weight: 700; font-size: 32px; line-height: 38px; letter-spacing: -0.02em; }
+    .lede { margin: 4px 0 0; max-width: 56ch; color: var(--muted); font-size: 15px; }
+
+    /* ---------- Link buttons ---------- */
+    .link-btn { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 48px; padding: 11px 16px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font-size: 15px; font-weight: 600; text-decoration: none; }
+    .link-btn:hover { background: var(--surface); }
+    .link-btn svg { flex: none; }
+    .support-link svg { color: var(--kofi); }
+
+    @media (max-width: 1179px) {
+      .layout { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); gap: var(--space-4); }
+      .rail { position: static; max-height: none; overflow: visible; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .topbar { padding: 0 var(--space-4); }
+      .topnav { margin-left: var(--space-2); }
+      .topnav .hide-sm, .btn .label { display: none; }
+      .btn.icon-only { padding: 0; width: 44px; }
+      .page-head { padding: var(--space-4); border-radius: var(--radius-md); }
+      .page-head h1 { font-size: 26px; line-height: 32px; }
+      .rail { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 560px) { .topnav a { padding: 0 12px; } .topnav .nav-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } }
+    @media (max-width: 480px) { .brand span { display: none; } }
+    @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; } }

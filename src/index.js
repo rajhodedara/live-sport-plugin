@@ -86,6 +86,10 @@ app.get(['/configure', '/:config/configure'], (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'configure.html'));
 });
 
+app.get('/status', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'status.html'));
+});
+
 app.get(['/donate', '/:config/donate'], (req, res) => {
   res.redirect('/#donate');
 });

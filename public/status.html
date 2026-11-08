@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0a0a0c">
+  <title>Nuvio Live Sports | Status</title>
+  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui.css">
+  <style>
+    .layout { grid-template-columns: minmax(0, 1fr); }
+    .page-head .head-tools { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+    .updated { color: var(--muted); font-size: 14px; }
+    .btn-chip { min-height: 40px; }
+    .btn:disabled { opacity: 0.55; cursor: wait; }
+    .state-msg { color: var(--muted); }
+    .state-msg.is-error { color: var(--danger); }
+
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: var(--space-4); margin-bottom: var(--space-5); }
+    .tile { padding: var(--space-5); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+    .tile span { display: block; color: var(--muted); font: 600 13px/18px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; }
+    .tile strong { display: block; margin-top: var(--space-1); font: 700 28px/34px var(--font-display); text-transform: capitalize; overflow-wrap: anywhere; }
+
+    .section-title { margin: var(--space-6) 0 var(--space-3); font: 600 22px/28px var(--font-display); }
+    .health-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--space-3); }
+    .health-provider-card { padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
+    .health-provider-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
+    .health-provider-name { min-width: 0; overflow: hidden; color: var(--text); font-size: 16px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+    .health-state { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--text); font-size: 13px; font-weight: 600; text-transform: capitalize; }
+    .health-state::before { width: 10px; height: 10px; border-radius: 50%; background: var(--faint); content: ""; }
+    .health-state.is-healthy::before, .health-state.is-cached::before { background: var(--ok); }
+    .health-state.is-empty::before, .health-state.is-degraded::before { background: var(--warn); }
+    .health-state.is-error::before { background: var(--accent-fill); }
+    .health-provider-meta { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); margin-top: var(--space-2); color: var(--muted); font-size: 14px; }
+    .health-note { margin: var(--space-2) 0 0; color: var(--warn); font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
+    <nav class="topnav" aria-label="Site">
+      <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
+      <a href="/configure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
+      <a href="/status" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
+      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg><span class="nav-label">Discord</span></a>
+      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span></a>
+    </nav>
+    <span class="spacer"></span>
+    <a class="btn icon-only" href="/#donate" aria-label="Donate">
+      <svg height="14" viewBox="0 0 24 24" width="14" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
+      <span class="label">Donate</span>
+    </a>
+    <button type="button" class="icon-btn" id="themeToggle" aria-label="Switch theme">
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+  </header>
+
+  <div class="layout">
+    <main class="content" id="providerHealthPanel">
+      <section class="page-head" aria-labelledby="status-h">
+        <div>
+          <p class="eyebrow">System</p>
+          <h1 id="status-h">Provider status</h1>
+          <p class="lede">Catalog sync health for this instance. Refreshes every 30 seconds while this page is open.</p>
+        </div>
+        <div class="head-tools">
+          <span class="updated" id="providerHealthUpdated" aria-live="polite"></span>
+          <button type="button" class="btn" id="refreshProviderHealth">Refresh</button>
+        </div>
+      </section>
+
+      <div class="tiles" id="providerHealthSummary" aria-live="polite"></div>
+
+      <h2 class="section-title" id="providers-h">Providers</h2>
+      <div class="health-list" id="providerHealthList" aria-labelledby="providers-h">
+        <div class="state-msg">Loading provider status...</div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const providerHealthPanel = document.getElementById('providerHealthPanel');
+    const providerHealthSummary = document.getElementById('providerHealthSummary');
+    const providerHealthList = document.getElementById('providerHealthList');
+    const providerHealthUpdated = document.getElementById('providerHealthUpdated');
+    const refreshProviderHealth = document.getElementById('refreshProviderHealth');
+    let loaded = false;
+
+    function formatHealthAge(value) {
+      if (!value) return 'Never';
+      const time = new Date(value).getTime();
+      if (!Number.isFinite(time)) return 'Unknown';
+      const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+      if (seconds < 60) return seconds + 's ago';
+      if (seconds < 3600) return Math.round(seconds / 60) + 'm ago';
+      if (seconds < 86400) return Math.round(seconds / 3600) + 'h ago';
+      return Math.round(seconds / 86400) + 'd ago';
+    }
+
+    function addHealthSummary(label, value) {
+      const item = document.createElement('div');
+      item.className = 'tile';
+      const key = document.createElement('span');
+      key.textContent = label;
+      const result = document.createElement('strong');
+      result.textContent = value;
+      item.append(key, result);
+      providerHealthSummary.appendChild(item);
+    }
+
+    function showMessage(text, isError) {
+      providerHealthList.replaceChildren();
+      const msg = document.createElement('div');
+      msg.className = 'state-msg' + (isError ? ' is-error' : '');
+      msg.textContent = text;
+      providerHealthList.appendChild(msg);
+    }
+
+    function renderProviderHealth(data) {
+      const providers = Array.isArray(data.providers) ? data.providers : [];
+      const sync = data.sync || {};
+      const breakers = data.circuitBreakers && typeof data.circuitBreakers === 'object'
+        ? Object.values(data.circuitBreakers)
+        : [];
+      const openBreakers = breakers.filter((breaker) => breaker && breaker.state === 'open').length;
+
+      providerHealthSummary.replaceChildren();
+      addHealthSummary('Sync', sync.state || 'unknown');
+      addHealthSummary('Catalog', Number.isFinite(sync.matchCount) ? String(sync.matchCount) : 'Not synced');
+      addHealthSummary('Duration', Number.isFinite(sync.durationMs) ? (sync.durationMs / 1000).toFixed(1) + 's' : 'n/a');
+      addHealthSummary('Open breakers', String(openBreakers));
+
+      providerHealthList.replaceChildren();
+      if (!providers.length) showMessage('No providers reported yet.', false);
+      for (const provider of providers) {
+        const card = document.createElement('div');
+        card.className = 'health-provider-card';
+        const head = document.createElement('div');
+        head.className = 'health-provider-head';
+        const name = document.createElement('span');
+        name.className = 'health-provider-name';
+        name.textContent = provider.name || provider.id || 'Unknown';
+        const stateName = provider.state || 'unknown';
+        const state = document.createElement('span');
+        state.className = 'health-state is-' + stateName;
+        state.textContent = stateName;
+        head.append(name, state);
+
+        const meta = document.createElement('div');
+        meta.className = 'health-provider-meta';
+        const fixtures = document.createElement('span');
+        fixtures.textContent = Number.isFinite(provider.matchCount) ? provider.matchCount + ' fixtures' : 'No fixture data';
+        const latency = document.createElement('span');
+        latency.textContent = Number.isFinite(provider.durationMs) ? provider.durationMs + ' ms' : 'Not checked';
+        const checked = document.createElement('span');
+        checked.textContent = formatHealthAge(provider.lastAttemptAt);
+        meta.append(fixtures, latency, checked);
+        card.append(head, meta);
+
+        const noteText = provider.error || provider.note ||
+          (provider.carriedForwardCount > 0 ? provider.carriedForwardCount + ' fixtures carried forward' : '');
+        if (noteText) {
+          const note = document.createElement('p');
+          note.className = 'health-note';
+          note.textContent = noteText;
+          card.appendChild(note);
+        }
+        providerHealthList.appendChild(card);
+      }
+      providerHealthUpdated.textContent = 'Updated ' + formatHealthAge(data.generatedAt);
+    }
+
+    async function loadProviderHealth() {
+      refreshProviderHealth.disabled = true;
+      try {
+        const response = await fetch('/api/provider-health', { cache: 'no-store' });
+        if (!response.ok) {
+          if (!loaded) showMessage('Provider status is not available from this server (HTTP ' + response.status + ').', true);
+          return;
+        }
+        renderProviderHealth(await response.json());
+        loaded = true;
+      } catch (_) {
+        if (loaded) providerHealthUpdated.textContent = 'Refresh failed';
+        else showMessage('Could not reach the server. Check that it is running.', true);
+      } finally {
+        refreshProviderHealth.disabled = false;
+      }
+    }
+
+    refreshProviderHealth.addEventListener('click', loadProviderHealth);
+    loadProviderHealth();
+    setInterval(() => {
+      if (!document.hidden) loadProviderHealth();
+    }, 30000);
+
+    (function () {
+      var b = document.getElementById('themeToggle');
+      if (!b) return;
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      var root = document.documentElement;
+      function eff() { return root.getAttribute('data-theme') || (mq.matches ? 'light' : 'dark'); }
+      function paint() {
+        var light = eff() === 'light';
+        b.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
+        b.querySelector('.ico-sun').toggleAttribute('hidden', light);
+        b.querySelector('.ico-moon').toggleAttribute('hidden', !light);
+      }
+      b.addEventListener('click', function () {
+        var next = eff() === 'light' ? 'dark' : 'light';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem('nuvio-theme', next); } catch (e) {}
+        paint();
+      });
+      if (mq.addEventListener) mq.addEventListener('change', paint);
+      paint();
+    })();
+  </script>
+</body>
+</html>
