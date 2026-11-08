@@ -59,6 +59,8 @@
     .topnav a { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 44px; padding: 0 14px; color: var(--muted); font-weight: 600; text-decoration: none; border-radius: var(--radius-md); }
     .topnav a svg { width: 18px; height: 18px; flex: none; }
     .topnav a:hover { color: var(--text); }
+    .topnav a .ext { width: 12px; height: 12px; margin-left: -2px; opacity: .75; }
+    .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .topnav a[aria-current="page"] { color: var(--text); box-shadow: inset 0 -3px 0 var(--accent-fill); border-radius: 0; }
     .spacer { flex: 1; }
 
@@ -91,6 +93,20 @@
     .link-btn:hover { background: var(--surface); }
     .link-btn svg { flex: none; }
     .support-link svg { color: var(--kofi); }
+
+    /* ---------- Provider icon tiles ---------- */
+    .prov-icon { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--accent); }
+    .prov-icon svg { width: 18px; height: 18px; }
+    .prov-icon .mono { font: 700 11px/1 var(--font-sans); letter-spacing: 0.02em; color: var(--text); }
+
+    /* ---------- Navigation toggle (hamburger) ---------- */
+    .nav-toggle { margin-right: var(--space-2); }
+    @media (min-width: 1180px) {
+      :root[data-sidebar="collapsed"] .layout { grid-template-columns: minmax(0, 1fr) 340px; }
+      :root[data-sidebar="collapsed"] .sidebar { display: none; }
+    }
+    @media (max-width: 1179px) { .nav-toggle.desktop-only { display: none; } }
+    .drawer-scrim { display: none; }
 
     @media (max-width: 1179px) {
       .layout { grid-template-columns: minmax(0, 1fr); padding: var(--space-4); gap: var(--space-4); }

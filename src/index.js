@@ -244,11 +244,29 @@ app.get('/api/options', (req, res) => {
   } catch (_) {
     languages = [];
   }
+  // Team names from the fixtures currently cached, most frequent first. They
+  // feed the favourite-teams picker's suggestions; free text is still accepted.
+  let teams = [];
+  try {
+    const cs = container.resolve('cacheService');
+    const cached = (cs && (typeof cs.getMatchesReadOnly === 'function' ? cs.getMatchesReadOnly() : (typeof cs.getMatches === 'function' ? cs.getMatches() : []))) || [];
+    const counts = new Map();
+    for (const m of cached) {
+      for (const t of [m && m.team1, m && m.team2]) {
+        const name = t && typeof t.name === 'string' ? t.name.trim() : '';
+        if (name && name.length <= 60) counts.set(name, (counts.get(name) || 0) + 1);
+      }
+    }
+    teams = [...counts.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 400).map((e) => e[0]);
+  } catch (_) {
+    teams = [];
+  }
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.json({
     languages,
+    teams,
     englishAlwaysFirst: true,
     replayFilters: [
       { value: 'all', label: 'All replays' },

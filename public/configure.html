@@ -7,7 +7,7 @@
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0a0a0c">
   <title>Nuvio Live Sports | Setup</title>
-  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}try{if(localStorage.getItem('nuvio-config-mode')==='wizard')document.documentElement.setAttribute('data-mode','wizard')}catch(e){}try{if(localStorage.getItem('nuvio-sidebar')==='collapsed')document.documentElement.setAttribute('data-sidebar','collapsed')}catch(e){}</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
@@ -49,8 +49,8 @@
     .group { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--line); }
 
     /* ---------- Selection tiles ---------- */
-    .chip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: var(--space-3); }
-    .checkbox-label { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 14px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; user-select: none; }
+    .chip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 1fr)); gap: var(--space-3); }
+    .checkbox-label { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 14px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.25; cursor: pointer; user-select: none; min-width: 0; overflow-wrap: anywhere; }
     .checkbox-label:hover { background: var(--surface); }
     .checkbox-label.active { background: var(--surface); border-color: var(--accent-fill); }
     .checkbox-label:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
@@ -71,9 +71,19 @@
     select { cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%2371717a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 38px; }
     select option { background: var(--surface); color: var(--text); }
     .mono-field { font-family: var(--font-mono); font-size: 13px; }
+    .team-picker { position: relative; }
+    #teamSuggest { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto; background: var(--surface); border: 2px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-card); }
+    #teamSuggest[hidden] { display: none; }
+    #teamSuggest li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 15px; }
+    #teamSuggest li:hover, #teamSuggest li[aria-selected="true"] { background: var(--surface-2); }
+    #teamSuggest .hint-row { color: var(--muted); font-weight: 500; cursor: default; }
     .team-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 0; padding: 0; list-style: none; }
-    .team-chips li { display: inline-flex; align-items: center; gap: 4px; min-height: 40px; padding: 0 4px 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-2); font-weight: 600; font-size: 14px; }
-    .team-chips button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 18px; line-height: 1; cursor: pointer; }
+    .team-chips:empty { display: none; }
+    .team-chips li { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 6px 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); font-weight: 600; font-size: 14px; }
+    .team-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: 700 12px/1 var(--font-sans); letter-spacing: 0.02em; overflow: hidden; }
+    .team-logo img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
+    #teamSuggest .team-logo { width: 28px; height: 28px; font-size: 11px; }
+    .team-chips button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
     .team-chips button:hover { color: var(--text); background: var(--surface); }
 
     /* ---------- Buttons ---------- */
@@ -147,20 +157,61 @@
     }
     @media (max-width: 480px) { .brand span { display: none; } }
     @media (max-width: 360px) { .chip-grid { grid-template-columns: 1fr; } }
-    </style>
+  
+    /* ---------- Layout modes: all steps (default) or wizard ---------- */
+    .seg { display: inline-flex; border: 2px solid var(--line-strong); border-radius: var(--radius-md); overflow: hidden; background: var(--surface-2); align-self: flex-start; }
+    .seg button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 var(--space-4); border: 0; background: none; color: var(--muted); font: 600 14px/1 var(--font-sans); cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--line-strong); }
+    .seg button:hover { color: var(--text); background: var(--surface); }
+    .seg button[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); }
+    .seg button:focus-visible { outline-offset: -3px; }
+    .seg svg { width: 18px; height: 18px; flex: none; }
+    #sec-finish, .wiz-nav { display: none; }
+    #sec-finish .btn { margin-top: 0; }
+    #sec-finish .hint { margin-top: var(--space-3); }
+    :root[data-mode="wizard"] .content > .panel { display: none; }
+    :root[data-mode="wizard"] .content > .panel.is-current { display: block; }
+    :root[data-mode="wizard"] #sec-finish.is-current { display: block; }
+    :root[data-mode="wizard"] .wiz-nav { display: flex; }
+    .wiz-nav { align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); }
+    .wiz-nav .btn { width: auto; min-width: 140px; min-height: 52px; margin: 0; display: inline-flex; padding: 13px 24px; font-size: 15px; font-family: var(--font-display); }
+    .wiz-nav .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .wiz-nav [hidden] { display: none !important; }
+    .wiz-count { color: var(--muted); font-size: 14px; }
+    @media (max-width: 1179px) {
+      :root[data-mode="wizard"] .wiz-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; margin: 0; padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); }
+      :root[data-mode="wizard"] .actionbar { display: none; }
+      .wiz-nav .btn { flex: 1; min-width: 0; }
+      .wiz-count { display: none; }
+    }
+    @media (max-width: 560px) { .seg { width: 100%; } .seg button { flex: 1; justify-content: center; } }
+
+    /* ---------- Install popup ---------- */
+    .install-note { margin: 0 0 var(--space-4); color: var(--muted); font-size: 14px; }
+    dialog.install-dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; padding: var(--space-6); border: 2px solid var(--accent-fill); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+    dialog.install-dialog::backdrop { background: #0a0a0ccc; }
+    .install-dialog h2 { margin: 0 var(--space-8) var(--space-4) 0; font: 600 22px/28px var(--font-display); }
+    .install-dialog .btn { display: flex; width: 100%; min-height: 52px; padding: 13px 18px; font-size: 15px; font-family: var(--font-display); text-align: center; }
+    .install-dialog .btn + .btn { margin-top: 10px; }
+    .dialog-close { position: absolute; top: var(--space-4); right: var(--space-4); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); cursor: pointer; }
+    .dialog-close svg { width: 20px; height: 20px; }
+  </style>
 </head>
 
 <body>
   <header class="topbar">
+    <button type="button" class="icon-btn nav-toggle desktop-only" id="navToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Close navigation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
     <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
     <nav class="topnav" aria-label="Site">
       <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
       <a href="/configure" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
       <a href="/status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
-      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer" title="Discord (opens in a new tab)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
-          </svg><span class="nav-label">Discord</span></a>
-      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span></a>
+          </svg><span class="nav-label">Discord</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
+      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer" title="GitHub (opens in a new tab)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
     </nav>
     <span class="spacer"></span>
     <a class="btn icon-only" href="#sec-support" aria-label="Donate">
@@ -175,7 +226,7 @@
 
   <div class="layout">
 
-    <aside class="sidebar">
+    <aside class="sidebar" id="sidebar">
       <nav class="stepnav" aria-label="Setup steps">
         <ol>
           <li><a href="#sec-sports"><span class="step-n" aria-hidden="true">1</span>Sports</a></li>
@@ -193,9 +244,13 @@
 
       <section class="page-head" aria-labelledby="hero-h">
         <div>
-          <p class="eyebrow">Nuvio Live Sports setup</p>
+          <p class="eyebrow" id="heroEyebrow">Nuvio Live Sports setup</p>
           <h1 id="hero-h">Configure your sports experience</h1>
           <p class="lede">Pick the sports and stream sources you want, set your timezone, then install the add-on.</p>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Setup layout" id="modeSeg">
+          <button type="button" role="radio" aria-checked="true" data-mode="all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>All steps</button>
+          <button type="button" role="radio" aria-checked="false" data-mode="wizard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Wizard</button>
         </div>
       </section>
 
@@ -233,10 +288,17 @@
         </div>
         <div class="fields">
           <div class="field wide">
-            <label for="teams">Favourite teams</label>
-            <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false">
+            <label for="teamSearch">Favourite teams</label>
+            <div class="team-picker">
+              <input type="text" id="teamSearch" role="combobox" aria-expanded="false" aria-controls="teamSuggest" aria-autocomplete="list" placeholder="Search a team, or type any name and press Enter" autocomplete="off" spellcheck="false">
+              <ul id="teamSuggest" role="listbox" aria-label="Team suggestions" hidden></ul>
+            </div>
             <ul class="team-chips" id="teamChips" aria-label="Added teams"></ul>
-            <p class="hint">Comma separated. These fixtures are surfaced first.</p>
+            <p class="hint">Suggestions come from today's fixtures. Any name works. Fixtures for your teams are shown first.</p>
+            <details class="crypto-details" style="margin-top:12px">
+              <summary>Edit as comma-separated text</summary>
+              <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false" style="margin-top:8px">
+            </details>
           </div>
           <div class="field wide">
             <label for="timezone">Match time timezone</label>
@@ -427,6 +489,17 @@
         </div>
       </section>
 
+      <!-- Wizard final step -->
+      <section class="panel" id="sec-finish" aria-labelledby="finish-h">
+        <div class="panel-head">
+          <span class="step-n" aria-hidden="true">6</span>
+          <div class="panel-title"><h2 id="finish-h" tabindex="-1">Review and install</h2><p>Check your choices, then install the add-on.</p></div>
+        </div>
+        <ul class="summary" id="finishSummary"></ul>
+        <button type="button" class="btn btn-ghost" id="finishCopy">Copy link for Nuvio app</button>
+        <p class="hint">You can go back to any step from the list on the left.</p>
+      </section>
+
       <!-- Support -->
       <section class="panel" id="sec-support" aria-labelledby="support-h">
         <div class="panel-head">
@@ -480,6 +553,12 @@
       </section>
 
       
+      <div class="wiz-nav" id="wizNav">
+        <button type="button" class="btn btn-ghost" id="wizBack">Back</button>
+        <span class="wiz-count" id="wizCount" aria-live="polite"></span>
+        <button type="button" class="btn btn-primary" id="wizNext">Next</button>
+        <a class="btn btn-primary" id="wizInstall" href="#" hidden>Install add-on</a>
+      </div>
     </main>
 
     <aside class="rail" aria-label="Progress and install">
@@ -497,7 +576,19 @@
       </section>
 
       <!-- 6 · Install (primary action) -->
-      <section class="card card-install" id="sec-install" aria-labelledby="install-h">
+      <section class="card card-install" id="sec-install" aria-labelledby="install-cta-h">
+        <h2 id="install-cta-h">Install add-on</h2>
+        <p class="install-note">Review your choices and get the add-on link for Nuvio.</p>
+        <button type="button" class="btn btn-primary" id="openInstall">Review and install</button>
+      </section>
+    </aside>
+  </div>
+
+
+  <dialog class="install-dialog" id="installDialog" aria-labelledby="install-h">
+    <button type="button" class="dialog-close" id="closeInstall" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
         <h2 id="install-h">Install add-on</h2>
         <a href="#" id="installBtn" class="btn btn-primary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -526,16 +617,16 @@
         </div>
 
         <p class="status" id="installStatus" role="status" aria-live="polite"></p>
-      </section>
-    </aside>
-  </div>
-
+      
+  </dialog>
 
   <div class="actionbar">
     <a class="btn btn-primary" id="barInstall" href="#">Install add-on</a>
     <button type="button" class="btn btn-ghost" id="barCopy">Copy link</button>
   </div>
 
+  <script src="/provider-icons.js"></script>
+  <script src="/nav-toggle.js"></script>
   <script>
     const btn = document.getElementById('installBtn');
     const copyBtn = document.getElementById('copyBtn');
@@ -567,6 +658,7 @@
     const installStatus = document.getElementById('installStatus');
     const barInstall = document.getElementById('barInstall');
     const barCopy = document.getElementById('barCopy');
+    const wizInstall = document.getElementById('wizInstall');
 
     // Attempt to load existing config from URL
     let existingConfig = {};
@@ -710,6 +802,14 @@
       }
     }
 
+    // Provider icon tiles on the source chips (sport glyph or monogram, nothing fetched).
+    if (window.ProviderIcon) {
+      document.querySelectorAll('#liveSourcesGrid .checkbox-label, #replaySourcesGrid .checkbox-label').forEach(l => {
+        const cb = l.querySelector('input');
+        if (cb) cb.insertAdjacentHTML('afterend', window.ProviderIcon(cb.value, l.textContent.trim()));
+      });
+    }
+
     let currentManifestUrl = '';
     let currentCollectionsUrl = '';
     let effectiveOrigin = window.location.origin;
@@ -815,10 +915,13 @@
 
       renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams);
       renderProgress(selectedSports, selectedLive, selectedReplay, teams, tz, replayFilter);
+      const finishSummary = document.getElementById('finishSummary');
+      if (finishSummary && configSummary) finishSummary.innerHTML = configSummary.innerHTML;
 
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
       if (barInstall) barInstall.href = installUrl;
+      if (wizInstall) wizInstall.href = installUrl;
     }
 
     // navigator.clipboard only exists in a secure context (HTTPS or http://localhost).
@@ -958,11 +1061,42 @@
     }
 
     const teamChips = document.getElementById('teamChips');
+
+    // Team artwork hook: set window.NUVIO_TEAM_LOGOS = { 'arsenal': 'https://...png' } (lower-case
+    // names) to show real logos. Without an entry a team shows its initials.
+    function teamLogoUrl(name) {
+      const map = window.NUVIO_TEAM_LOGOS;
+      return (map && map[String(name).toLowerCase()]) || null;
+    }
+    function teamInitials(name) {
+      const words = String(name).split(/[^A-Za-z0-9\u00C0-\u024F]+/).filter(Boolean);
+      if (!words.length) return '?';
+      return (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+    }
+    function teamLogoEl(name) {
+      const box = document.createElement('span');
+      box.className = 'team-logo';
+      box.setAttribute('aria-hidden', 'true');
+      const url = teamLogoUrl(name);
+      if (url) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.src = url;
+        img.addEventListener('error', () => { box.textContent = teamInitials(name); });
+        box.appendChild(img);
+      } else {
+        box.textContent = teamInitials(name);
+      }
+      return box;
+    }
+
     function renderTeamChips() {
       if (!teamChips) return;
       teamChips.textContent = '';
       parseTeams(input.value).forEach((team, i) => {
         const li = document.createElement('li');
+        li.appendChild(teamLogoEl(team));
         li.appendChild(document.createTextNode(team));
         const x = document.createElement('button');
         x.type = 'button';
@@ -976,6 +1110,84 @@
         });
         li.appendChild(x);
         teamChips.appendChild(li);
+      });
+    }
+
+    // ---- Team search with suggestions ----
+    let knownTeams = [];
+    const teamSearch = document.getElementById('teamSearch');
+    const teamSuggest = document.getElementById('teamSuggest');
+    let suggestItems = [];
+    let suggestIndex = -1;
+
+    function addTeam(name) {
+      const clean = String(name || '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!clean) return;
+      const list = parseTeams(input.value);
+      if (!list.some(t => t.toLowerCase() === clean.toLowerCase())) list.push(clean);
+      input.value = list.join(', ');
+      teamSearch.value = '';
+      closeSuggest();
+      updateLink();
+    }
+    function closeSuggest() {
+      teamSuggest.hidden = true;
+      teamSuggest.textContent = '';
+      suggestItems = [];
+      suggestIndex = -1;
+      teamSearch.setAttribute('aria-expanded', 'false');
+      teamSearch.removeAttribute('aria-activedescendant');
+    }
+    function setActive(i) {
+      suggestIndex = i;
+      Array.from(teamSuggest.children).forEach((li, n) => li.setAttribute('aria-selected', String(n === i)));
+      const active = teamSuggest.children[i];
+      if (active) { teamSearch.setAttribute('aria-activedescendant', active.id); active.scrollIntoView({ block: 'nearest' }); }
+      else teamSearch.removeAttribute('aria-activedescendant');
+    }
+    function openSuggest() {
+      const q = teamSearch.value.trim().toLowerCase();
+      const have = new Set(parseTeams(input.value).map(t => t.toLowerCase()));
+      const matches = knownTeams.filter(t => !have.has(t.toLowerCase()) && (!q || t.toLowerCase().includes(q))).slice(0, 8);
+      suggestItems = matches.slice();
+      const typed = teamSearch.value.trim();
+      const exact = typed && knownTeams.some(t => t.toLowerCase() === typed.toLowerCase());
+      teamSuggest.textContent = '';
+      const rows = matches.map(t => ({ name: t, custom: false }));
+      if (typed && !exact && !have.has(typed.toLowerCase())) rows.push({ name: typed, custom: true });
+      if (!rows.length) { closeSuggest(); return; }
+      rows.forEach((r, n) => {
+        const li = document.createElement('li');
+        li.id = 'teamOpt' + n;
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', 'false');
+        li.appendChild(teamLogoEl(r.name));
+        li.appendChild(document.createTextNode(r.custom ? 'Add \u201c' + r.name + '\u201d' : r.name));
+        li.addEventListener('mousedown', (e) => { e.preventDefault(); addTeam(r.name); });
+        teamSuggest.appendChild(li);
+      });
+      suggestItems = rows.map(r => r.name);
+      teamSuggest.hidden = false;
+      teamSearch.setAttribute('aria-expanded', 'true');
+      setActive(-1);
+    }
+    if (teamSearch) {
+      teamSearch.addEventListener('input', openSuggest);
+      teamSearch.addEventListener('focus', openSuggest);
+      teamSearch.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+      teamSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); if (teamSuggest.hidden) openSuggest(); setActive(Math.min(suggestItems.length - 1, suggestIndex + 1)); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(-1, suggestIndex - 1)); }
+        else if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const picked = suggestIndex >= 0 ? suggestItems[suggestIndex] : teamSearch.value;
+          addTeam(picked);
+        }
+        else if (e.key === 'Escape') { closeSuggest(); }
+        else if (e.key === 'Backspace' && !teamSearch.value) {
+          const list = parseTeams(input.value);
+          if (list.length) { list.pop(); input.value = list.join(', '); updateLink(); }
+        }
       });
     }
 
@@ -1056,6 +1268,7 @@
       const links = Array.from(document.querySelectorAll('.stepnav a'));
       const targets = links.map(a => document.querySelector(a.getAttribute('href')));
       function mark(id) {
+        if (document.documentElement.dataset.mode === 'wizard') return;
         links.forEach(a => {
           if (a.getAttribute('href') === '#' + id) a.setAttribute('aria-current', 'location');
           else a.removeAttribute('aria-current');
@@ -1088,6 +1301,7 @@
         const res = await fetch('/api/options', { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
+        if (Array.isArray(data.teams)) knownTeams = data.teams.filter(t => typeof t === 'string');
         const langs = Array.isArray(data.languages) ? data.languages : [];
         if (langs.length === 0) return;
 
@@ -1146,6 +1360,93 @@
       }
     };
   
+
+    // ---- Install popup ----
+    (function () {
+      const dlg = document.getElementById('installDialog');
+      const open = document.getElementById('openInstall');
+      const close = document.getElementById('closeInstall');
+      if (!dlg || !open) return;
+      function openInstall() {
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      }
+      function closeInstall() {
+        if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+      }
+      open.addEventListener('click', openInstall);
+      if (close) close.addEventListener('click', closeInstall);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) closeInstall(); });
+      // The sixth step in the left list opens the popup (in wizard mode it goes to the review step instead).
+      const installLink = document.querySelector('.stepnav a[href="#sec-install"]');
+      if (installLink) installLink.addEventListener('click', (e) => {
+        if (document.documentElement.getAttribute('data-mode') === 'wizard') return;
+        e.preventDefault();
+        openInstall();
+      });
+    })();
+
+    // ---- Layout modes: all steps, or one step at a time ----
+    (function () {
+      const ORDER = ['sec-sports', 'sec-teams', 'sec-sources', 'sec-prefs', 'sec-collections', 'sec-finish'];
+      const root = document.documentElement;
+      const panels = ORDER.map(id => document.getElementById(id));
+      const support = document.getElementById('sec-support');
+      const links = Array.from(document.querySelectorAll('.stepnav a'));
+      const eyebrow = document.getElementById('heroEyebrow');
+      const back = document.getElementById('wizBack');
+      const next = document.getElementById('wizNext');
+      const count = document.getElementById('wizCount');
+      const segButtons = Array.from(document.querySelectorAll('#modeSeg button'));
+      const last = ORDER.length - 1;
+      let mode = root.getAttribute('data-mode') === 'wizard' ? 'wizard' : 'all';
+      let step = 0;
+
+      function render() {
+        root.setAttribute('data-mode', mode);
+        segButtons.forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
+        panels.forEach((p, i) => p && p.classList.toggle('is-current', mode === 'wizard' && i === step));
+        if (support) support.classList.toggle('is-current', mode === 'wizard' && step === last);
+        if (eyebrow) eyebrow.textContent = mode === 'wizard' ? 'Step ' + (step + 1) + ' of ' + ORDER.length : 'Nuvio Live Sports setup';
+        if (mode === 'wizard') {
+          links.forEach((a, i) => { if (i === step) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+          if (back) back.disabled = step === 0;
+          if (next) next.hidden = step === last;
+          if (wizInstall) wizInstall.hidden = step !== last;
+          if (count) count.textContent = 'Step ' + (step + 1) + ' of ' + ORDER.length;
+        }
+      }
+
+      function go(i) {
+        step = Math.max(0, Math.min(last, i));
+        render();
+        const h = panels[step] && panels[step].querySelector('h2');
+        window.scrollTo({ top: 0 });
+        if (h) h.focus({ preventScroll: true });
+      }
+
+      function setMode(m) {
+        mode = m;
+        try { localStorage.setItem('nuvio-config-mode', m); } catch (e) {}
+        render();
+        window.scrollTo({ top: 0 });
+      }
+
+      segButtons.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+      if (back) back.addEventListener('click', () => go(step - 1));
+      if (next) next.addEventListener('click', () => go(step + 1));
+      links.forEach((a, i) => a.addEventListener('click', (e) => { if (mode === 'wizard') { e.preventDefault(); go(i); } }));
+      document.querySelectorAll('a[href="#sec-support"]').forEach(a => a.addEventListener('click', (e) => { if (mode === 'wizard') { e.preventDefault(); go(last); } }));
+      const finishCopy = document.getElementById('finishCopy');
+      if (finishCopy) finishCopy.addEventListener('click', () => {
+        copyBtn.click();
+        setTimeout(() => {
+          const ok = installStatus && installStatus.classList.contains('is-ok');
+          flashLabel(finishCopy, ok ? 'Copied' : 'Copy failed', 'Copy link for Nuvio app');
+        }, 450);
+      });
+      render();
+    })();
+
     (function () {
       var b = document.getElementById('themeToggle');
       if (!b) return;

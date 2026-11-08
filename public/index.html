@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Nuvio Live Sports</title>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@600;700&display=swap" rel="stylesheet">
-  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}try{if(localStorage.getItem('nuvio-sidebar')==='collapsed')document.documentElement.setAttribute('data-sidebar','collapsed')}catch(e){}</script>
   <link rel="stylesheet" href="/ui.css">
   <style>
 
@@ -67,17 +67,63 @@
     .title { font-family: var(--font-display); font-weight: 700; font-size: 1.25rem; line-height: 1.3; margin-bottom: var(--space-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
     .desc { font-size: 0.9rem; color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.5; }
 
-    #player-overlay { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 100; flex-direction: column; }
-    #close-btn { position: absolute; top: var(--space-6); right: var(--space-10); z-index: 101; }
-    #video-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative; }
-    video { width: 100%; max-width: 1400px; max-height: 85vh; border-radius: var(--radius-md); background: #000; }
-
-    #source-selector { display: none; position: absolute; z-index: 102; background: var(--surface); padding: var(--space-5); border-radius: var(--radius-md); border: 1px solid var(--line-strong); flex-direction: column; gap: var(--space-3); }
-    #source-selector h3 { margin: 0; color: var(--text); font-family: var(--font-display); }
-    .source-btn { min-height: 44px; padding: 0 var(--space-5); background: var(--surface-2); color: var(--text); border: 2px solid var(--line-strong); border-radius: var(--radius-md); cursor: pointer; font-weight: 600; font-size: 15px; }
-    .source-btn:hover { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
-
-    .loader { position: absolute; display: flex; flex-direction: column; align-items: center; gap: var(--space-4); color: var(--text); }
+    /* ---------- Player modal ---------- */
+    dialog.player-dialog { width: min(1100px, calc(100% - 32px)); max-height: calc(100vh - 32px); padding: var(--space-5); overflow: auto; border: 2px solid var(--line-strong); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+    dialog.player-dialog::backdrop { background: #0a0a0ccc; }
+    .player-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+    .player-head .eyebrow { margin: 0 0 2px; }
+    .player-head h2 { margin: 0; font: 700 24px/30px var(--font-display); overflow-wrap: anywhere; }
+    .player-stage { position: relative; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; overflow: hidden; border-radius: var(--radius-md); background: #000; }
+    .player-stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    .auto-row { margin: calc(-1 * var(--space-2)) 0 var(--space-3); }
+    .sw { display: inline-flex; align-items: center; gap: var(--space-3); min-height: 44px; padding: 0; border: 0; background: none; color: var(--text); font: 600 14px/1.3 var(--font-sans); text-align: left; cursor: pointer; }
+    .sw-track { position: relative; flex: none; width: 44px; height: 26px; box-sizing: border-box; border: 2px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-2); }
+    .sw-knob { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--text); }
+    .sw[aria-checked="true"] .sw-track { background: var(--accent-fill); border-color: var(--accent-fill); }
+    .sw[aria-checked="true"] .sw-knob { left: 20px; background: var(--on-accent); }
+    .player-actions { display: flex; align-items: center; gap: var(--space-2); flex: none; }
+    .player-dialog.is-picking .player-stage { display: none; }
+    #source-selector { display: none; flex-direction: column; gap: var(--space-4); }
+    .player-dialog.is-picking #source-selector { display: flex; }
+    .src-top { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3); }
+    #source-selector h3 { margin: 0; color: var(--text); font: 600 20px/26px var(--font-display); }
+    .src-count { color: var(--muted); font-size: 14px; }
+    .src-filters { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .src-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; padding: 0 var(--space-4); border: 2px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text); font: 600 14px/1 var(--font-sans); cursor: pointer; }
+    .src-chip small { color: var(--muted); font-size: 12px; font-weight: 600; }
+    .src-chip[aria-pressed="true"] { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+    .src-chip[aria-pressed="true"] small { color: var(--on-accent); }
+    .src-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); max-height: min(60vh, 560px); overflow-y: auto; padding-right: 2px; }
+    .src-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); width: 100%; min-height: 60px; padding: var(--space-2) var(--space-4); border: 2px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); text-align: left; cursor: pointer; font-family: var(--font-sans); }
+    .src-row:hover, .src-row:focus-visible { border-color: var(--accent-fill); background: var(--surface); }
+    .src-main { min-width: 0; display: grid; gap: 2px; }
+    .src-title { font-weight: 600; font-size: 15px; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: var(--space-2); }
+    .src-sub { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .src-best { flex: none; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent-fill); color: var(--on-accent); font: 700 11px/16px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; }
+    .src-q { display: inline-flex; align-items: center; gap: var(--space-2); justify-content: flex-end; min-width: 6.5em; }
+    .src-rate { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .src-play { width: 22px; height: 22px; color: var(--accent); }
+    .qbadge { display: inline-flex; width: 40px; height: 22px; flex: none; color: var(--text); }
+    .qbadge svg { width: 40px; height: 22px; }
+    .qbadge.q-4k { color: var(--accent); } .qbadge.q-qhd { color: var(--accent); } .qbadge.q-fhd { color: var(--ok); } .qbadge.q-sd { color: var(--muted); }
+    .src-extra { padding-top: var(--space-3); border-top: 1px solid var(--line); }
+    .src-extra:empty { display: none; }
+    .src-extra button { background: none; border: 0; padding: 8px 0; color: var(--muted); font: 600 14px var(--font-sans); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+    .src-extra button:hover { color: var(--text); }
+    @media (max-width: 640px) { .src-row { grid-template-columns: auto minmax(0, 1fr) auto; } .src-play { display: none; } .src-rate { display: none; } .src-q { min-width: 0; } }
+    .loader { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-5); text-align: center; color: #f4f4f5; background: #000000b3; }
+    .loader.is-error { background: #000000eb; }
+    .loader-title { font: 600 18px/24px var(--font-display); }
+    .loader-detail { margin: 0; max-width: 46ch; color: #d4d4d8; font-size: 14px; line-height: 1.5; }
+    .loader-detail:empty, .loader-tech:empty { display: none; }
+    .loader-tech { margin: 0; color: #a1a1aa; font: 12px/1.4 var(--font-mono); }
+    .loader-icon { display: none; width: 44px; height: 44px; color: #f87171; }
+    .loader.is-error .loader-icon { display: block; }
+    .loader.is-error .spinner { display: none; }
+    .loader-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: center; margin-top: var(--space-2); }
+    .loader-actions:empty { display: none; }
+    .src-row.is-failed { opacity: .6; }
+    .src-fail { color: var(--warn); font-weight: 600; }
     .spinner { width: 40px; height: 40px; border: 3px solid var(--line-strong); border-top-color: var(--accent-fill); border-radius: 50%; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -146,12 +192,16 @@
     @media (max-width: 560px) { .seg .t { display: none; } .seg button { padding: 0 var(--space-4); } }
 
     @media (max-width: 1179px) {
-      .sidebar { display: none; }
+      .sidebar { position: fixed; top: 64px; left: 0; bottom: 0; z-index: 60; width: min(320px, 86vw); max-height: none; margin: 0; padding: var(--space-4); overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); transform: translateX(-102%); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+      :root[data-drawer="open"] .sidebar { transform: none; visibility: visible; transition: transform .2s ease; }
+      .drawer-scrim { display: none; position: fixed; inset: 64px 0 0 0; z-index: 55; background: #0a0a0c99; }
+      :root[data-drawer="open"] .drawer-scrim { display: block; }
       .mobile-cats { display: block; }
     }
     @media (max-width: 720px) {
       .search { max-width: none; }
-      #close-btn { right: var(--space-4); top: var(--space-4); }
+      dialog.player-dialog { width: calc(100% - 16px); padding: var(--space-3); }
+      .player-head h2 { font-size: 20px; line-height: 26px; }
     }
     @media (max-width: 480px) { .brand span { display: none; } }
     </style>
@@ -160,15 +210,18 @@
 <body>
 
   <header class="topbar">
+    <button type="button" class="icon-btn nav-toggle" id="navToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Close navigation" data-drawer="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
     <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
     <nav class="topnav" aria-label="Site">
       <a href="/" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
       <a href="/configure"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
       <a href="/status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
-      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer" title="Discord (opens in a new tab)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
-          </svg><span class="nav-label">Discord</span></a>
-      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span></a>
+          </svg><span class="nav-label">Discord</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
+      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer" title="GitHub (opens in a new tab)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
     </nav>
     <span class="spacer"></span>
     <button class="btn icon-only" aria-label="Donate" onclick="document.getElementById('donate-modal').style.display='flex'">
@@ -180,6 +233,7 @@
         <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
       </button>
   </header>
+  <div class="drawer-scrim" id="drawerScrim"></div>
 
   <!-- Donation Modal -->
   <div id="donate-modal" class="modal" onclick="if(event.target===this)this.style.display='none'">
@@ -228,7 +282,7 @@
   </div>
 
   <div class="layout">
-    <aside class="sidebar" aria-label="Catalogs">
+    <aside class="sidebar" id="sidebar" aria-label="Catalogs">
       <nav class="catnav" id="catalogNav" aria-label="Catalogs"><div class="state-msg">Loading catalogs...</div></nav>
       <div class="side-card"><strong>Keep the server running</strong>Support covers the public server and the scrapers behind it. <a href="#donate" onclick="document.getElementById('donate-modal').style.display='flex';return false;">Ways to help</a></div>
     </aside>
@@ -265,23 +319,46 @@
   </div>
 
 
-  <div id="player-overlay">
-    <button id="close-btn" class="btn" onclick="closePlayer()">Close Player</button>
-    
-    <div id="source-selector">
-      <h3>Select Stream Source</h3>
-      <div id="source-buttons" style="display:flex; flex-direction:column; gap:10px;"></div>
-    </div>
-
-    <div id="video-container">
-      <div class="loader" id="loader">
-        <div class="spinner"></div>
-        <div>Loading stream...</div>
+  <dialog id="player-dialog" class="player-dialog" aria-labelledby="playerTitle">
+    <div class="player-head">
+      <div>
+        <p class="eyebrow">Now playing</p>
+        <h2 id="playerTitle">Live stream</h2>
       </div>
-      <video id="video" controls autoplay></video>
+      <div class="player-actions">
+        <button type="button" class="btn btn-chip" id="changeSource" hidden>Change source</button>
+      <button type="button" class="icon-btn" id="close-btn" aria-label="Close player" onclick="closePlayer()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+      </div>
     </div>
-  </div>
+    <div class="auto-row">
+      <button type="button" role="switch" aria-checked="false" id="autoNext" class="sw">
+        <span class="sw-track"><span class="sw-knob"></span></span>
+        <span class="sw-label">Switch automatically if a stream fails</span>
+      </button>
+    </div>
+    <div id="source-selector">
+      <div class="src-top"><h3>Choose a source</h3><span class="src-count" id="srcCount"></span></div>
+      <div class="src-filters" id="srcFilters" role="group" aria-label="Filter by provider"></div>
+      <ul class="src-list" id="source-buttons"></ul>
+      <div class="src-extra" id="srcExtra"></div>
+    </div>
+    <div class="player-stage" id="video-container">
+      <video id="video" controls autoplay playsinline></video>
+      <div class="loader" id="loader" role="status" aria-live="polite">
+        <div class="spinner"></div>
+        <svg class="loader-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/></svg>
+        <div class="loader-title" id="loaderMsg">Connecting to stream...</div>
+        <p class="loader-detail" id="loaderDetail"></p>
+        <p class="loader-tech" id="loaderTech"></p>
+        <div class="loader-actions" id="loaderActions"></div>
+      </div>
+    </div>
+  </dialog>
 
+  <script src="/provider-icons.js"></script>
+  <script src="/nav-toggle.js"></script>
   <script>
     let hls = null;
     let currentMatches = [];
@@ -531,7 +608,7 @@
         card.setAttribute('role', 'button');
         card.setAttribute('aria-label', 'Play ' + stripEmoji(meta.name));
         card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
-        card.onclick = () => fetchAndPlay(meta.id);
+        card.onclick = () => fetchAndPlay(meta.id, cleanName);
         
         const isLive = meta.name.includes('\u{1F534}');
         let cleanName = stripEmoji(meta.name).replace(/^\[?LIVE\]?:?\s*/i, '');
@@ -567,50 +644,334 @@
       });
     }
 
-    async function fetchAndPlay(id) {
-      document.getElementById('player-overlay').style.display = 'flex';
-      document.getElementById('loader').style.display = 'flex';
-      document.getElementById('source-selector').style.display = 'none';
+    // ---- Source picker: parse the stream titles into provider, channel, region and quality ----
+    const TIERS = {
+      '4K': { rank: 5, label: '4K Ultra HD', cls: 'q-4k' },
+      'QHD': { rank: 4, label: 'Quad HD', cls: 'q-qhd' },
+      'FHD': { rank: 3, label: 'Full HD', cls: 'q-fhd' },
+      'HD': { rank: 2, label: 'HD', cls: 'q-hd' },
+      'SD': { rank: 1, label: 'Standard definition', cls: 'q-sd' }
+    };
+    function tierOf(text) {
+      const t = String(text || '').toLowerCase();
+      if (/2160|\b4k\b|uhd/.test(t)) return '4K';
+      if (/1440|qhd/.test(t)) return 'QHD';
+      if (/1080|fhd|full ?hd/.test(t)) return 'FHD';
+      if (/720|\bhd\b/.test(t)) return 'HD';
+      if (/576|480|360|\bsd\b/.test(t)) return 'SD';
+      return '';
+    }
+    function qualityBadge(tier) {
+      if (!tier) return '';
+      const t = TIERS[tier];
+      return '<span class="qbadge ' + t.cls + '" role="img" aria-label="' + esc2(t.label) + '" title="' + esc2(t.label) + '"><svg viewBox="0 0 40 22" aria-hidden="true"><rect x="1" y="1" width="38" height="20" rx="5" fill="none" stroke="currentColor" stroke-width="2"/><text x="20" y="15.5" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor" font-family="system-ui, sans-serif">' + tier + '</text></svg></span>';
+    }
+    const esc2 = (v) => escapeHtml(v);
+
+    function parseStream(st, index) {
+      const raw = String(st.title || st.name || '');
+      const lines = raw.split('\n').map((l) => stripEmoji(l)).filter(Boolean);
+      const head = lines[0] || '';
+      const qualityLine = lines.find((l) => /quality\s*:/i.test(l)) || '';
+      const qText = qualityLine.replace(/^.*quality\s*:\s*/i, '');
+      const qParts = qText.split('\u00b7').map((x) => x.trim());
+      const rateMatch = /([\d.]+)\s*mbps/i.exec(qText);
+      let provider = '';
+      let channel = head;
+      if (head.includes('|')) {
+        const bits = head.split('|');
+        provider = bits.shift().trim();
+        channel = bits.join('|').trim();
+      }
+      const metaMatch = /\[([^\]]+)\]/.exec(channel);
+      const meta = metaMatch ? metaMatch[1].trim() : '';
+      channel = channel.replace(/\[[^\]]*\]/g, '').replace(/\s+/g, ' ').trim();
+      const tier = tierOf(qParts[0]) || tierOf(channel);
+      const isExtra = /donation|help keep|ko-?fi/i.test(raw) && !st.url;
+      return {
+        st, index, provider: provider || 'Other', channel, meta, tier,
+        rank: tier ? TIERS[tier].rank : 0,
+        rate: rateMatch ? parseFloat(rateMatch[1]) : 0,
+        rateText: rateMatch ? rateMatch[1] + ' Mbps' : '',
+        extra: isExtra
+      };
+    }
+
+    let sourceItems = [];
+    let sourceExtras = [];
+    let activeProvider = 'all';
+
+    function sortSources(items) {
+      return items.slice().sort((a, b) => (failedKeys.has(a.index) - failedKeys.has(b.index)) || b.rank - a.rank || b.rate - a.rate || a.index - b.index);
+    }
+
+    function renderSourceList() {
+      const dlg = document.getElementById('player-dialog');
+      const sorted = sortSources(sourceItems);
+      const counts = {};
+      sorted.forEach((i) => { counts[i.provider] = (counts[i.provider] || 0) + 1; });
+      // number the unnamed streams per provider
+      const seen = {};
+      sorted.forEach((i) => {
+        if (!i.channel) { seen[i.provider] = (seen[i.provider] || 0) + 1; i.label = 'Stream ' + seen[i.provider]; }
+        else i.label = i.channel;
+      });
+      const filters = document.getElementById('srcFilters');
+      const names = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+      filters.innerHTML = [['all', 'All', sorted.length]].concat(names.map((n) => [n, n, counts[n]])).map((f) =>
+        '<button type="button" class="src-chip" data-provider="' + esc2(f[0]) + '" aria-pressed="' + (activeProvider === f[0]) + '">' + esc2(f[1]) + ' <small>' + f[2] + '</small></button>').join('');
+      filters.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => { activeProvider = b.dataset.provider; renderSourceList(); }));
+
+      const visible = sorted.filter((i) => activeProvider === 'all' || i.provider === activeProvider);
+      document.getElementById('srcCount').textContent = visible.length + (visible.length === 1 ? ' source' : ' sources') + ', best quality first';
+      const list = document.getElementById('source-buttons');
+      list.innerHTML = '';
+      visible.forEach((item, idx) => {
+        const li = document.createElement('li');
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'src-row';
+        const icon = window.ProviderIcon ? window.ProviderIcon(item.provider, item.provider) : '';
+        const failed = failedKeys.has(item.index);
+        if (failed) btn.classList.add('is-failed');
+        const sub = [item.provider, item.meta].filter(Boolean).join(' \u00b7 ');
+        btn.innerHTML = icon +
+          '<span class="src-main"><span class="src-title"><span>' + esc2(item.label) + '</span>' + (!failed && idx === 0 && activeProvider === 'all' && item.rank > 0 ? '<span class="src-best">Best</span>' : '') + '</span><span class="src-sub">' + esc2(sub) + (failed ? ' \u00b7 <span class="src-fail">Did not work</span>' : '') + '</span></span>' +
+          '<span class="src-q">' + qualityBadge(item.tier) + (item.rateText ? '<span class="src-rate">' + esc2(item.rateText) + '</span>' : '') + '</span>' +
+          '<svg class="src-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
+        btn.setAttribute('aria-label', 'Play ' + item.label + ' from ' + item.provider + (item.tier ? ', ' + TIERS[item.tier].label : ''));
+        btn.addEventListener('click', () => pickSource(item));
+        li.appendChild(btn);
+        list.appendChild(li);
+      });
+      const extra = document.getElementById('srcExtra');
+      extra.innerHTML = '';
+      sourceExtras.forEach((x) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = stripEmoji(String(x.st.title || '').split('\n')[0]).replace(/\s+/g, ' ') || 'Support the server';
+        b.addEventListener('click', () => playStreamUrl(x.st.url, x.st));
+        extra.appendChild(b);
+      });
+    }
+
+    function haltVideo() {
       const video = document.getElementById('video');
-      video.style.opacity = '0';
-      
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      if (hls) { hls.destroy(); hls = null; }
+    }
+
+    function showPicker() {
+      const dlg = document.getElementById('player-dialog');
+      haltVideo();
+      clearTimers();
+      playToken++;
+      hideState();
+      document.getElementById('changeSource').hidden = true;
+      dlg.classList.add('is-picking');
+      renderSourceList();
+    }
+
+    function pickSource(item) {
+      const dlg = document.getElementById('player-dialog');
+      dlg.classList.remove('is-picking');
+      currentItem = item;
+      showLoading('Connecting to stream...');
+      document.getElementById('changeSource').hidden = false;
+      playStreamUrl(item.st.url, item.st);
+    }
+
+    async function fetchAndPlay(id, title) {
+      document.getElementById('playerTitle').textContent = title || 'Live stream';
+      const dlg = document.getElementById('player-dialog');
+      if (!dlg.open) { if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', ''); }
+      dlg.classList.remove('is-picking');
+      activeProvider = 'all';
+      failedKeys.clear();
+      currentItem = null;
+      clearTimers();
+      playToken++;
+      document.getElementById('changeSource').hidden = true;
+      sourceItems = [];
+      sourceExtras = [];
+      showLoading('Finding streams...');
+      const retry = () => fetchAndPlay(id, title);
+
       try {
         const res = await fetch(`/stream/tv/${id}.json`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
         const data = await res.json();
-        
+
         if (!data.streams || data.streams.length === 0) {
-          alert('No streams found for this match.');
-          closePlayer();
+          showProblem('No streams available yet',
+            'This match has no streams right now. They usually appear shortly before kick-off, so check back a little later.',
+            '',
+            [{ label: 'Check again', primary: true, run: retry }, { label: 'Close', run: closePlayer }]);
           return;
         }
 
-        if (data.streams.length === 1) {
+        const items = data.streams.map(parseStream);
+        sourceExtras = items.filter((i) => i.extra);
+        sourceItems = items.filter((i) => !i.extra);
+
+        if (sourceItems.length === 0) {
           playStreamUrl(data.streams[0].url, data.streams[0]);
+        } else if (sourceItems.length === 1) {
+          currentItem = sourceItems[0];
+          playStreamUrl(sourceItems[0].st.url, sourceItems[0].st);
         } else {
-          document.getElementById('loader').style.display = 'none';
-          const selector = document.getElementById('source-selector');
-          const btnContainer = document.getElementById('source-buttons');
-          btnContainer.innerHTML = '';
-          
-          data.streams.forEach(stream => {
-            const btn = document.createElement('button');
-            btn.className = 'source-btn';
-            btn.innerText = stream.title;
-            btn.onclick = () => {
-              selector.style.display = 'none';
-              document.getElementById('loader').style.display = 'flex';
-              playStreamUrl(stream.url, stream);
-            };
-            btnContainer.appendChild(btn);
-          });
-          
-          selector.style.display = 'flex';
+          showPicker();
         }
       } catch (err) {
         console.error(err);
-        alert('Error resolving stream.');
-        closePlayer();
+        showProblem('Could not load streams',
+          'The server did not return the streams for this match. Check your connection and try again.',
+          err && err.message ? String(err.message) : '',
+          [{ label: 'Try again', primary: true, run: retry }, { label: 'Close', run: closePlayer }]);
       }
+    }
+
+    // A message in the player stage with its own actions (no browser alerts).
+    function showProblem(title, detail, tech, actions) {
+      clearTimers();
+      const el = document.getElementById('loader');
+      el.classList.add('is-error');
+      el.style.display = 'flex';
+      document.getElementById('loaderMsg').textContent = title;
+      document.getElementById('loaderDetail').textContent = detail || '';
+      document.getElementById('loaderTech').textContent = tech || '';
+      const box = document.getElementById('loaderActions');
+      box.replaceChildren();
+      (actions || []).forEach((a) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'btn' + (a.primary ? ' btn-primary' : '');
+        b.textContent = a.label;
+        b.addEventListener('click', a.run);
+        box.appendChild(b);
+      });
+      const first = box.querySelector('button');
+      if (first) first.focus();
+    }
+
+    // ---- Playback state: loading, slow, failed ----
+    let playToken = 0;
+    let slowTimer = null;
+    let failTimer = null;
+    let bufferTimer = null;
+    let currentItem = null;
+    let switchTimer = null;
+    let stallTimer = null;
+    let playedOnce = false;
+    const STALL_MS = 15000;
+    let autoNext = false;
+    try { autoNext = localStorage.getItem('nuvio-autonext') === '1'; } catch (e) {}
+    const failedKeys = new Set();
+    const SLOW_MS = 12000;
+    const TIMEOUT_MS = 40000;
+
+    function clearTimers() {
+      clearTimeout(slowTimer); clearTimeout(failTimer); clearTimeout(bufferTimer); clearTimeout(switchTimer); clearTimeout(stallTimer);
+      slowTimer = failTimer = bufferTimer = switchTimer = stallTimer = null;
+    }
+    function stateEl(id) { return document.getElementById(id); }
+    function showLoading(title, detail) {
+      const el = stateEl('loader');
+      el.classList.remove('is-error');
+      el.style.display = 'flex';
+      stateEl('loaderMsg').textContent = title || 'Connecting to stream...';
+      stateEl('loaderDetail').textContent = detail || '';
+      stateEl('loaderTech').textContent = '';
+      stateEl('loaderActions').replaceChildren();
+    }
+    function hideState() {
+      stateEl('loader').style.display = 'none';
+    }
+    function actionButton(label, primary, handler) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'btn' + (primary ? ' btn-primary' : '');
+      b.textContent = label;
+      b.addEventListener('click', handler);
+      return b;
+    }
+    function nextCandidate() {
+      return sortSources(sourceItems).find((i) => i !== currentItem && !failedKeys.has(i.index));
+    }
+    function showError(title, detail, tech) {
+      const el = stateEl('loader');
+      el.classList.add('is-error');
+      el.style.display = 'flex';
+      stateEl('loaderMsg').textContent = title;
+      stateEl('loaderDetail').textContent = detail || '';
+      stateEl('loaderTech').textContent = tech || '';
+      const actions = stateEl('loaderActions');
+      actions.replaceChildren();
+      const next = nextCandidate();
+      if (next) actions.appendChild(actionButton('Try next best source', true, () => pickSource(next)));
+      if (currentItem) actions.appendChild(actionButton('Try again', !next, () => pickSource(currentItem)));
+      if (sourceItems.length > 1) actions.appendChild(actionButton('Choose another source', false, showPicker));
+      const first = actions.querySelector('button');
+      if (first) first.focus();
+    }
+    function failPlayback(token, title, detail, tech) {
+      if (token !== playToken) return;
+      clearTimers();
+      haltVideo();
+      if (currentItem) failedKeys.add(currentItem.index);
+      const next = nextCandidate();
+      if (autoNext && next) { showSwitching(next, title, detail, tech); return; }
+      if (autoNext && sourceItems.length > 1 && !next) {
+        showError('No working source found', 'We tried every source for this match. They may all be down right now.', tech);
+        stateEl('loaderActions').appendChild(actionButton('Start over', true, () => {
+          failedKeys.clear();
+          const best = sortSources(sourceItems)[0];
+          if (best) pickSource(best);
+        }));
+        return;
+      }
+      if (autoNext && sourceItems.length <= 1) {
+        detail = (detail ? detail + ' ' : '') + 'This match has only one source, so there is nothing to switch to.';
+      }
+      showError(title, detail, tech);
+    }
+    function showSwitching(next, title, detail, tech) {
+      const el = stateEl('loader');
+      el.classList.remove('is-error');
+      el.style.display = 'flex';
+      stateEl('loaderMsg').textContent = 'That source failed. Trying the next best one...';
+      stateEl('loaderDetail').textContent = (next.label || next.channel || next.provider) + ' (' + next.provider + ')';
+      stateEl('loaderTech').textContent = '';
+      const actions = stateEl('loaderActions');
+      actions.replaceChildren();
+      actions.appendChild(actionButton('Stop and choose myself', false, () => {
+        clearTimeout(switchTimer);
+        switchTimer = null;
+        showError(title, detail, tech);
+      }));
+      switchTimer = setTimeout(() => { switchTimer = null; pickSource(next); }, 1500);
+    }
+    function hlsFailure(d) {
+      const details = (d && d.details) || '';
+      const code = d && d.response && d.response.code;
+      const tech = [details, code === 0 ? 'no response' : (code ? 'HTTP ' + code : '')].filter(Boolean).join(' \u00b7 ');
+      if (/manifestLoad|levelLoad|manifestParsing/.test(details)) {
+        return ['This stream is unavailable', 'The source did not respond, or it blocked this request. This usually means the provider has taken it down or restricts where it can be played.', tech];
+      }
+      if (/fragLoad|fragParsing|bufferStall/.test(details)) {
+        return ['The stream stopped', 'The source stopped sending video. It may have ended or dropped.', tech];
+      }
+      if (d && d.type === 'mediaError') {
+        return ['This format is not supported', 'Your browser could not decode this stream.', tech];
+      }
+      return ['The stream could not be played', 'Something went wrong while loading this source.', tech];
+    }
+    function onPlayRejected(err) {
+      // Autoplay can be blocked until the user presses play; that is not a failure.
+      if (err && err.name === 'NotAllowedError') { hideState(); return; }
+      console.log(err);
     }
 
     function playStreamUrl(url, streamObj = null) {
@@ -619,40 +980,104 @@
         closePlayer();
         return;
       }
-      
+
       const video = document.getElementById('video');
-      document.getElementById('loader').style.display = 'none';
+      const token = ++playToken;
+      clearTimers();
+      playedOnce = false;
       video.style.opacity = '1';
 
       if (!url) {
-        alert('This stream cannot be played in the browser directly.');
-        closePlayer();
+        failPlayback(token, 'This stream cannot play here', 'It needs another app or player. Try a different source.');
         return;
       }
 
-      if (Hls.isSupported()) {
+      showLoading('Connecting to stream...');
+      slowTimer = setTimeout(() => {
+        if (token === playToken) showLoading('Still connecting...', 'This source is slow or may be down. You can keep waiting or pick another one.');
+        if (token === playToken) {
+          const actions = stateEl('loaderActions');
+          actions.appendChild(actionButton('Choose another source', false, () => { playToken++; clearTimers(); if (sourceItems.length > 1) showPicker(); else closePlayer(); }));
+        }
+      }, SLOW_MS);
+      failTimer = setTimeout(() => failPlayback(token, 'This stream timed out', 'The source did not start playing in time.', 'no playback after ' + (TIMEOUT_MS / 1000) + 's'), TIMEOUT_MS);
+
+      if (typeof Hls !== 'undefined' && Hls.isSupported()) {
         if (hls) hls.destroy();
         hls = new Hls({ maxBufferLength: 30 });
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          if (token !== playToken || !data || !data.fatal) return;
+          const f = hlsFailure(data);
+          failPlayback(token, f[0], f[1], f[2]);
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(onPlayRejected));
         hls.loadSource(url);
         hls.attachMedia(video);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(e=>console.log(e)));
       } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
         video.src = url;
-        video.play().catch(e=>console.log(e));
+        video.play().catch(onPlayRejected);
+      } else {
+        failPlayback(token, 'This browser cannot play this stream', 'Try another browser or open it in the Nuvio app.');
       }
     }
 
-    function closePlayer() {
-      document.getElementById('player-overlay').style.display = 'none';
-      document.getElementById('source-selector').style.display = 'none';
+    (function () {
+      const sw = document.getElementById('autoNext');
+      const paint = () => sw.setAttribute('aria-checked', String(autoNext));
+      sw.addEventListener('click', () => {
+        autoNext = !autoNext;
+        try { localStorage.setItem('nuvio-autonext', autoNext ? '1' : '0'); } catch (e) {}
+        paint();
+      });
+      paint();
+    })();
+
+    (function () {
       const video = document.getElementById('video');
-      video.pause();
-      video.src = '';
-      if (hls) {
-        hls.destroy();
-        hls = null;
-      }
+      video.addEventListener('playing', () => {
+        playedOnce = true;
+        clearTimers();
+        hideState();
+      });
+      video.addEventListener('waiting', () => {
+        clearTimeout(bufferTimer);
+        clearTimeout(stallTimer);
+        const token = playToken;
+        // A stall after playback had started: give up if it does not recover.
+        stallTimer = setTimeout(() => {
+          if (playedOnce && token === playToken && !video.paused && document.getElementById('player-dialog').open) {
+            failPlayback(token, 'The stream stalled', 'The source stopped sending video and did not recover.', 'stalled for ' + (STALL_MS / 1000) + 's');
+          }
+        }, STALL_MS);
+        bufferTimer = setTimeout(() => { if (!video.paused && document.getElementById('player-dialog').open) showLoading('Buffering...'); }, 1500);
+      });
+      video.addEventListener('error', () => {
+        // Clearing the source on close also raises an error event; ignore that.
+        if (!document.getElementById('player-dialog').open || (!hls && !video.getAttribute('src'))) return;
+        failPlayback(playToken, 'The video could not be played', 'The source returned something this browser cannot play.', video.error ? 'media error ' + video.error.code : '');
+      });
+    })();
+
+    function stopPlayback() {
+      clearTimers();
+      playToken++;
+      document.getElementById('player-dialog').classList.remove('is-picking');
+      document.getElementById('changeSource').hidden = true;
+      haltVideo();
     }
+
+    function closePlayer() {
+      const dlg = document.getElementById('player-dialog');
+      if (dlg.open) dlg.close(); else stopPlayback();
+    }
+
+    (function () {
+      const dlg = document.getElementById('player-dialog');
+      // Esc, the close button and backdrop clicks all end up here.
+      dlg.addEventListener('close', stopPlayback);
+      document.getElementById('changeSource').addEventListener('click', showPicker);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) closePlayer(); });
+    })();
 
     function checkDonateParam() {
       if (window.location.hash === '#donate' || (window.location.search && window.location.search.includes('donate'))) {
