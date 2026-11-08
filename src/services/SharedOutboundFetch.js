@@ -77,7 +77,12 @@ function createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay = abortab
           if (isCapacity) {
             console.warn('[GuardedOutbound] Native capacity', JSON.stringify(failure.capacityDiagnostic || { reason: failure.code }));
             if (proxyUrl) {
-              throw Object.assign(failure, { transportCode: failure.code, code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503 });
+              lastError = Object.assign(failure, { transportCode: failure.code, code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503 });
+              if (attempt < attempts) {
+                await delay(350 * attempt, signal);
+                continue;
+              }
+              throw lastError;
             }
             lastError = failure;
             break;

@@ -85,7 +85,7 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
     const keyId = records.find(r => r.key === key)?.keyId || nextKeyId;
     const diagnostic = () => ({ threadId, poolId, requested: { keyId, profile: configuration.profile, egress: configuration.proxyUrl ? 'proxy' : 'direct', owner }, limit: maxSlots, slots: records.map(r => ({ slotId: r.slotId, keyId: r.keyId, profile: r.profile, egress: r.egress, owner: r.owner || 'idle', state: !r.slot ? 'creating' : r.reserved ? 'reserved' : r.slot.busy ? 'busy' : 'idle', phase: r.reserved ? r.phase : r.slot?.busy ? 'draining' : 'idle', ...(r.reserved ? { reservationAgeMs: Math.max(0, now() - r.reservedAt) } : {}), ...(r.slot?.busy && r.operationStartedAt !== undefined ? { operationAgeMs: Math.max(0, now() - r.operationStartedAt) } : {}) })) });
     if (!resumed && (waiters.length || wakeInFlight)) {
-      await waitForCapacity(signal, waitUntil, diagnostic);
+      await waitForCapacity(signal, waitUntil, diagnostic, Boolean(configuration.proxyUrl));
       return acquire(key, configuration, signal, owner, waitUntil, true);
     }
     let record = records.find(item => item.key === key && item.slot && !item.reserved && !item.slot.busy);
@@ -114,7 +114,7 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
       const idle = records.find(item => item.key !== key && item.slot && !item.reserved && !item.slot.busy);
       if (!idle) {
         if (resumed) wakeInFlight = false;
-        await waitForCapacity(signal, waitUntil, diagnostic, resumed);
+        await waitForCapacity(signal, waitUntil, diagnostic, resumed || Boolean(configuration.proxyUrl));
         return acquire(key, configuration, signal, owner, waitUntil, true);
       }
       // Reserve synchronously, before awaiting closure, so another request cannot

@@ -27,6 +27,7 @@ module.exports = {
         // workers serve an old catalog, a missing one means an empty catalog,
         // until the next sync lands.
         MATCHES_CACHE_PATH: '/root/nuvio-live-sports/data/matches_cache.json',
+        LIVE_OVERLAY_FILE: '/root/nuvio-live-sports/data/live_overlay.json',
         MALLOC_ARENA_MAX: '2',
         MALLOC_CONF: 'narenas:2,dirty_decay_ms:5000,muzzy_decay_ms:5000',
         LD_PRELOAD: '/usr/lib/x86_64-linux-gnu/libjemalloc.so.2',
@@ -47,6 +48,8 @@ module.exports = {
         PREWARM_MAX_MATCHES: '12',
         PREWARM_CRON_SCHEDULE: '*/3 * * * *',
         WARP_PROXY_URL: 'socks5://127.0.0.1:40000',
+        LEAF_INSTALL_CONFIG: process.env.LEAF_INSTALL_CONFIG || 'https://premium.highfly.to/bff8de7f-67bc-49e0-99e3-fefecee64abb/manifest.json',
+        LEAF_PROXY_URL: process.env.LEAF_PROXY_URL || 'socks5://127.0.0.1:40000',
         // Cloudflare worker-budget counters live in process memory, so each
         // cluster instance must be told how many siblings share the same caps.
         WORKER_INSTANCE_COUNT: '2',

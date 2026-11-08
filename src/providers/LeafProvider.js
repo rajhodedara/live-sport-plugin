@@ -426,7 +426,7 @@ class LeafProvider extends BaseProvider {
     const url = `${context.apiBase}/stream/sport/${encodeURIComponent(targetId)}.json`;
     const res = await impitClient.safeFetch(url, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', Origin: context.origin, Referer: `${context.origin}/` },
-      signal: context.signal, timeoutMs: context.remaining(), maxBodyBytes: MAX_BODY_BYTES, attempts: 1
+      signal: context.signal, timeoutMs: context.remaining(), maxBodyBytes: MAX_BODY_BYTES, attempts: 2
     });
     context.remaining();
     if (res?.status === 429) {
