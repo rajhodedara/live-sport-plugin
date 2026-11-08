@@ -75,7 +75,7 @@ const SOURCE_PRIORITY = {
   fullraces: 8,
   hockeyreplays: 8,
   mlblive: 8,
-  leaf_recap: 8,
+  leaf_recap: 2,
   watchfooty: 8,
   admin: 9,
   streamedpk: 9,

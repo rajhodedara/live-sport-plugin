@@ -462,9 +462,13 @@ class LeafProvider extends BaseProvider {
       if (!st || typeof st.url !== 'string' || !st.url) continue;
       try { validateLeafManifestUrl(st.url); } catch (_) { continue; }
       const parsed = new URL(st.url);
-      if (!parsed.search) continue;
-      const slug = (parsed.pathname.match(/\/m3u\/([a-z0-9-]+)\/live\.m3u8/i) || [])[1] || '';
-      if (slug.length > 256) continue;
+      const isPapacito = parsed.hostname === 'papacito.cfd' || parsed.hostname.endsWith('.papacito.cfd');
+      if (isPapacito && !parsed.search) continue;
+      let slug = (parsed.pathname.match(/\/m3u\/([a-z0-9-]+)\/live\.m3u8/i) || [])[1] || '';
+      if (!slug && !isPapacito) {
+        slug = (parsed.pathname.replace(/\.m3u8$/i, '').match(/\/([a-z0-9_-]+)$/i) || [])[1] || '';
+      }
+      if (slug.length > 256) slug = slug.slice(0, 256);
       candidates.push({ st, directUrl: st.url, slug, referer: `${context.origin}/`, origin: context.origin });
       if (candidates.length === MAX_CANDIDATES) break;
     }

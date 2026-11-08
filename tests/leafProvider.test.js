@@ -411,5 +411,36 @@ describe('LeafProvider Unit Tests', () => {
       );
       seedSpy.mockRestore();
     });
+
+    test('resolves modern sports.highfly.to opaque URLs without query strings', async () => {
+      safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+        if (url.includes('/stream/sport/')) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [
+                {
+                  name: 'Leaf (Strong) · Sky Sports Main Event',
+                  title: '1920x1080 · Stereo · ~6.2 Mbps · Leaf (Strong)',
+                  url: 'https://sports.highfly.to/live/opaque987654321'
+                }
+              ]
+            })
+          };
+        }
+        return playlistResponse();
+      });
+
+      const res = await provider.resolveStream('streamed:opaque-match', 'football', 'Match');
+      expect(res).toHaveLength(1);
+      expect(res[0].quality).toBe('FHD');
+      expect(res[0].resolution).toBe('1080p');
+      expect(res[0].bitrate).toBe('6.2 Mbps');
+      expect(res[0].url).toContain('/api/leaf/m3u8/');
+      const token = res[0].url.split('/api/leaf/m3u8/')[1].replace('/index.m3u8', '');
+      const verified = leafState.verify(token);
+      expect(verified.m).toBe('streamed:opaque-match');
+    });
   });
 });

@@ -53,8 +53,16 @@ function validateLeafManifestUrl(value) {
     if (typeof value !== 'string' || value.length > 16 * 1024 ||
         value !== value.trim() || /[\u0000-\u001f\u007f]/.test(value)) throw new Error();
     const parsed = new URL(value);
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port ||
-        !(parsed.hostname === 'papacito.cfd' || parsed.hostname.endsWith('.papacito.cfd'))) throw new Error();
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) throw new Error();
+    // Accept papacito.cfd delivery hosts (authenticated segments with ?token= or ?ft=
+    // JWT credentials) and recaps.highfly.to / *.highfly.to delivery hosts (unauthenticated
+    // backup streams introduced in 2026-11). Both are served via the Leaf egress profile.
+    const h = parsed.hostname;
+    const isPapacito = h === 'papacito.cfd' || h.endsWith('.papacito.cfd');
+    const isHighflyDelivery = h === 'recaps.highfly.to' || h.endsWith('.recaps.highfly.to') ||
+                               h === 'highfly.to' || h.endsWith('.highfly.to') ||
+                               h === 'highfly.dev' || h.endsWith('.highfly.dev');
+    if (!isPapacito && !isHighflyDelivery) throw new Error();
   } catch (_) {
     throw Object.assign(new Error('Invalid Leaf manifest URL'), { code: 'ERR_LEAF_MANIFEST_URL', statusCode: 400 });
   }

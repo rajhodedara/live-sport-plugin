@@ -115,7 +115,14 @@ function mediaCandidate(url, slug) {
   try {
     validateLeafManifestUrl(url);
     const parsed = new URL(url);
-    if (!parsed.search || (slug && parsed.pathname !== `/m3u/${slug}/live.m3u8`)) return null;
+    const isPapacito = parsed.hostname === 'papacito.cfd' || parsed.hostname.endsWith('.papacito.cfd');
+    if (isPapacito) {
+      if (!parsed.search || (slug && parsed.pathname !== `/m3u/${slug}/live.m3u8`)) return null;
+    } else {
+      if (slug && parsed.pathname.includes('/m3u/')) {
+        if (parsed.pathname !== `/m3u/${slug}/live.m3u8`) return null;
+      }
+    }
     const now = Date.now();
     let expiresAt = now + MINT_TTL_MS;
     for (const value of parsed.searchParams.values()) {
