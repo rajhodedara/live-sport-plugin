@@ -34,6 +34,13 @@
     /* ---------- Hero ---------- */
 
     /* ---------- Panels ---------- */
+    html:not(.accounts) [data-account-only] { display: none !important; }
+    .device-bar-main { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
+    .device-bar-main label { font: 600 13px/18px var(--font-sans); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+    .device-bar-main select { flex: 1 1 200px; min-width: 0; min-height: 48px; padding: 0 var(--space-4); border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font: 15px var(--font-sans); }
+    .device-note { min-height: 20px; margin: var(--space-2) 0 0; color: var(--muted); font-size: 14px; }
+    .device-note.is-error { color: var(--danger); }
+    @media (max-width: 720px) { .device-bar-main .btn { width: 100%; } }
     .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-6); margin-bottom: var(--space-4); }
     .panel-head { display: flex; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-5); flex-wrap: wrap; }
     .panel-head .step-n { width: 36px; height: 36px; font-size: 16px; background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
@@ -227,11 +234,12 @@
     <button type="button" class="icon-btn nav-toggle desktop-only" id="navToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Close navigation">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
     </button>
-    <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
+    <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo-icon.webp" alt="" width="36" height="36"><span>Nuvio Live Sports</span></a>
     <nav class="topnav" aria-label="Site">
       <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
       <a href="/configure" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
       <a href="/status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
+      <a href="/account"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg><span class="nav-label">Account</span></a>
       <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer" title="Discord (opens in a new tab)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
           </svg><span class="nav-label">Discord</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
@@ -252,6 +260,7 @@
     <aside class="sidebar" id="sidebar">
       <nav class="stepnav" aria-label="Setup steps">
         <ol>
+          <li data-account-only><a href="#sec-device"><span class="step-n" aria-hidden="true">1</span>Device</a></li>
           <li><a href="#sec-sports"><span class="step-n" aria-hidden="true">1</span>Sports</a></li>
           <li><a href="#sec-teams"><span class="step-n" aria-hidden="true">2</span>Teams and time</a></li>
           <li><a href="#sec-sources"><span class="step-n" aria-hidden="true">3</span>Live sources</a></li>
@@ -274,6 +283,22 @@
         <div class="seg" role="radiogroup" aria-label="Setup layout" id="modeSeg">
           <button type="button" role="radio" aria-checked="true" data-mode="all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>All steps</button>
           <button type="button" role="radio" aria-checked="false" data-mode="wizard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Wizard</button>
+        </div>
+      </section>
+
+      <!-- Device (accounts only) -->
+      <section class="panel" id="sec-device" data-account-only aria-labelledby="device-h">
+        <div class="panel-head">
+          <span class="step-n" aria-hidden="true">1</span>
+          <div class="panel-title"><h2 id="device-h" tabindex="-1">Choose your device</h2><p>Each device keeps its own settings and its own install link. Pick the one you are setting up.</p></div>
+        </div>
+        <div id="deviceBar" hidden>
+          <div class="device-bar-main">
+            <label for="deviceSelect">Device</label>
+            <select id="deviceSelect" aria-describedby="deviceNote"></select>
+            <a class="btn" href="/account">Manage devices</a>
+          </div>
+          <p class="device-note" id="deviceNote" role="status" aria-live="polite"></p>
         </div>
       </section>
 
@@ -909,6 +934,7 @@
         if (config.replaySources === '') config.replaySources = 'none';
       }
 
+      window.__nuvioConfig = config;
       if (Object.keys(config).length > 0) {
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
         const encoded = base64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -930,6 +956,12 @@
         if (colQuery) collectionsUrl += (collectionsUrl.includes('?') ? '&' : '?') + colQuery;
       }
 
+      // With accounts on, the install link is the chosen device's own, and edits autosave to it.
+      if (window.__deviceUrl) manifestUrl = window.__deviceUrl;
+      // Accounts on but no device chosen: there is no link to hand out yet.
+      const noDevice = !!window.__accountsOn && !window.__deviceUrl;
+      if (noDevice) { manifestUrl = ''; collectionsUrl = ''; downloadUrl = '#'; }
+      if (window.__deviceSave) window.__deviceSave(config);
       currentManifestUrl = manifestUrl;
       currentCollectionsUrl = collectionsUrl;
       // Keep the download button on the current config too (it carries the
@@ -946,7 +978,7 @@
       const finishSummary = document.getElementById('finishSummary');
       if (finishSummary && configSummary) finishSummary.innerHTML = configSummary.innerHTML;
 
-      const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
+      const installUrl = manifestUrl ? manifestUrl.replace(/^https?:\/\//, 'stremio://') : '#';
       btn.href = installUrl;
       if (barInstall) barInstall.href = installUrl;
       if (wizInstall) wizInstall.href = installUrl;
@@ -997,8 +1029,12 @@
       setTimeout(() => { el.textContent = restore; }, 2200);
     }
 
+    const needsDevice = () => !!window.__accountsOn && !window.__deviceUrl;
+    const NEEDS_DEVICE_MSG = 'Add or choose a device first. Links are created per device.';
+
     copyBtn.addEventListener('click', async (e) => {
       e.preventDefault();
+      if (needsDevice()) { setStatus(NEEDS_DEVICE_MSG, 'err'); return; }
       let ok = false;
       try {
         if (hasModernClipboard) {
@@ -1020,6 +1056,7 @@
     if (copyCollectionsBtn) {
       copyCollectionsBtn.addEventListener('click', async (e) => {
         e.preventDefault();
+        if (needsDevice()) { setStatus(NEEDS_DEVICE_MSG, 'err'); return; }
         const restoreLabel = collectionsBtnLabel ? collectionsBtnLabel.textContent : 'Copy JSON';
         if (collectionsBtnLabel) collectionsBtnLabel.textContent = 'Fetching JSON';
         try {
@@ -1044,6 +1081,8 @@
         }
       });
     }
+
+    if (downloadCollectionsBtn) downloadCollectionsBtn.addEventListener('click', (e) => { if (needsDevice()) { e.preventDefault(); setStatus(NEEDS_DEVICE_MSG, 'err'); } });
 
     input.addEventListener('input', updateLink);
     timezoneSelect.addEventListener('change', updateLink);
@@ -1226,6 +1265,7 @@
     // ---- Install is only possible once the configuration is complete ----
     function configIssues() {
       const issues = [];
+      if (window.__accountsOn && !window.__deviceUrl) issues.push({ sec: 'sec-device', text: window.__deviceCount === 0 ? 'Add a device first. Each device gets its own install link.' : 'Choose the device you are installing for.' });
       if (!Array.from(checkboxes).some(cb => cb.checked)) issues.push({ sec: 'sec-sports', text: 'Choose at least one sport.' });
       let tzOk = !!timezoneSelect.value;
       if (tzOk) { try { new Intl.DateTimeFormat('en-US', { timeZone: timezoneSelect.value }); } catch (e) { tzOk = false; } }
@@ -1280,6 +1320,8 @@
       const issues = configIssues();
       const ok = issues.length === 0;
       [btn, barInstall, wizInstall].forEach(el => setInstallEnabled(el, ok));
+      const linksOk = !(window.__accountsOn && !window.__deviceUrl);
+      [copyBtn, barCopy, document.getElementById('finishCopy'), copyCollectionsBtn, downloadCollectionsBtn].forEach(el => setInstallEnabled(el, linksOk));
       renderIssues(document.getElementById('installIssues'), issues);
       renderIssues(document.getElementById('finishIssues'), issues);
       const hint = document.getElementById('barHint');
@@ -1391,7 +1433,7 @@
           if (ol) ol.scrollLeft = Math.max(0, cur.offsetLeft - 16);
         }
       }
-      mark('sec-sports');
+      mark(document.documentElement.classList.contains('accounts') ? 'sec-device' : 'sec-sports');
       if (!('IntersectionObserver' in window)) return;
       const visible = new Set();
       const io = new IntersectionObserver((entries) => {
@@ -1504,11 +1546,15 @@
 
     // ---- Layout modes: all steps, or one step at a time ----
     (function () {
-      const ORDER = ['sec-sports', 'sec-teams', 'sec-sources', 'sec-prefs', 'sec-collections', 'sec-finish'];
       const root = document.documentElement;
+      const withDevice = root.classList.contains('accounts');
+      const ORDER = ['sec-device', 'sec-sports', 'sec-teams', 'sec-sources', 'sec-prefs', 'sec-collections', 'sec-finish'].filter(id => id !== 'sec-device' || withDevice);
       const panels = ORDER.map(id => document.getElementById(id));
       const support = document.getElementById('sec-support');
-      const links = Array.from(document.querySelectorAll('.stepnav a'));
+      const links = Array.from(document.querySelectorAll('.stepnav a')).filter(a => withDevice || !a.closest('[data-account-only]'));
+      // Step numbers follow what is actually shown (the device step only exists with accounts).
+      links.forEach((a, i) => { const n = a.querySelector('.step-n'); if (n) n.textContent = String(i + 1); });
+      panels.forEach((p, i) => { const n = p && p.querySelector('.panel-head .step-n'); if (n) n.textContent = String(i + 1); });
       const eyebrow = document.getElementById('heroEyebrow');
       const back = document.getElementById('wizBack');
       const next = document.getElementById('wizNext');
@@ -1527,7 +1573,7 @@
         if (mode === 'wizard') {
           links.forEach((a, i) => { if (i === step) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
           if (back) back.disabled = step === 0;
-          if (next) next.hidden = step === last;
+          if (next) { next.hidden = step === last; next.disabled = withDevice && ORDER[step] === 'sec-device' && !window.__deviceUrl; }
           if (wizInstall) wizInstall.hidden = step !== last;
           if (count) count.textContent = 'Step ' + (step + 1) + ' of ' + ORDER.length;
         }
@@ -1568,6 +1614,7 @@
         const el = document.getElementById(secId);
         if (el) el.scrollIntoView({ block: 'start' });
       };
+      window.nuvioRenderWizard = render;
       render();
     })();
 
@@ -1593,6 +1640,101 @@
       paint();
     })();
   </script>
+
+  <script>
+  /* Per-device setup. When accounts are enabled, settings belong to a device chosen here:
+     the form edits that device, changes autosave, and the install link is the device's own. */
+  (function () {
+    var bar = document.getElementById('deviceBar');
+    var select = document.getElementById('deviceSelect');
+    var note = document.getElementById('deviceNote');
+    if (!bar || !select) return;
+    var deviceId = new URLSearchParams(location.search).get('device') || '';
+    var timer = null, lastSaved = null, pending = null, ready = false;
+
+    function j(r) { return r.json().catch(function () { return {}; }); }
+    function say(t, bad) { note.textContent = t || ''; note.classList.toggle('is-error', !!bad); }
+    function pathHasConfig() { var p = location.pathname.split('/'); return p.length >= 3 && p[p.length - 1] === 'configure'; }
+    function b64(o) { return btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+    function refresh() { if (typeof updateLink === 'function') updateLink(); }
+
+    function put(cfg, keepalive) {
+      var body = JSON.stringify({ config: cfg });
+      if (body === lastSaved) return Promise.resolve();
+      lastSaved = body;
+      return fetch('/api/auth/devices/' + encodeURIComponent(deviceId), {
+        method: 'PUT', credentials: 'same-origin', keepalive: !!keepalive,
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: cfg })
+      }).then(function (r) { say(r.ok ? 'Saved to this device.' : 'Could not save. Please sign in again.', !r.ok); })
+        .catch(function () { say('Could not reach the server.', true); });
+    }
+    window.__deviceSave = function (cfg) {
+      if (!ready) return;
+      pending = cfg; clearTimeout(timer);
+      timer = setTimeout(function () { put(pending); pending = null; }, 500);
+    };
+    window.__deviceFlush = function () {
+      if (!ready || !pending) return;
+      clearTimeout(timer); var c = pending; pending = null; put(c, true);
+    };
+    ['installBtn', 'barInstall', 'wizInstall', 'copyBtn', 'barCopy', 'openInstall'].forEach(function (id) {
+      var el = document.getElementById(id); if (el) el.addEventListener('click', window.__deviceFlush, true);
+    });
+    window.addEventListener('pagehide', window.__deviceFlush);
+
+    select.addEventListener('change', function () {
+      if (select.value) location.href = '/configure?device=' + encodeURIComponent(select.value);
+    });
+
+    function loadDevice() {
+      return fetch('/api/auth/devices/' + encodeURIComponent(deviceId), { credentials: 'same-origin' }).then(function (r) {
+        if (!r.ok) { say('That device no longer exists. Choose another.', true); return; }
+        return j(r).then(function (d) {
+          var cfg = d.config || {};
+          if (!pathHasConfig() && Object.keys(cfg).length) {
+            location.replace('/' + b64(cfg) + '/configure?device=' + encodeURIComponent(deviceId));
+            return;
+          }
+          if (!d.manifestUrl) { say('This device was added before links were stored. Remove it and add it again.', true); return; }
+          window.__deviceUrl = d.manifestUrl;
+          lastSaved = JSON.stringify({ config: cfg });
+          ready = true;
+          say('Changes save to this device automatically.');
+          refresh();
+          if (window.nuvioRenderWizard) window.nuvioRenderWizard();
+          // Arrived with a device already chosen (e.g. just added): the wizard can skip past this step.
+          if (document.documentElement.getAttribute('data-mode') === 'wizard' && window.nuvioGoTo && !window.__deviceAdvanced) {
+            window.__deviceAdvanced = true; window.nuvioGoTo('sec-sports');
+          }
+        });
+      });
+    }
+
+    fetch('/api/auth/providers', { credentials: 'same-origin' }).then(j).then(function (info) {
+      if (!info.enabled || !(info.providers || []).length) return;
+      return fetch('/api/auth/devices', { credentials: 'same-origin' }).then(function (r) { return r.ok ? j(r) : null; }).then(function (res) {
+        if (!res) return;
+        window.__accountsOn = true;
+        bar.hidden = false;
+        var list = res.devices || [];
+        window.__deviceCount = list.length;
+        if (!list.length) { var mb = bar.querySelector('a.btn'); if (mb) mb.textContent = 'Add a device'; }
+        select.textContent = '';
+        var known = list.some(function (d) { return d.id === deviceId; });
+        // The prompt is only a prompt: never selectable, and gone from the list once a device is chosen.
+        var ph = document.createElement('option'); ph.value = ''; ph.disabled = true; ph.selected = !known; ph.hidden = known;
+        ph.textContent = list.length ? 'Choose a device' : 'No devices yet'; select.appendChild(ph);
+        list.forEach(function (d) { var o = document.createElement('option'); o.value = d.id; o.textContent = d.name; o.selected = d.id === deviceId; select.appendChild(o); });
+        if (!deviceId && list.length === 1) { location.replace('/configure?device=' + encodeURIComponent(list[0].id)); return; }
+        if (!list.length) say('Add a device first, then come back to set it up.');
+        else if (!deviceId) say('Choose the device you are setting up.');
+        refresh();
+        if (deviceId) return loadDevice();
+      });
+    }).catch(function () {});
+  })();
+  </script>
+  <script src="/auth-nav.js" defer></script>
 </body>
 
 </html>

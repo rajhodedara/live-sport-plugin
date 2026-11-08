@@ -47,7 +47,9 @@ function sign(payload) {
   if (!validFields(payload)) {
     throw Object.assign(new Error('Invalid Leaf state payload'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
   }
-  const body = Buffer.from(JSON.stringify({ m: payload.m, s: payload.s || '', t: Date.now() })).toString('base64url');
+  const claims = { m: payload.m, s: payload.s || '', t: Date.now() };
+  if (payload.u) claims.u = payload.u; // account whose own install must mint this stream
+  const body = Buffer.from(JSON.stringify(claims)).toString('base64url');
   return `${body}.${mac(body)}`;
 }
 
@@ -64,7 +66,8 @@ function validFields(payload) {
     typeof payload.m === 'string' && payload.m.trim().length > 0 && Buffer.byteLength(payload.m, 'utf8') <= 1024 &&
     !/[\u0000-\u001f\u007f]/.test(payload.m) &&
     (payload.s === undefined || (typeof payload.s === 'string' &&
-      payload.s.length <= 256 && /^[a-z0-9-]*$/i.test(payload.s)));
+      payload.s.length <= 256 && /^[a-z0-9-]*$/i.test(payload.s))) &&
+    (payload.u === undefined || (typeof payload.u === 'string' && /^[0-9a-f-]{36}$/i.test(payload.u)));
 }
 
 function verify(token) {

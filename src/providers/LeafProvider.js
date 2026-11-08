@@ -6,6 +6,7 @@ const leafState = require('../services/LeafState');
 const leafMint = require('../services/LeafMint');
 const { isRateLimit } = leafMint;
 const { resolveLeafInstallConfig } = require('../services/LeafInstallConfig');
+const { installForUser } = require('../services/LeafAccountInstall');
 const { rateLimitDelay, recordAccountRateLimit, accountCooldownRemaining } = require('../services/LeafRateLimitState');
 const { checkLeafStream } = require('../services/LeafStreamProbe');
 const { isInconclusiveResolutionError, inconclusiveErrorReason, markInconclusiveStreams, inconclusiveStreamsReason } = require('../services/StreamResolutionOutcome');
@@ -111,7 +112,9 @@ class LeafProvider extends BaseProvider {
     return resolveLeafInstallConfig().apiBase;
   }
 
-  _configuration() {
+  _configuration(userId) {
+    const own = installForUser(userId);
+    if (own) return { ...own, userId };
     try { return resolveLeafInstallConfig(); }
     catch (_) { return { configured: false, apiBase: '', origin: '' }; }
   }
@@ -331,7 +334,7 @@ class LeafProvider extends BaseProvider {
     opts = { ...opts, forceRefresh: Boolean(opts.forceRefresh || src?.forceRefresh), skipCache: Boolean(opts.skipCache || src?.skipCache) };
     const targetId = src?.id || sourceId;
     if (typeof targetId !== 'string' || !targetId.trim() || Buffer.byteLength(targetId, 'utf8') > 1024 || /[\u0000-\u001f\u007f]/.test(targetId)) return [];
-    const config = this._configuration();
+    const config = this._configuration(opts.userId);
     if (!config.configured) {
       this._warnUnconfigured();
       return [];
@@ -490,7 +493,7 @@ class LeafProvider extends BaseProvider {
 
     for (const { st, directUrl, slug, referer, origin } of validCandidates) {
       context.remaining();
-      const stateToken = leafState.sign({ m: targetId, s: slug });
+      const stateToken = leafState.sign({ m: targetId, s: slug, ...(context.userId ? { u: context.userId } : {}) });
       const manifestProxyUrl = `${BASE_URL}/api/leaf/m3u8/${stateToken}/index.m3u8`;
       leafMint.seed(targetId, slug, directUrl, { base: context.apiBase });
       if (leafMint.peekCachedUrl(targetId, slug, { base: context.apiBase }) !== directUrl) continue;

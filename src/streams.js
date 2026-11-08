@@ -1105,8 +1105,10 @@ function prewarmSkipProvidersSet() {
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 
-function resolveKey(src, matchId) {
-  return require('./services/StreamResolveCache').resolveKey(src, matchId);
+function resolveKey(src, matchId, userId) {
+  const key = require('./services/StreamResolveCache').resolveKey(src, matchId);
+  // Leaf streams are minted from the requesting account's own install: never share them across accounts.
+  return userId && src && src.source === 'leaf' ? `${key}|u:${userId}` : key;
 }
 
 // Background prewarming is best-effort work: bound it per worker and drop excess
@@ -1438,6 +1440,7 @@ async function handleStream(type, id, config) {
   } catch (_) {}
 
   const activeSources = selectSources(candidateSources, config, match);
+  const userId = config && typeof config.__uid === 'string' ? config.__uid : undefined;
   const streamScorer = container.resolve('streamScorer');
 
   const resolveCache = container.resolve('streamResolveCache');
@@ -1463,7 +1466,7 @@ async function handleStream(type, id, config) {
   const PRIORITY1_QUORUM = 3;
   const inFlight = [];
   for (const src of activeSources) {
-    const key = resolveKey(src, match.id);
+    const key = resolveKey(src, match.id, userId);
     const isPriority1 = SOURCE_PRIORITY[src.source] === 1;
     // Local positive cache entries are already verified. On a warm re-click,
     // wait for these cheap reads, not for new scrapes on the missing mirrors.
@@ -1472,6 +1475,7 @@ async function handleStream(type, id, config) {
       inconclusive: Boolean(resolveCache.isDeferred?.(key)) };
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+        userId,
         onInconclusive() { state.inconclusive = true; }
       }), timingStream)
       .then((minted) => {

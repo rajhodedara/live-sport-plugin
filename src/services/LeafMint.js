@@ -198,7 +198,7 @@ async function mintUrl(matchId, slug, opts = {}) {
       (slug !== undefined && (typeof slug !== 'string' || slug.length > 256 || !/^[a-z0-9-]*$/i.test(slug)))) {
     throw Object.assign(new Error('Leaf mint input is invalid'), { code: 'ERR_LEAF_MINT_INPUT' });
   }
-  const config = resolveLeafInstallConfig();
+  const config = opts.install || resolveLeafInstallConfig();
   if (!config.configured) throw Object.assign(new Error('Leaf mint is not configured'), { code: 'ERR_LEAF_MINT_UNCONFIGURED' });
   const base = config.apiBase;
   const key = keyOf(matchId, slug, base);

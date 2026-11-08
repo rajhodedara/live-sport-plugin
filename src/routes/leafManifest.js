@@ -26,6 +26,7 @@ const { validateLeafManifestUrl: validateTargetUrl } = require('../services/Guar
 const leafState = require('../services/LeafState');
 const leafMint = require('../services/LeafMint');
 const { resolveLeafInstallConfig } = require('../services/LeafInstallConfig');
+const { installForUser } = require('../services/LeafAccountInstall');
 const { isInconclusiveResolutionError } = require('../services/StreamResolutionOutcome');
 
 // Live edge vs request budget: papacito's playlists run #EXT-X-TARGETDURATION:11
@@ -511,7 +512,9 @@ async function resolveViaState(stateToken, query = {}) {
     });
   }
 
-  const install = resolveLeafInstallConfig();
+  // A stream minted for an account uses that account's own Highfly install.
+  const accountInstall = payload.u ? installForUser(payload.u) : null;
+  const install = accountInstall || resolveLeafInstallConfig();
   let childUrl = query.url;
   if (childUrl !== undefined) {
     validateTargetUrl(childUrl);
@@ -519,7 +522,9 @@ async function resolveViaState(stateToken, query = {}) {
       throw Object.assign(new Error('Leaf child playlist account changed'), { code: 'ERR_LEAF_STATE', statusCode: 400 });
     }
   }
-  const minted = await leafMint.mintUrl(payload.m, payload.s);
+  const minted = accountInstall
+    ? await leafMint.mintUrl(payload.m, payload.s, { install })
+    : await leafMint.mintUrl(payload.m, payload.s);
   if (childUrl !== undefined) {
     const parent = new URL(minted);
     const child = new URL(childUrl);

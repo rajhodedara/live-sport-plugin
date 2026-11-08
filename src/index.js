@@ -58,6 +58,25 @@ const app = express();
 app.set('trust proxy', true);
 app.use(cors());
 
+// ─── Sign-in gate for the web pages ──────────────────────────────────────────
+// When accounts are enabled, the dashboard, configure and status pages need a
+// signed-in session. Addon/API URLs (manifest, catalog, stream, /api/*) stay open
+// so installed devices keep working. Runs before express.static.
+{
+  const gateAuth = require('./auth').getAuth();
+  const PAGE = /^\/(?:index\.html|configure(?:\.html)?|status(?:\.html)?)?$|^\/[^/]+\/configure$/;
+  app.use((req, res, next) => {
+    if (gateAuth.service && req.path === '/configure.html') return res.redirect(301, '/configure' + req.url.slice(req.path.length));
+    if (!gateAuth.service || (req.method !== 'GET' && req.method !== 'HEAD') || !PAGE.test(req.path)) return next();
+    const { parseCookies } = require('./routes/auth');
+    if (gateAuth.service.getSessionUser(parseCookies(req.headers.cookie).nuvio_session)) {
+      res.setHeader('Cache-Control', 'private, no-cache'); // revalidate (304) but allow back/forward cache
+      return next();
+    }
+    return res.redirect(302, `/account?next=${encodeURIComponent(req.originalUrl)}`);
+  });
+}
+
 // Artwork under /posters is large (the replay hero JPEGs are ~100-200 KB) and
 // rarely changes, but it used to be sent with no-store. That made Cloudflare
 // report BYPASS, so every view pulled the bytes from origin - the largest
@@ -74,16 +93,53 @@ app.use('/posters', express.static(path.join(__dirname, 'public', 'posters'), po
 app.use('/posters', express.static(path.join(__dirname, 'posters'), posterStaticOptions));
 
 // Serve static assets from public (logos, cryptocurrency QR codes, etc.)
-app.use(express.static(path.join(__dirname, '..', 'public')));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.static(path.join(process.cwd(), 'public')));
+// Assets keep their filenames, so they cannot be cached forever. Images change rarely and are cached
+// for a week; CSS/JS are served stale for up to a day while they revalidate in the background, which
+// removes the per-page 304 round trips. HTML is always revalidated.
+const publicStaticOptions = {
+  setHeaders: (res, filePath) => {
+    if (/\.(?:png|jpe?g|webp|svg|ico|gif)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
+    } else if (/\.(?:css|js)$/i.test(filePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
+    }
+  }
+};
+app.use(express.static(path.join(__dirname, '..', 'public'), publicStaticOptions));
+app.use(express.static(path.join(__dirname, 'public'), publicStaticOptions));
+app.use(express.static(path.join(process.cwd(), 'public'), publicStaticOptions));
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-app.get(['/configure', '/:config/configure'], (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'configure.html'));
+// ─── Accounts / SSO ──────────────────────────────────────────────────────────
+// Must stay above the /api resolver proxy so the OAuth callback is not swallowed.
+const auth = require('./auth').getAuth();
+app.use('/api/auth', require('./routes/auth').createAuthRouter({
+  service: auth.service || { providers: { list: () => [], get: () => null } },
+  config: auth.config,
+  baseUrlFor: (req) => (auth.config.publicUrl || getRequestBaseUrl(req)),
+}));
+if (auth.service) {
+  require('./services/LeafAccountInstall').setResolver((uid) => auth.service.getLeafInstall(uid));
+}
+app.get(['/account', '/login'], (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'account.html'));
+});
+// Resolves device tokens in addon config URLs (/<config>/manifest.json etc.).
+app.use(require('./auth/deviceConfigMiddleware').createDeviceConfigMiddleware({ service: auth.service }));
+
+// With accounts enabled the page gets an extra first step (choose a device). The server marks the
+// document, so the right steps render immediately with no flash and no client-side guessing.
+app.get(['/configure', '/:config/configure'], (req, res, next) => {
+  const file = path.join(__dirname, '..', 'public', 'configure.html');
+  if (!require('./auth').getAuth().service) return res.sendFile(file);
+  fs.readFile(file, 'utf8', (err, html) => {
+    if (err) return next(err);
+    res.setHeader('Content-Type', 'text/html; charset=UTF-8');
+    res.send(html.replace('<html lang="en"', '<html lang="en" class="accounts"'));
+  });
 });
 
 app.get('/status', (req, res) => {
@@ -1215,7 +1271,8 @@ app.get('/:config?/manifest.json', (req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', '*');
   res.setHeader('Content-Type', 'application/json');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  // Account-specific manifests must never be shared via CDN/browser caches.
+  res.setHeader('Cache-Control', req.nuvioUserId ? 'private, no-store' : 'public, max-age=86400');
   res.send(newManifest);
 });
 
