@@ -275,7 +275,7 @@ class PitSportProvider extends BaseProvider {
             if (watchJson && typeof watchJson.url === 'string' && watchJson.url.trim()) {
               const m3u8Url = watchJson.url.trim();
               const channelName = watchJson.channel?.channelname || label;
-              const title = `PitSport - ${channelName} (${matchTitle || 'Live Event'})`;
+              const title = channelName || matchTitle || 'PitSport Feed';
               const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(m3u8Url)}&referer=${encodeURIComponent(streamReferer)}&origin=${encodeURIComponent(streamOrigin)}`;
 
               const s = new StreamEntity({

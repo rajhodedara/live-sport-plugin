@@ -9,7 +9,7 @@ const container = require('../src/container');
 const { handleStream } = require('../src/streams');
 const StreamResolveCache = require('../src/services/StreamResolveCache');
 
-const feed = id => ({ url: `https://cdn.fixture.test/${id}.mp4`, title: `Feed ${id}`, _source: 'daddylive' });
+const feed = id => ({ url: `https://cdn.fixture.test/${id}.mp4`, title: `Feed ${id}`, _source: 'leaf' });
 function deferred() {
   let resolve;
   const promise = new Promise(done => { resolve = done; });
@@ -41,7 +41,7 @@ describe('verified Priority-1 quorum response window', () => {
       title: 'Fixture A vs Fixture B',
       category: channel ? 'networks' : 'football',
       sources: ['a', 'b', 'c', 'd'].map(id => ({
-        source: channel && id === 'd' ? 'vavoo' : 'daddylive', id
+        source: channel && id === 'd' ? 'vavoo' : 'leaf', id
       }))
     };
     const controls = Object.fromEntries(['a', 'b', 'c', 'd'].map(id => [id, deferred()]));
@@ -61,7 +61,7 @@ describe('verified Priority-1 quorum response window', () => {
   }
 
   function cachedFixture(rows, { ttl = {}, sources, match: extra = {} } = {}) {
-    const list = sources || ['a', 'b', 'c', 'd'].map(id => ({ source: 'daddylive', id }));
+    const list = sources || ['a', 'b', 'c', 'd'].map(id => ({ source: 'leaf', id }));
     const match = { id: 'cached_quorum', title: 'Fixture A vs Fixture B', category: 'football', sources: list, ...extra };
     const controls = Object.fromEntries(list.map(src => [src.id, deferred()]));
     const cache = new StreamResolveCache({ sharedResolver: {
@@ -75,7 +75,7 @@ describe('verified Priority-1 quorum response window', () => {
     container.resolve.mockImplementation(name => ({
       cacheService: { findMatch: () => match }, streamResolveCache: cache,
       streamScorer: { calculateScore: () => 1 }, m3u8Parser: null,
-      daddyLiveProvider: provider, timStreamsProvider: provider
+      daddyLiveProvider: provider, timStreamsProvider: provider, leafProvider: provider
     })[name]);
     return { id: `nuvio_sport_${match.id}`, match, controls, cache, provider };
   }
@@ -130,10 +130,10 @@ describe('verified Priority-1 quorum response window', () => {
   test('duplicate rows with the same cache key never count as three working sources', async () => {
     const { id, match } = fixture({ warm: ['a'], ready: ['a'] });
     match.sources = [
-      { source: 'daddylive', id: 'a' },
-      { source: 'daddylive', id: 'a' },
-      { source: 'daddylive', id: 'a' },
-      { source: 'daddylive', id: 'd' }
+      { source: 'leaf', id: 'a' },
+      { source: 'leaf', id: 'a' },
+      { source: 'leaf', id: 'a' },
+      { source: 'leaf', id: 'd' }
     ];
     let response;
     handleStream('tv', id).then(value => { response = value; });
@@ -164,7 +164,7 @@ describe('verified Priority-1 quorum response window', () => {
     controls.d.resolve([feed('d')]);
     await jest.advanceTimersByTimeAsync(0);
     expect((await pending).streams.map(row => row.url)).toEqual(['https://cdn.fixture.test/d.mp4']);
-    expect(cache.get('daddylive:cached_quorum:a')[0].externalUrl).toContain('/watch?');
+    expect(cache.get('leaf:cached_quorum:a')[0].externalUrl).toContain('/watch?');
   });
 
   test('a cache entry expiring between has and getOrCreate cannot bypass the hard deadline', async () => {
@@ -179,11 +179,11 @@ describe('verified Priority-1 quorum response window', () => {
     await jest.advanceTimersByTimeAsync(200);
     expect(response).toBeDefined();
     expect(response.streams).toHaveLength(3);
-    expect(cache.inFlight.has('daddylive:cached_quorum:d')).toBe(true);
+    expect(cache.inFlight.has('leaf:cached_quorum:d')).toBe(true);
     controls.d.resolve([feed('new-d')]);
     await jest.advanceTimersByTimeAsync(0);
     expect((await pending).streams).toHaveLength(3);
-    expect(cache.get('daddylive:cached_quorum:d')[0].url).toBe('https://cdn.fixture.test/new-d.mp4');
+    expect(cache.get('leaf:cached_quorum:d')[0].url).toBe('https://cdn.fixture.test/new-d.mp4');
     get.mockRestore();
   });
 
@@ -217,7 +217,7 @@ describe('verified Priority-1 quorum response window', () => {
   });
 
   test('cached YouTube feeds remain eligible even when web streams are disabled', async () => {
-    const youtube = id => ({ title: id, ytId: id.repeat(11), _source: 'daddylive' });
+    const youtube = id => ({ title: id, ytId: id.repeat(11), _source: 'leaf' });
     const { id, controls } = cachedFixture({ a: youtube('a'), b: youtube('b'), c: youtube('c') });
     let response;
     const pending = handleStream('tv', id, { webStreams: 'disabled' }).then(value => { response = value; return value; });
@@ -231,7 +231,7 @@ describe('verified Priority-1 quorum response window', () => {
 
   test('team-channel rows withheld before kickoff do not certify a direct quorum', async () => {
     const web = { title: 'Fixture player', externalUrl: '/watch?url=https%3A%2F%2Fplayer.fixture.test%2Flive' };
-    const sources = ['a', 'b', 'c', 'd', 'e'].map(id => ({ source: 'daddylive', id }));
+    const sources = ['a', 'b', 'c', 'd', 'e'].map(id => ({ source: 'leaf', id }));
     const { id, controls } = cachedFixture({
       a: { ...feed('team-a'), title: 'MLB | Team A' },
       b: { ...feed('team-b'), title: 'MLB | Team B' },
@@ -248,7 +248,7 @@ describe('verified Priority-1 quorum response window', () => {
 
   test('hidden settled priority web options do not cut off a pending secondary direct', async () => {
     const web = id => ({ title: id, externalUrl: `/watch?url=https%3A%2F%2Fplayer.fixture.test%2F${id}` });
-    const sources = ['a', 'b', 'c'].map(id => ({ source: 'daddylive', id })).concat({ source: 'timstreams', id: 'd' });
+    const sources = ['a', 'b', 'c'].map(id => ({ source: 'leaf', id })).concat({ source: 'timstreams', id: 'd' });
     const { id, controls } = cachedFixture({ a: web('a'), b: web('b'), c: web('c') }, { sources });
     let response;
     const pending = handleStream('tv', id, { webStreams: 'disabled' }).then(value => { response = value; return value; });
@@ -261,7 +261,7 @@ describe('verified Priority-1 quorum response window', () => {
 
   test('cached web-only priority sources retain the soft window for an arriving secondary direct', async () => {
     const web = id => ({ title: id, externalUrl: `/watch?url=https%3A%2F%2Fplayer.fixture.test%2F${id}` });
-    const sources = ['a', 'b', 'c'].map(id => ({ source: 'daddylive', id })).concat({ source: 'timstreams', id: 'd' });
+    const sources = ['a', 'b', 'c'].map(id => ({ source: 'leaf', id })).concat({ source: 'timstreams', id: 'd' });
     const { id, controls } = cachedFixture({ a: web('a'), b: web('b'), c: web('c') }, { sources });
     let response;
     const pending = handleStream('tv', id).then(value => { response = value; return value; });

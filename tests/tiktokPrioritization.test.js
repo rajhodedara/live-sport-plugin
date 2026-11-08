@@ -23,24 +23,44 @@ describe('TikTok CDN Deprioritization & Worker Quota Saver', () => {
   });
 
   describe('StreamScoringService', () => {
-    test('awards top Direct CDN bonus to DaddyLive and keeps Vavoo higher than SKTech', () => {
+    test('awards Direct CDN bonus according to priority hierarchy (leaf > timstreams > ppvst > pitsport > daddylive > vavoo > sktech)', () => {
+      const leafStream = { url: 'https://leaf.example/index.m3u8', resolution: '1080p' };
+      const timstreamsStream = { url: 'https://tim.example/index.m3u8', resolution: '1080p' };
+      const ppvstStream = { url: 'https://ppvst.example/index.m3u8', resolution: '1080p' };
+      const pitsportStream = { url: 'https://pitsport.example/index.m3u8', resolution: '1080p' };
       const daddyliveStream = { url: 'https://castr.example/index.m3u8', resolution: '1080p' };
       const vavooStream = { url: 'https://sunshine.example/index.m3u8', resolution: '1080p' };
       const sktechStream = { url: 'https://sktech.example/index.m3u8', resolution: '1080p' };
 
+      const leafScore = scorer.calculateScore(leafStream, 'leaf');
+      const timstreamsScore = scorer.calculateScore(timstreamsStream, 'timstreams');
+      const ppvstScore = scorer.calculateScore(ppvstStream, 'ppvst');
+      const pitsportScore = scorer.calculateScore(pitsportStream, 'pitsport');
       const daddyliveScore = scorer.calculateScore(daddyliveStream, 'daddylive');
       const vavooScore = scorer.calculateScore(vavooStream, 'vavoo');
       const sktechScore = scorer.calculateScore(sktechStream, 'sktech');
 
-      // DaddyLive: 50 + 30 + 20 + 20 + 15 = 135
-      expect(daddyliveScore).toBe(135);
-      // Vavoo: 50 + 30 + 20 + 15 + 15 = 130
-      expect(vavooScore).toBe(130);
-      // SKTech: 50 + 30 + 20 + 10 = 110
-      expect(sktechScore).toBe(110);
+      // leaf: 50 + 30 + 20 + 30 + 15 = 145
+      expect(leafScore).toBe(145);
+      // timstreams: 50 + 30 + 20 + 25 + 15 = 140
+      expect(timstreamsScore).toBe(140);
+      // ppvst: 50 + 30 + 20 + 20 + 15 = 135
+      expect(ppvstScore).toBe(135);
+      // pitsport: 50 + 30 + 20 + 15 + 15 = 130
+      expect(pitsportScore).toBe(130);
+      // DaddyLive: 50 + 30 + 20 + 10 + 15 = 125
+      expect(daddyliveScore).toBe(125);
+      // Vavoo: 50 + 30 + 20 + 5 + 15 = 120
+      expect(vavooScore).toBe(120);
+      // SKTech: 50 + 30 + 20 + 5 = 105
+      expect(sktechScore).toBe(105);
 
-      // Hierarchy: DaddyLive >= Vavoo > SKTech
-      expect(daddyliveScore).toBeGreaterThanOrEqual(vavooScore);
+      // Hierarchy: leaf > timstreams > ppvst > pitsport > daddylive >= vavoo > sktech
+      expect(leafScore).toBeGreaterThan(timstreamsScore);
+      expect(timstreamsScore).toBeGreaterThan(ppvstScore);
+      expect(ppvstScore).toBeGreaterThan(pitsportScore);
+      expect(pitsportScore).toBeGreaterThan(daddyliveScore);
+      expect(daddyliveScore).toBeGreaterThan(vavooScore);
       expect(vavooScore).toBeGreaterThan(sktechScore);
     });
 

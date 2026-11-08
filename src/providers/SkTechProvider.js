@@ -52,9 +52,11 @@ class SkTechProvider extends BaseProvider {
         if (/namibia\s*(?:vs?\.?|@|-)\s*uganda/i.test(m.title)) continue;
         const now = Date.now();
         if (m.endDate && now > m.endDate + 30 * 60 * 1000) continue;
-        if (m.kickoff && m.kickoff > 0 && (now - m.kickoff) > 4 * 3600 * 1000) continue;
+        const cat = this.normalizeCategory(m.category);
+        const maxDurationMs = cat === 'cricket' ? 10 * 3600 * 1000 : (cat === 'motorsport' ? 6 * 3600 * 1000 : 4 * 3600 * 1000);
+        if (m.kickoff && m.kickoff > 0 && (now - m.kickoff) > maxDurationMs) continue;
 
-        const isLive = m.kickoff && m.kickoff <= now && (now - m.kickoff) <= 4 * 3600 * 1000;
+        const isLive = m.kickoff && m.kickoff <= now && (now - m.kickoff) <= maxDurationMs;
         const status = isLive ? 'live' : ((m.kickoff && m.kickoff > now) ? 'upcoming' : 'live');
 
         matches.push(new MatchEntity({

@@ -13,6 +13,66 @@ const DYNAMIC_EVENT_FEEDS = [
   { label: 'Sony LIV', url: 'https://nonyliv.saqlainhaider8198.workers.dev/nony2.m3u' }
 ];
 
+const CRICKET_COUNTRY_MAP = {
+  IND: 'India',
+  INDIA: 'India',
+  NZ: 'New Zealand',
+  NZL: 'New Zealand',
+  AUS: 'Australia',
+  ENG: 'England',
+  SA: 'South Africa',
+  RSA: 'South Africa',
+  PAK: 'Pakistan',
+  WI: 'West Indies',
+  WIN: 'West Indies',
+  SL: 'Sri Lanka',
+  SRI: 'Sri Lanka',
+  BAN: 'Bangladesh',
+  BGD: 'Bangladesh',
+  AFG: 'Afghanistan',
+  ZIM: 'Zimbabwe',
+  IRE: 'Ireland',
+  IRL: 'Ireland',
+  SCO: 'Scotland',
+  NED: 'Netherlands',
+  NLD: 'Netherlands',
+  UAE: 'United Arab Emirates',
+  NAM: 'Namibia',
+  OMA: 'Oman',
+  OMN: 'Oman',
+  NEP: 'Nepal',
+  USA: 'USA',
+  CAN: 'Canada',
+  KEN: 'Kenya',
+  UGA: 'Uganda',
+  PNG: 'Papua New Guinea',
+  ITA: 'Italy',
+  JER: 'Jersey',
+  HK: 'Hong Kong',
+  HKG: 'Hong Kong',
+  BER: 'Bermuda',
+  KUW: 'Kuwait',
+  QAT: 'Qatar',
+  BRN: 'Bahrain',
+  MAS: 'Malaysia',
+  SIN: 'Singapore',
+  THA: 'Thailand',
+  LKA: 'Sri Lanka',
+  ZWE: 'Zimbabwe',
+  WIE: 'West Indies',
+  WIND: 'West Indies'
+};
+
+function resolveCountryCode(rawCode) {
+  if (!rawCode) return null;
+  const upper = rawCode.trim().toUpperCase();
+  const isWomen = /[-_]?W(?:OMEN)?$/i.test(upper);
+  const base = upper.replace(/[-_]?W(?:OMEN)?$/i, '');
+  const countryName = CRICKET_COUNTRY_MAP[base];
+  if (!countryName) return null;
+  return isWomen ? `${countryName} Women` : countryName;
+}
+
 class SkTechMatchResolver {
   constructor(options = {}) {
     this.baseUrl = options.baseUrl || BASE_API_URL;
@@ -41,7 +101,7 @@ class SkTechMatchResolver {
    * Cleans raw M3U titles by stripping language tags, quality markers, emojis, and brackets
    */
   cleanEventTitle(rawTitle, tvgName = '') {
-    let title = (tvgName && /\bvs\b/i.test(tvgName)) ? tvgName : (rawTitle || tvgName || '');
+    let title = (tvgName && /\bvs?\.?\b/i.test(tvgName)) ? tvgName : (rawTitle || tvgName || '');
     // Strip language/commentary prefixes: e.g. "ENG |", "HIN |", "[HINDI]", "Tamil |"
     title = title.replace(/^[A-Za-z]{2,8}\s*\|\s*/i, '');
     title = title.replace(/^\[[A-Za-z\s]+\]\s*/i, '');
@@ -58,6 +118,83 @@ class SkTechMatchResolver {
     title = title.replace(/\s+\d+\s*\([^)]+\)$/, '');
     title = title.replace(/\s+Vs\s+/i, ' vs ').trim();
     return title;
+  }
+
+  /**
+   * Recovers match teams, canonical title, and sport category from metadata
+   * (tvg-logo, streamUrl, tvgName, rawTitle) when titles are generic stage rounds (e.g. "2nd ODI").
+   */
+  recoverMatchMetadata(cleanTitle, curMeta = {}, streamUrl = '') {
+    let resolvedTitle = cleanTitle;
+    let teamA = null;
+    let teamB = null;
+    let category = null;
+
+    const candidates = [
+      curMeta.logo || '',
+      streamUrl || '',
+      curMeta.tvgName || '',
+      curMeta.rawTitle || '',
+      curMeta.group || ''
+    ];
+
+    const combinedIndicator = `${cleanTitle || ''} ${streamUrl || ''} ${curMeta.logo || ''} ${curMeta.tvgName || ''} ${curMeta.group || ''}`.toLowerCase();
+    const isCricketIndicator = combinedIndicator.includes('cricodi') ||
+                               combinedIndicator.includes('crict20') ||
+                               combinedIndicator.includes('cricket') ||
+                               combinedIndicator.includes('ipl') ||
+                               combinedIndicator.includes('t20') ||
+                               combinedIndicator.includes('odi');
+
+    // 1. Check if cleanTitle already parses as "Team A vs Team B"
+    const titleParts = cleanTitle.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
+    if (titleParts.length === 2 && titleParts[0].trim() && titleParts[1].trim()) {
+      teamA = { name: titleParts[0].trim(), logo: '' };
+      teamB = { name: titleParts[1].trim(), logo: '' };
+      if (isCricketIndicator || resolveCountryCode(teamA.name) || resolveCountryCode(teamB.name)) {
+        category = 'cricket';
+      }
+      return { title: cleanTitle, teamA, teamB, category };
+    }
+
+    // 2. Check for "X Tour of Y" series titles
+    for (const text of candidates) {
+      const tourMatch = text.match(/([A-Za-z\s]+?)\s+Tour\s+of\s+([A-Za-z\s]+?)(?:\s+\d{4})?(?:[_\.\/]|$)/i);
+      if (tourMatch) {
+        const visiting = tourMatch[1].trim();
+        const host = tourMatch[2].trim();
+        teamA = { name: host, logo: '' };
+        teamB = { name: visiting, logo: '' };
+        category = 'cricket';
+        const hasRoundTag = cleanTitle && !/tour\s+of/i.test(cleanTitle) && cleanTitle !== text;
+        resolvedTitle = `${host} vs ${visiting}${hasRoundTag ? ` (${cleanTitle})` : ''}`;
+        return { title: resolvedTitle, teamA, teamB, category };
+      }
+    }
+
+    // 3. Check for bilateral country abbreviation slugs: e.g. NZvsIND, NZ_WvsIND_W, AUS-v-ENG
+    const bilateralRe = /(?:^|[^A-Za-z0-9])([A-Za-z]{2,4}(?:[-_]?[Ww](?:omen)?)?)\s*(?:vs?\.?|[-_]v[-_]|@)\s*([A-Za-z]{2,4}(?:[-_]?[Ww](?:omen)?)?)(?=[^A-Za-z0-9]|$)/i;
+    for (const text of candidates) {
+      const m = text.match(bilateralRe);
+      if (m) {
+        const c1 = resolveCountryCode(m[1]);
+        const c2 = resolveCountryCode(m[2]);
+        if (c1 && c2) {
+          teamA = { name: c1, logo: '' };
+          teamB = { name: c2, logo: '' };
+          category = 'cricket';
+          resolvedTitle = `${c1} vs ${c2}${cleanTitle ? ` (${cleanTitle})` : ''}`;
+          return { title: resolvedTitle, teamA, teamB, category };
+        }
+      }
+    }
+
+    // 4. Sport indicator check from URL / logo
+    if (isCricketIndicator) {
+      category = 'cricket';
+    }
+
+    return { title: resolvedTitle, teamA, teamB, category };
   }
 
   /**
@@ -131,9 +268,10 @@ class SkTechMatchResolver {
       if (isTestOrDemo) continue;
 
       const now = Date.now();
+      const maxDurationMs = category === 'cricket' ? 10 * 3600 * 1000 : (category === 'motorsport' ? 6 * 3600 * 1000 : 4 * 3600 * 1000);
       const isFinished = endDate > 0
         ? (now > endDate + 30 * 60 * 1000)
-        : (kickoff > 0 ? (now > kickoff + 4 * 60 * 60 * 1000) : false);
+        : (kickoff > 0 ? (now > kickoff + maxDurationMs) : false);
       if (isFinished) continue;
 
       matches.push({
@@ -219,8 +357,10 @@ class SkTechMatchResolver {
             continue;
           }
 
-          const cat     = this.normalizeCategory(curMeta.group, clean);
-          const mapKey  = `${cat}:${clean.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+          const metaRecovery = this.recoverMatchMetadata(clean, curMeta, parsed.url);
+          const finalTitle   = metaRecovery.title || clean;
+          const cat          = metaRecovery.category || this.normalizeCategory(curMeta.group, finalTitle);
+          const mapKey       = `${cat}:${finalTitle.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 
           const resMatch = (curMeta.rawTitle || '').match(/\b(1080p|720p|540p|480p|360p|240p|144p)\b/i);
           const resTag   = resMatch ? resMatch[1].toUpperCase() : 'HD';
@@ -269,13 +409,13 @@ class SkTechMatchResolver {
               matchObj.sources.push(srcObj);
             }
           } else {
-            const teamParts = clean.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
-            const teamA = teamParts.length === 2 ? { name: teamParts[0].trim(), logo: '' } : null;
-            const teamB = teamParts.length === 2 ? { name: teamParts[1].trim(), logo: '' } : null;
+            const teamParts = finalTitle.split(/\s+(?:vs?\.?|@|[-–—])\s+/i);
+            const teamA = metaRecovery.teamA || (teamParts.length === 2 ? { name: teamParts[0].trim(), logo: '' } : null);
+            const teamB = metaRecovery.teamB || (teamParts.length === 2 ? { name: teamParts[1].trim(), logo: '' } : null);
 
             const matchObj = {
               id:          `sktech_ev_${feedKey}_${curMeta.tvgId || Math.random().toString(36).slice(2, 8)}`,
-              title:       clean,
+              title:       finalTitle,
               category:    cat,
               kickoff:     Date.now(),
               rawCategory: curMeta.group || `${feed.label} Live`,

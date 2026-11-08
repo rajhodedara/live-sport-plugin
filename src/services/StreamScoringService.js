@@ -36,32 +36,43 @@ class StreamScoringService {
       (typeof streamEntity.url === 'string' && /tiktokcdn|byteoversea|ibytedtos|\.image/i.test(streamEntity.url))
     );
 
-    if (isTikTok) {
+    const src = sourceName || streamEntity._source;
+    // Zero-bandwidth ByteRange providers (pitsport, timstreams) use #EXT-X-BYTERANGE
+    // direct redirects and do not consume Cloudflare Worker proxying.
+    const isZeroBandwidthByteRange = (src === 'pitsport' || src === 'timstreams');
+
+    if (isTikTok && !isZeroBandwidthByteRange) {
       score -= 30; // Deprioritize worker-heavy streams
     } else {
       // Direct CDN bonus for providers that bypass Cloudflare Workers entirely:
-      // DaddyLive is top (+20), Vavoo is solid (+15, higher than SKTech's +10)
-      if (sourceName === 'daddylive' || streamEntity._source === 'daddylive') {
+      // leaf (+30), timstreams (+25), ppvst (+20), pitsport (+15), daddylive (+10), vavoo (+5), sktech (+5)
+      if (src === 'leaf') {
+        score += 30;
+      } else if (src === 'timstreams') {
+        score += 25;
+      } else if (src === 'ppvst') {
         score += 20;
-      } else if (sourceName === 'vavoo' || streamEntity._source === 'vavoo') {
+      } else if (src === 'pitsport') {
         score += 15;
-      } else if (sourceName === 'sktech' || streamEntity._source === 'sktech') {
+      } else if (src === 'daddylive') {
         score += 10;
+      } else if (src === 'vavoo') {
+        score += 5;
+      } else if (src === 'sktech') {
+        score += 5;
       } else {
-        const otherDirect = ['golf', 'ppvst', 'damitv'];
-        if (otherDirect.includes(sourceName) || (streamEntity._source && otherDirect.includes(streamEntity._source))) {
-          score += 10;
+        const otherDirect = ['golf', 'damitv'];
+        if (otherDirect.includes(src)) {
+          score += 5;
         }
       }
     }
 
     // 4. Source Reliability
-    // Non-TikTok reliable sources
-    const reliableSources = ['daddylive', 'golf', 'echo', 'delta', 'vavoo', 'ppvst'];
-    if (!isTikTok && reliableSources.includes(sourceName)) {
+    // Non-TikTok (or zero-bandwidth ByteRange) reliable sources
+    const reliableSources = ['leaf', 'timstreams', 'ppvst', 'pitsport', 'daddylive', 'golf', 'echo', 'delta', 'vavoo'];
+    if ((!isTikTok || isZeroBandwidthByteRange) && reliableSources.includes(src)) {
       score += 15;
-    } else if (sourceName === 'timstreams') {
-      score += 5;
     }
 
     return score;

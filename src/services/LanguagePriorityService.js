@@ -365,8 +365,9 @@ function compareStreams(a, b, priorities) {
     // CDN / Cloudflare Worker Tier:
     // Prioritize clean direct CDN feeds over TikTok CDN feeds that require
     // Cloudflare Worker uncloaking for every .image chunk.
-    const aIsTikTok = (a && (a.isTikTok || a._isTikTok)) ? 1 : 0;
-    const bIsTikTok = (b && (b.isTikTok || b._isTikTok)) ? 1 : 0;
+    // Zero-bandwidth ByteRange providers (pitsport, timstreams) do not consume CF worker proxying.
+    const aIsTikTok = (a && (a.isTikTok || a._isTikTok) && a._source !== 'pitsport' && a._source !== 'timstreams') ? 1 : 0;
+    const bIsTikTok = (b && (b.isTikTok || b._isTikTok) && b._source !== 'pitsport' && b._source !== 'timstreams') ? 1 : 0;
     if (aIsTikTok !== bIsTikTok) return aIsTikTok - bIsTikTok;
 
     return streamRankScore(b) - streamRankScore(a);

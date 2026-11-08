@@ -54,35 +54,35 @@ function isEventStreamSource(src) {
 }
 
 const SOURCE_PRIORITY = {
-  scorezone: 1,
   leaf: 1,
-  daddylive: 1,
-  pitsport: 2,
-  vavoo: 2,
-  sktech: 2,
-  ppvst: 2,
-  damitv: 2,
-  ak47live: 2,
-  golf: 2,
-  delta: 2,
-  echo: 2,
-  replayzone: 2,
-  livetv: 2,
-  soccerfull: 2,
-  basketballvideo: 2,
-  nflvideo: 2,
-  fullraces: 2,
-  hockeyreplays: 2,
-  mlblive: 2,
-  leaf_recap: 2,
-  watchfooty: 2,
-  admin: 3,
-  streamedpk: 3,
-  embedindia: 3,
-  embedst: 3,
-  cdnlive: 3,
-  streamsports99: 4,
-  timstreams: 9,
+  scorezone: 1,
+  timstreams: 2,
+  ppvst: 3,
+  pitsport: 4,
+  daddylive: 5,
+  vavoo: 6,
+  sktech: 7,
+  damitv: 8,
+  ak47live: 8,
+  golf: 8,
+  delta: 8,
+  echo: 8,
+  replayzone: 8,
+  livetv: 8,
+  soccerfull: 8,
+  basketballvideo: 8,
+  nflvideo: 8,
+  fullraces: 8,
+  hockeyreplays: 8,
+  mlblive: 8,
+  leaf_recap: 8,
+  watchfooty: 8,
+  admin: 9,
+  streamedpk: 9,
+  embedindia: 9,
+  embedst: 9,
+  cdnlive: 9,
+  streamsports99: 10,
   streamsports: 13
 };
 
@@ -173,6 +173,28 @@ function selectSources(matchSources, config, match = null) {
     return 0;
   });
 
+  // Cap DaddyLive mirrors to max 4 diverse broadcaster feeds per fixture
+  const dlSources = sortedSources.filter(s => s && s.source === 'daddylive');
+  let acceptedDl = null;
+  if (dlSources.length > 4) {
+    const dlSeenChannels = new Set();
+    const diverse = [];
+    const remaining = [];
+    for (const src of dlSources) {
+      const chKey = (src.channelName || src.channel || src.name || src.id || '').toLowerCase().trim();
+      if (!dlSeenChannels.has(chKey) && diverse.length < 4) {
+        dlSeenChannels.add(chKey);
+        diverse.push(src);
+      } else {
+        remaining.push(src);
+      }
+    }
+    acceptedDl = new Set(diverse.concat(remaining).slice(0, 4));
+  }
+  const cappedSources = acceptedDl
+    ? sortedSources.filter(src => src.source !== 'daddylive' || acceptedDl.has(src))
+    : sortedSources;
+
   const checkAllowed = (srcName, enabledList) => {
     if (srcName.startsWith('yaml_')) return true;
     if (srcName === 'embedindia' || srcName === 'embedst') return enabledList.includes('streamedpk');
@@ -192,7 +214,7 @@ function selectSources(matchSources, config, match = null) {
       ? config.replaySources.split(',').map(s => s.trim())
       : (hasReplayConfig && config.replaySources === 'none' ? [] : null);
 
-    return sortedSources.filter(src => {
+    return cappedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isReplay = isReplaySource(src.source);
       if (isReplay) {
@@ -210,10 +232,10 @@ function selectSources(matchSources, config, match = null) {
   // Case 2: Legacy combined sources configuration (config.sources)
   if (config && typeof config.sources === 'string') {
     if (config.sources === 'none') {
-      return sortedSources.filter(src => src.source.startsWith('yaml_'));
+      return cappedSources.filter(src => src.source.startsWith('yaml_'));
     }
     const enabled = config.sources.split(',').map(s => s.trim());
-    return sortedSources.filter(src => {
+    return cappedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
       if (!isFallback) return false;
@@ -222,7 +244,7 @@ function selectSources(matchSources, config, match = null) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  return sortedSources.filter(src => {
+  return cappedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
   });
@@ -1442,7 +1464,7 @@ async function handleStream(type, id, config) {
   const inFlight = [];
   for (const src of activeSources) {
     const key = resolveKey(src, match.id);
-    const isPriority1 = src.source === 'daddylive' || SOURCE_PRIORITY[src.source] === 1;
+    const isPriority1 = SOURCE_PRIORITY[src.source] === 1;
     // Local positive cache entries are already verified. On a warm re-click,
     // wait for these cheap reads, not for new scrapes on the missing mirrors.
     const wasWarm = isPriority1 && Boolean(resolveCache.has?.(key));
@@ -1553,6 +1575,12 @@ async function handleStream(type, id, config) {
     if (eligible.length === 0) return false;
     const priority1Pending = inFlight.some(f => f.isPriority1 && !f.settled);
     if (priority1Pending && priority1ReadyCount(eligible) < PRIORITY1_QUORUM) return false;
+    const inFlightSourceByKey = new Map(inFlight.map(f => [f.key, f.source]));
+    const getRowSource = (row) => row.source || row._source || row.sourceName || inFlightSourceByKey.get(row._cacheKey);
+    const hasHigherTierResolved = eligible.some(row => (SOURCE_PRIORITY[getRowSource(row)] || 99) <= 4);
+    const higherTierPending = inFlight.some(f => (SOURCE_PRIORITY[f.source] || 99) <= 4 && !f.settled);
+    const withinSoftDeadline = (Date.now() - resolutionStartedAt) < SOFT_DEADLINE_MS;
+    if (!hasHigherTierResolved && higherTierPending && withinSoftDeadline) return false;
     return !isTvChannel || eligible.filter(isDirectRow).length >= TV_CHANNEL_QUORUM;
   };
   const shouldWait = !readyToRespond() && inFlight.length > 0;
@@ -1716,7 +1744,7 @@ async function handleStream(type, id, config) {
         const inner = titleChannelMatch[1];
         // Skip resolution/bitrate placeholders and Auto/stream markers — they
         // are quality tags, not channel names (e.g. Leaf's "(FHD)").
-        if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
+        if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k|live\s+event|event|live\s+stream|stream\s*\d*)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
           channelName = inner;
         } else {
           // Some providers (ak47/fawanews) emit "[CHANNEL NAME] <match title> (HD)":

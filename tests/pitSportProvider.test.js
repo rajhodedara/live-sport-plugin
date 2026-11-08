@@ -277,7 +277,7 @@ describe('PitSportProvider', () => {
       const hlsStream = streams.find(s => s.url);
       expect(hlsStream).toBeDefined();
       expect(hlsStream.name).toBe('PitSport');
-      expect(hlsStream.title).toContain('PitSport - NFL1 (Jaguars vs Ravens)');
+      expect(hlsStream.title).toBe('NFL1');
       expect(hlsStream.url).toContain('/api/manifest?url=');
       expect(hlsStream.url).toContain(encodeURIComponent('https://prod-e2.tonzoidio.st/hmk/token123/out/v1/channel(aeg1lwf9)/index.m3u8'));
       expect(hlsStream.behaviorHints.notWebReady).toBe(true);

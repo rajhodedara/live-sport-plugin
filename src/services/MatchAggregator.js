@@ -722,7 +722,8 @@ class MatchAggregator {
           existingVavooUrls.add(vavooSource.id);
           match.sources.push(vavooSource);
           injectedForThisMatch++;
-          if (injectedForThisMatch >= 8) break; // Allow up to 8 broadcast feeds per match across regions
+          const maxVavoo = Number(process.env.VAVOO_INJECTION_CAP || 3);
+          if (injectedForThisMatch >= maxVavoo) break; // Allow up to 3 broadcast feeds per match across regions (capped down from 8)
         }
       }
 
@@ -984,7 +985,11 @@ class MatchAggregator {
     // Digit signatures must agree: "beIN 1" vs "beIN 2", "Court 13" vs "Court 7"
     // are different channels/events even when the words are identical.
     if (!isMoto1 && !isMoto2) {
-      if (p1.digits !== p2.digits) return false;
+      if (!p1.teams && !p2.teams) {
+        if (p1.digits !== p2.digits) return false;
+      } else if (p1.digits && p2.digits && p1.digits !== p2.digits) {
+        return false;
+      }
     }
 
     // 6a. One fixture + one channel-like listing: the channel-like tokens must be
@@ -1082,7 +1087,7 @@ class MatchAggregator {
     }
     const ok = provider.lastCatalogOk === true;
     if (!Array.isArray(incoming) || incoming.length === 0) {
-      return result(ok, ok ? 'empty' : 'empty-unverified');
+      return result(false, ok ? 'empty' : 'empty-unverified');
     }
 
     const cacheService = this.cacheService;

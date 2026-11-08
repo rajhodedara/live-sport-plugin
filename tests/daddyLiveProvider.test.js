@@ -464,16 +464,16 @@ describe('DaddyLiveProvider', () => {
       expect(p.name).toBe('DaddyLive');
     });
 
-    test('selectSources includes daddylive at priority 2', () => {
+    test('selectSources ranks timstreams ahead of daddylive, and daddylive ahead of streamsports99', () => {
       const sources = [
         { source: 'timstreams', id: '1' },
         { source: 'daddylive', id: '2' },
         { source: 'streamsports99', id: '3' }
       ];
       const selected = selectSources(sources, null);
-      expect(selected[0].source).toBe('daddylive');
-      expect(selected[1].source).toBe('streamsports99');
-      expect(selected[2].source).toBe('timstreams');
+      expect(selected[0].source).toBe('timstreams');
+      expect(selected[1].source).toBe('daddylive');
+      expect(selected[2].source).toBe('streamsports99');
     });
 
     test('resolveSource routes to daddyLiveProvider', async () => {
