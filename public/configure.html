@@ -72,6 +72,7 @@
     select option { background: var(--surface); color: var(--text); }
     .mono-field { font-family: var(--font-mono); font-size: 13px; }
     .team-picker { position: relative; }
+    @media (max-width: 720px) { #teamSuggest { max-height: 42vh; } }
     #teamSuggest { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto; background: var(--surface); border: 2px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-card); }
     #teamSuggest[hidden] { display: none; }
     #teamSuggest li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 15px; }
@@ -131,8 +132,10 @@
     .crypto img { display: block; width: 100%; max-width: 96px; height: auto; margin: 0 auto 8px; border-radius: 5px; border: 1px solid var(--line); aspect-ratio: 1 / 1; object-fit: contain; }
     .crypto .crypto-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; line-height: 1.3; }
     .crypto .crypto-short { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-    .crypto .crypto-addr { font-family: var(--font-mono); font-size: 11px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
+    .crypto .crypto-addr { font-family: var(--font-mono); font-size: 12px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
     .crypto button.is-copied { background: var(--ok) !important; border-color: var(--ok) !important; color: var(--bg) !important; }
+    .crypto-copy { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; margin-top: 8px; padding: 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+    .crypto-copy svg { width: 14px; height: 14px; }
     .status { margin: 10px 0 0; font-size: 14px; min-height: 18px; color: var(--muted); }
     .status.is-ok { color: var(--ok); } .status.is-err { color: var(--danger); }
 
@@ -195,6 +198,27 @@
     .install-dialog .btn + .btn { margin-top: 10px; }
     .dialog-close { position: absolute; top: var(--space-4); right: var(--space-4); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); cursor: pointer; }
     .dialog-close svg { width: 20px; height: 20px; }
+
+    /* Phones and tablets: no step bar or side cards. The bottom bar carries Install and Copy link. */
+    @media (max-width: 1179px) {
+      .sidebar, .rail { display: none; }
+      html { scroll-padding-top: 16px; }
+      /* Keep the last content clear of the fixed bottom bar (Install/Copy, or Back/Next in the wizard). */
+      .layout { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
+    }
+
+    /* ---------- Install is only enabled for a complete setup ---------- */
+    .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; filter: saturate(.5); }
+    .issues { margin: 0 0 var(--space-4); padding: var(--space-4); border: 2px solid var(--warn); border-radius: var(--radius-md); background: var(--surface-2); }
+    .issues[hidden] { display: none; }
+    .issues strong { display: block; margin-bottom: var(--space-2); font: 600 15px/22px var(--font-display); }
+    .issues ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+    .issue-link { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: 600 14px/1.3 var(--font-sans); text-align: left; cursor: pointer; }
+    .issue-link .go { flex: none; color: var(--accent); font-size: 13px; }
+    .bar-hint { flex: 1 1 100%; margin: 0; color: var(--warn); font: 600 13px/1.3 var(--font-sans); }
+    .bar-hint[hidden] { display: none; }
+    .bar-hint button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }
+    .actionbar { flex-wrap: wrap; }
   </style>
 </head>
 
@@ -225,7 +249,6 @@
   </header>
 
   <div class="layout">
-
     <aside class="sidebar" id="sidebar">
       <nav class="stepnav" aria-label="Setup steps">
         <ol>
@@ -495,6 +518,7 @@
           <span class="step-n" aria-hidden="true">6</span>
           <div class="panel-title"><h2 id="finish-h" tabindex="-1">Review and install</h2><p>Check your choices, then install the add-on.</p></div>
         </div>
+        <div class="issues" id="finishIssues" role="alert" hidden></div>
         <ul class="summary" id="finishSummary"></ul>
         <button type="button" class="btn btn-ghost" id="finishCopy">Copy link for Nuvio app</button>
         <p class="hint">You can go back to any step from the list on the left.</p>
@@ -523,7 +547,7 @@
               <div class="crypto-short">ETH</div>
               <div class="crypto-name">Polygon, Arbitrum, Base</div>
               <div class="crypto-addr" title="Click to select">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
-              <button type="button" onclick="copyCryptoAddr('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)" style="margin-top:6px; background:var(--surface); border:1px solid var(--line-strong); color:var(--text); border-radius:12px; padding:4px 10px; font-size:12px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 <span>Copy</span>
               </button>
@@ -533,7 +557,7 @@
               <div class="crypto-short">SOL</div>
               <div class="crypto-name">Solana</div>
               <div class="crypto-addr" title="Click to select">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
-              <button type="button" onclick="copyCryptoAddr('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)" style="margin-top:6px; background:var(--surface); border:1px solid var(--line-strong); color:var(--text); border-radius:12px; padding:4px 10px; font-size:12px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 <span>Copy</span>
               </button>
@@ -543,7 +567,7 @@
               <div class="crypto-short">BTC</div>
               <div class="crypto-name">Bitcoin</div>
               <div class="crypto-addr" title="Click to select">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
-              <button type="button" onclick="copyCryptoAddr('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)" style="margin-top:6px; background:var(--surface); border:1px solid var(--line-strong); color:var(--text); border-radius:12px; padding:4px 10px; font-size:12px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)">
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
                 <span>Copy</span>
               </button>
@@ -590,6 +614,8 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
         <h2 id="install-h">Install add-on</h2>
+        <div class="issues" id="installIssues" role="alert" hidden></div>
+
         <a href="#" id="installBtn" class="btn btn-primary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <path d="M12 3v12" />
@@ -621,6 +647,7 @@
   </dialog>
 
   <div class="actionbar">
+    <p class="bar-hint" id="barHint" hidden></p>
     <a class="btn btn-primary" id="barInstall" href="#">Install add-on</a>
     <button type="button" class="btn btn-ghost" id="barCopy">Copy link</button>
   </div>
@@ -915,6 +942,7 @@
 
       renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams);
       renderProgress(selectedSports, selectedLive, selectedReplay, teams, tz, replayFilter);
+      applyValidity();
       const finishSummary = document.getElementById('finishSummary');
       if (finishSummary && configSummary) finishSummary.innerHTML = configSummary.innerHTML;
 
@@ -1173,7 +1201,11 @@
     }
     if (teamSearch) {
       teamSearch.addEventListener('input', openSuggest);
-      teamSearch.addEventListener('focus', openSuggest);
+      teamSearch.addEventListener('focus', () => {
+        // On phones the list would open behind the fixed bottom bar, so bring the box to the top first.
+        if (window.matchMedia('(max-width: 1179px)').matches) teamSearch.scrollIntoView({ block: 'start' });
+        openSuggest();
+      });
       teamSearch.addEventListener('blur', () => setTimeout(closeSuggest, 120));
       teamSearch.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowDown') { e.preventDefault(); if (teamSuggest.hidden) openSuggest(); setActive(Math.min(suggestItems.length - 1, suggestIndex + 1)); }
@@ -1190,6 +1222,84 @@
         }
       });
     }
+
+    // ---- Install is only possible once the configuration is complete ----
+    function configIssues() {
+      const issues = [];
+      if (!Array.from(checkboxes).some(cb => cb.checked)) issues.push({ sec: 'sec-sports', text: 'Choose at least one sport.' });
+      let tzOk = !!timezoneSelect.value;
+      if (tzOk) { try { new Intl.DateTimeFormat('en-US', { timeZone: timezoneSelect.value }); } catch (e) { tzOk = false; } }
+      if (!tzOk) issues.push({ sec: 'sec-teams', text: 'Choose a valid timezone.' });
+      if (!Array.from(liveSourceCheckboxes).some(cb => cb.checked)) issues.push({ sec: 'sec-sources', text: 'Choose at least one live source.' });
+      const replaysOn = !replayFilterSelect || replayFilterSelect.value !== 'disabled';
+      if (replaysOn && !Array.from(replaySourceCheckboxes).some(cb => cb.checked)) {
+        issues.push({ sec: 'sec-prefs', text: 'Choose at least one replay source, or hide replays.' });
+      }
+      return issues;
+    }
+
+    function goToSection(sec) {
+      const dlg = document.getElementById('installDialog');
+      if (dlg && dlg.open) dlg.close();
+      if (window.nuvioGoTo) window.nuvioGoTo(sec);
+    }
+
+    function renderIssues(box, issues) {
+      if (!box) return;
+      box.textContent = '';
+      if (!issues.length) { box.hidden = true; return; }
+      const title = document.createElement('strong');
+      title.textContent = 'Finish setting up before installing';
+      const list = document.createElement('ul');
+      issues.forEach(i => {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'issue-link';
+        const t = document.createElement('span');
+        t.textContent = i.text;
+        const go = document.createElement('span');
+        go.className = 'go';
+        go.textContent = 'Fix';
+        b.append(t, go);
+        b.addEventListener('click', () => goToSection(i.sec));
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      box.append(title, list);
+      box.hidden = false;
+    }
+
+    function setInstallEnabled(el, enabled) {
+      if (!el) return;
+      if (enabled) { el.removeAttribute('aria-disabled'); el.removeAttribute('tabindex'); }
+      else { el.setAttribute('aria-disabled', 'true'); el.setAttribute('tabindex', '-1'); }
+    }
+
+    function applyValidity() {
+      const issues = configIssues();
+      const ok = issues.length === 0;
+      [btn, barInstall, wizInstall].forEach(el => setInstallEnabled(el, ok));
+      renderIssues(document.getElementById('installIssues'), issues);
+      renderIssues(document.getElementById('finishIssues'), issues);
+      const hint = document.getElementById('barHint');
+      if (hint) {
+        hint.textContent = '';
+        if (issues.length) {
+          hint.append(document.createTextNode(issues[0].text + ' '));
+          const fix = document.createElement('button');
+          fix.type = 'button';
+          fix.textContent = issues.length > 1 ? 'Fix (' + issues.length + ' to go)' : 'Fix';
+          fix.addEventListener('click', () => goToSection(issues[0].sec));
+          hint.appendChild(fix);
+        }
+        hint.hidden = ok;
+      }
+      return ok;
+    }
+    [btn, barInstall, wizInstall].forEach(el => {
+      if (el) el.addEventListener('click', (e) => { if (el.getAttribute('aria-disabled') === 'true') e.preventDefault(); });
+    });
 
     function setText(id, text) {
       const el = document.getElementById(id);
@@ -1208,7 +1318,7 @@
         { label: 'Sports', note: sports.length + ' of ' + checkboxes.length + ' selected', ok: sports.length > 0 },
         { label: 'Teams and timezone', note: (teamList.length ? teamList.length + ' favourite' + (teamList.length === 1 ? '' : 's') : 'No favourites yet (optional)') + ', ' + (tz || 'no timezone'), ok: !!tz },
         { label: 'Live sources', note: live.length + ' of ' + liveSourceCheckboxes.length + ' selected', ok: live.length > 0 },
-        { label: 'Languages and replays', note: replayFilter === 'disabled' ? 'Replays hidden' : (replayFilter === 'mainstream' ? 'Mainstream replays' : 'All replays'), ok: true }
+        { label: 'Languages and replays', note: replayFilter === 'disabled' ? 'Replays hidden' : (replay.length + ' replay source' + (replay.length === 1 ? '' : 's') + ', ' + (replayFilter === 'mainstream' ? 'mainstream' : 'all') + ' replays'), ok: replayFilter === 'disabled' || replay.length > 0 }
       ];
       const done = items.filter(i => i.ok).length;
       const list = document.getElementById('progressList');
@@ -1238,10 +1348,10 @@
       setText('progressText', done + '/' + items.length);
       const ring = document.getElementById('progressRingBox');
       if (ring) ring.setAttribute('aria-label', done + ' of ' + items.length + ' steps ready');
-      const ready = sports.length > 0 && live.length > 0;
+      const ready = configIssues().length === 0;
       const hint = document.getElementById('readyHint');
       if (hint) {
-        hint.textContent = ready ? 'Ready to install. Your link updates as you change options.' : 'Choose at least one sport and one live source before installing.';
+        hint.textContent = ready ? 'Ready to install. Your link updates as you change options.' : 'Finish the items marked below before installing.';
         hint.className = 'progress-note' + (ready ? '' : ' is-warn');
       }
     }
@@ -1259,6 +1369,8 @@
         setTimeout(() => {
           const ok = installStatus && installStatus.classList.contains('is-ok');
           flashLabel(barCopy, ok ? 'Copied' : 'Copy failed', 'Copy link');
+          // Clipboard can be blocked (plain HTTP); the popup has the link field to copy by hand.
+          if (!ok) openInstallDialog();
         }, 450);
       });
     }
@@ -1362,6 +1474,11 @@
   
 
     // ---- Install popup ----
+    function openInstallDialog() {
+      const dlg = document.getElementById('installDialog');
+      if (!dlg || dlg.open) return;
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    }
     (function () {
       const dlg = document.getElementById('installDialog');
       const open = document.getElementById('openInstall');
@@ -1442,8 +1559,15 @@
         setTimeout(() => {
           const ok = installStatus && installStatus.classList.contains('is-ok');
           flashLabel(finishCopy, ok ? 'Copied' : 'Copy failed', 'Copy link for Nuvio app');
+          if (!ok) openInstallDialog();
         }, 450);
       });
+      window.nuvioGoTo = function (secId) {
+        const i = ORDER.indexOf(secId);
+        if (mode === 'wizard' && i >= 0) { go(i); return; }
+        const el = document.getElementById(secId);
+        if (el) el.scrollIntoView({ block: 'start' });
+      };
       render();
     })();
 

@@ -15,6 +15,16 @@
     return root.getAttribute('data-drawer') === 'open';
   }
   function paint() {
+    // Pages whose menu is only a desktop sidebar (no drawer) show the button disabled on small screens.
+    var unavailable = !wide.matches && !hasDrawer;
+    toggle.disabled = unavailable;
+    if (unavailable) {
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.setAttribute('aria-label', 'Menu not available on this screen');
+      toggle.setAttribute('title', 'No menu on this screen');
+      return;
+    }
+    toggle.removeAttribute('title');
     var open = isOpen();
     toggle.setAttribute('aria-expanded', String(open));
     toggle.setAttribute('aria-label', open ? 'Close navigation' : 'Open navigation');

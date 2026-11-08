@@ -101,6 +101,8 @@
     .src-sub { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .src-best { flex: none; padding: 1px 8px; border-radius: var(--radius-pill); background: var(--accent-fill); color: var(--on-accent); font: 700 11px/16px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; }
     .src-q { display: inline-flex; align-items: center; gap: var(--space-2); justify-content: flex-end; min-width: 6.5em; }
+    .src-ext { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: 600 12px/1 var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; }
+    .src-ext svg { width: 14px; height: 14px; }
     .src-rate { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .src-play { width: 22px; height: 22px; color: var(--accent); }
     .qbadge { display: inline-flex; width: 40px; height: 22px; flex: none; color: var(--text); }
@@ -187,12 +189,14 @@
     .cell-play svg { color: var(--text); }
     @media (max-width: 900px) {
       .grid[data-view="table"] { --cols: 96px minmax(0, 1fr) 40px; }
+      .grid[data-view="table"] .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; white-space: normal; line-height: 1.3; }
       .grid[data-view="table"] .table-head span:nth-child(n+3):nth-child(-n+5), .grid[data-view="table"] .cell-league, .grid[data-view="table"] .cell-sport, .grid[data-view="table"] .cell-status { display: none; }
     }
     @media (max-width: 560px) { .seg .t { display: none; } .seg button { padding: 0 var(--space-4); } }
 
     @media (max-width: 1179px) {
       .sidebar { position: fixed; top: 64px; left: 0; bottom: 0; z-index: 60; width: min(320px, 86vw); max-height: none; margin: 0; padding: var(--space-4); overflow-y: auto; background: var(--surface); border-right: 1px solid var(--line); transform: translateX(-102%); visibility: hidden; transition: transform .2s ease, visibility 0s linear .2s; }
+      .cat-item, .cat-group > summary { min-height: 44px; }
       :root[data-drawer="open"] .sidebar { transform: none; visibility: visible; transition: transform .2s ease; }
       .drawer-scrim { display: none; position: fixed; inset: 64px 0 0 0; z-index: 55; background: #0a0a0c99; }
       :root[data-drawer="open"] .drawer-scrim { display: block; }
@@ -202,6 +206,12 @@
       .search { max-width: none; }
       dialog.player-dialog { width: calc(100% - 16px); padding: var(--space-3); }
       .player-head h2 { font-size: 20px; line-height: 26px; }
+      .player-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; row-gap: var(--space-1); }
+      .player-head > div:first-child { display: contents; }
+      .player-head .eyebrow { grid-column: 1; grid-row: 1; margin: 0; }
+      .player-actions { grid-column: 2; grid-row: 1; }
+      .player-head h2 { grid-column: 1 / -1; grid-row: 2; }
+      .src-top { flex-direction: column; align-items: flex-start; gap: 2px; }
     }
     @media (max-width: 480px) { .brand span { display: none; } }
     </style>
@@ -282,6 +292,7 @@
   </div>
 
   <div class="layout">
+
     <aside class="sidebar" id="sidebar" aria-label="Catalogs">
       <nav class="catnav" id="catalogNav" aria-label="Catalogs"><div class="state-msg">Loading catalogs...</div></nav>
       <div class="side-card"><strong>Keep the server running</strong>Support covers the public server and the scrapers behind it. <a href="#donate" onclick="document.getElementById('donate-modal').style.display='flex';return false;">Ways to help</a></div>
@@ -693,7 +704,8 @@
         rank: tier ? TIERS[tier].rank : 0,
         rate: rateMatch ? parseFloat(rateMatch[1]) : 0,
         rateText: rateMatch ? rateMatch[1] + ' Mbps' : '',
-        extra: isExtra
+        extra: isExtra,
+        external: !st.url && !!st.externalUrl
       };
     }
 
@@ -737,9 +749,9 @@
         const sub = [item.provider, item.meta].filter(Boolean).join(' \u00b7 ');
         btn.innerHTML = icon +
           '<span class="src-main"><span class="src-title"><span>' + esc2(item.label) + '</span>' + (!failed && idx === 0 && activeProvider === 'all' && item.rank > 0 ? '<span class="src-best">Best</span>' : '') + '</span><span class="src-sub">' + esc2(sub) + (failed ? ' \u00b7 <span class="src-fail">Did not work</span>' : '') + '</span></span>' +
-          '<span class="src-q">' + qualityBadge(item.tier) + (item.rateText ? '<span class="src-rate">' + esc2(item.rateText) + '</span>' : '') + '</span>' +
+          '<span class="src-q">' + (item.external ? '<span class="src-ext">New tab <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg></span>' : qualityBadge(item.tier) + (item.rateText ? '<span class="src-rate">' + esc2(item.rateText) + '</span>' : '')) + '</span>' +
           '<svg class="src-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
-        btn.setAttribute('aria-label', 'Play ' + item.label + ' from ' + item.provider + (item.tier ? ', ' + TIERS[item.tier].label : ''));
+        btn.setAttribute('aria-label', 'Play ' + item.label + ' from ' + item.provider + (item.tier ? ', ' + TIERS[item.tier].label : '') + (item.external ? ', opens in a new tab' : ''));
         btn.addEventListener('click', () => pickSource(item));
         li.appendChild(btn);
         list.appendChild(li);
@@ -775,6 +787,11 @@
     }
 
     function pickSource(item) {
+      if (item.external) {
+        // Opened straight from the click so the browser allows it; the list stays open.
+        window.open(item.st.externalUrl, '_blank', 'noopener');
+        return;
+      }
       const dlg = document.getElementById('player-dialog');
       dlg.classList.remove('is-picking');
       currentItem = item;
@@ -817,7 +834,16 @@
         sourceItems = items.filter((i) => !i.extra);
 
         if (sourceItems.length === 0) {
-          playStreamUrl(data.streams[0].url, data.streams[0]);
+          showProblem('No streams available yet',
+            'This match has no streams right now. They usually appear shortly before kick-off, so check back a little later.',
+            '',
+            [{ label: 'Check again', primary: true, run: retry }, { label: 'Close', run: closePlayer }]);
+        } else if (sourceItems.length === 1 && sourceItems[0].external) {
+          const only = sourceItems[0];
+          showProblem('This source opens in a new tab',
+            only.provider + ' can\'t play inside this window. Open it in a new tab to watch.',
+            '',
+            [{ label: 'Open in new tab', primary: true, run: () => { window.open(only.st.externalUrl, '_blank', 'noopener'); closePlayer(); } }, { label: 'Close', run: closePlayer }]);
         } else if (sourceItems.length === 1) {
           currentItem = sourceItems[0];
           playStreamUrl(sourceItems[0].st.url, sourceItems[0].st);
@@ -976,7 +1002,7 @@
 
     function playStreamUrl(url, streamObj = null) {
       if (streamObj && streamObj.externalUrl) {
-        window.open(streamObj.externalUrl, '_blank');
+        window.open(streamObj.externalUrl, '_blank', 'noopener');
         closePlayer();
         return;
       }
