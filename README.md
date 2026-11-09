@@ -169,7 +169,7 @@ Catalogs automatically adapt based on current time:
 - **🧠 Algorithmic Stream Scoring & Ranking:** Evaluates and sorts stream links in real time based on resolution (1080p > 720p > SD), latency, direct M3U8 vs. webview embeds, audio commentary language, and live viewer counts.
 - **🧱 Clean Architecture & Awilix IoC:** Built with Domain-Driven Design (DDD) entities (`MatchEntity`, `StreamEntity`), modular service layers, and an Awilix Inversion of Control (IoC) dependency injection container.
 - **📄 Declarative YAML Provider Engine:** Includes a dynamic `YamlProviderBuilder` allowing developers to configure and plug in new stream scrapers via declarative YAML definitions without writing boilerplate.
-- **⚙️ Responsive Glassmorphic Web Dashboard:** Includes a local browser player (`/`) and a full configuration interface (`/configure`) to filter sports categories, toggle active providers, localize match kickoffs to your timezone, and track favorite clubs.
+- **⚙️ Responsive Glassmorphic Web Dashboard:** Includes a local browser player (`/`) and a full configuration interface (`/configure`) to filter sports categories, toggle active providers, localize match kickoffs to your timezone, and track favorite clubs. A provider status page (`/status`) reports scraper health for the instance.
 
 ---
 
@@ -211,6 +211,10 @@ Visit `http://localhost:7000/configure` to customize:
 - **Streaming Sources Selection:** Individually enable or disable scrapers (DaddyLive, StreamFree, TimStreams, Streamed.pk, SportyHunter, WatchFooty, CDNLiveTV, StreamSports99, Streamic, DamiTV, EmbedIndia, PpvSt, ReplayZone, ScoreZone).
 - **Localization & Timezones:** Automatically detects or manually configures your local IANA timezone to render match kick-offs in your local time.
 - **Priority Tracking ("⭐ Your Teams"):** Enter comma-separated favorite clubs or athletes (e.g. `Arsenal, Lakers, Ferrari`) to dynamically generate a dedicated priority catalog.
+
+### Provider Status UI (`/status`)
+
+Visit `http://localhost:7000/status` to see, per provider, the last catalog sync state, fixture count, response time and open circuit breakers for the running instance. The page refreshes every five minutes. Providers that reused cached fixtures are shown as served from cache and are not plotted on the response-time chart.
 
 ---
 
