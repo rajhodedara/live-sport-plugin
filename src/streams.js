@@ -76,7 +76,6 @@ const SOURCE_PRIORITY = {
   hockeyreplays: 8,
   mlblive: 8,
   leaf_recap: 2,
-  watchfooty: 8,
   admin: 9,
   streamedpk: 9,
   embedindia: 9,
@@ -89,8 +88,8 @@ const SOURCE_PRIORITY = {
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -102,7 +101,6 @@ const STREAM_SPORT_ICONS = {
 const NICE_NAMES = {
   vavoo: 'Vavoo',
   cdnlive: 'CDNLiveTV',
-  watchfooty: 'WatchFooty',
   daddylive: 'DaddyLive',
   timstreams: 'TimStreams',
   streamsports: 'StreamSports',
@@ -130,7 +128,6 @@ const NICE_NAMES = {
 
 const CHANNEL_TITLE_NICE_NAMES = {
   daddylive: 'DaddyLive',
-  watchfooty: 'WatchFooty',
   cdnlive: 'CDNLiveTV',
   streamsports99: 'StreamSports99',
   timstreams: 'TimStreams',
@@ -273,9 +270,6 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
       console.warn('[DamiTV] Dispatch failed', JSON.stringify({ ms: Date.now() - startedAt, kind }));
       throw failure;
     }
-  } else if (sourceName === 'watchfooty') {
-    const provider = container.resolve('watchFootyProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title);
   } else if (sourceName === 'cdnlive') {
     const provider = container.resolve('cdnLiveProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title);
@@ -709,7 +703,6 @@ function repairRefererFor(targetUrl) {
     }
   } catch (_) { /* fall through to the hard-coded chain */ }
 
-  if (/\.wfty\.st$/.test(host) || /watchfooty/i.test(host)) return 'https://sportsembed.su/';
   if (/\.strmd\.st$/.test(host) || /streamed/i.test(host)) return 'https://embed.st/';
   if (/tiestep|dlive|thedaddy|dlstreams|daddylive|assetrage|romponalis/i.test(host) || /\.7odxv0l067ka\.net$/.test(host)) return 'https://assetrage.net/';
   // Terminal hosts discovered by the DaddyLive iframe-domain audit. These
@@ -903,7 +896,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // ── Retry-once safety net ───────────────────────────────────────────
       // Two upstream behaviours answer 403/401 to an otherwise healthy stream,
       // and both are repaired by a Referer:
-      //   - some CDNs (notably WatchFooty's wfty.st edge) refuse when the
+      //   - some CDNs refuse when the
       //     Referer is MISSING;
       //   - DaddyLive's segment CDN refuses when the Referer is PRESENT but
       //     from the wrong family: the iframe that happened to serve the
@@ -1082,20 +1075,18 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 
 // Prewarm: mint tokens for a match's top sources before the user clicks
 // Prewarm all sources by default. This used to default to 3, which meant only the
-// first three providers were minted up-front and the rest (WatchFooty is commonly
-// 4th in priority order) were minted while the user was already waiting on the
-// click. Callers can still pass an explicit smaller number if they ever want to
-// cap it, but the safe default is "everything".
+// first three providers were minted up-front and the rest were minted while the
+// user was already waiting on the click. Callers can still pass an explicit
+// smaller number if they ever want to cap it, but the safe default is "everything".
 // Providers excluded from PREWARMING (not from on-demand resolution).
 // Minting these is the heaviest work in the app:
 //   - admin/echo/golf/delta/streamedpk/embedindia/embedst: Streamed.pk embed
 //     chain — each variant spawns a WASM child process (StreamedPkProvider's
 //     own comment), batches of 5 per mint.
 //   - ppvst: spawns a full child Node process per resolve (PpvStProvider).
-//   - watchfooty: resolves many variants per source via native extraction.
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,watchfooty,leaf,scorezone,pitsport';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,leaf,scorezone,pitsport';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
@@ -1447,8 +1438,7 @@ async function handleStream(type, id, config) {
   // Returns as soon as usable streams exist, bounded by a soft deadline;
   // anything still running keeps going and lands in the resolve cache for the
   // next request. Previously every source had to settle before anything was
-  // returned, so one slow provider (WatchFooty's embed chain: ~56s/variant)
-  // stalled the whole response.
+  // returned, so a single slow provider could stall the whole response.
   const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
   const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000), HARD_DEADLINE_MS);
   const resolutionStartedAt = Date.now();
@@ -1712,7 +1702,6 @@ async function handleStream(type, id, config) {
 
     if (s._source === 'vavoo' || sTitleLower.includes('vavoo')) providerName = 'Vavoo';
     else if (s._source === 'cdnlive' || sTitleLower.includes('cdnlive')) providerName = 'CDNLiveTV';
-    else if (s._source === 'watchfooty' || sTitleLower.includes('watchfooty')) providerName = 'WatchFooty';
     else if (s._source === 'daddylive' || sTitleLower.includes('daddylive')) providerName = 'DaddyLive';
     else if (s._source === 'timstreams' || sTitleLower.includes('timstreams')) providerName = 'TimStreams';
     else if (s._source === 'streamsports99' || sTitleLower.includes('streamsports99')) providerName = 'StreamSports99';
@@ -1907,7 +1896,6 @@ async function handleStream(type, id, config) {
         let referer = '';
         if (providerName === 'DaddyLive') referer = 'https://thedaddy.li/';
         else if (providerName === 'Streamed.pk') referer = 'https://embed.st/';
-        else if (providerName === 'WatchFooty') referer = (s.url && s.url.includes('.wfty.st')) ? 'https://sportsembed.su/' : 'https://watchfooty.st/';
         else if (providerName === 'CDNLiveTV') referer = 'https://cdnlivetv.tv/';
         else if (providerName === 'StreamSports99' || providerName === 'StreamSports') referer = 'https://streamsports99.fun/';
         else if (providerName === 'DamiTV') referer = 'https://damitv.st/';

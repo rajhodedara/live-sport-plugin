@@ -9,7 +9,6 @@ const MatchAggregator = require('./services/MatchAggregator');
 const StreamScoringService = require('./services/StreamScoringService');
 const TimStreamsProvider = require('./providers/TimStreamsProvider');
 
-const WatchFootyProvider = require('./providers/WatchFootyProvider');
 const CdnLiveProvider = require('./providers/CdnLiveProvider');
 const StreamSports99Provider = require('./providers/StreamSports99Provider');
 const EmbedIndiaProvider = require('./providers/EmbedIndiaProvider');
@@ -87,7 +86,6 @@ const yamlProviders = yamlBuilder.buildProviders(container, container.resolve('c
 container.register({
   timStreamsProvider: asClass(TimStreamsProvider).singleton(),
 
-  watchFootyProvider: asClass(WatchFootyProvider).singleton(),
   cdnLiveProvider: asClass(CdnLiveProvider).singleton(),
   streamSports99Provider: asClass(StreamSports99Provider).singleton(),
   embedIndiaProvider: asClass(EmbedIndiaProvider).singleton(),

@@ -156,8 +156,8 @@ test('a verified healthy TimStreams feed survives another embed failure with a n
 test('a partial positive response gets a short client cache, then a complete warm list recovers normal caching', async () => {
   let release;
   services.ppvStProvider.resolveStream.mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
-  services.watchFootyProvider = { resolveStream: jest.fn(async () => [{ title: 'Fast feed', url: 'https://cdn.fixture.test/fast.mp4' }]) };
-  const event = { ...match, sources: [source, { source: 'watchfooty', id: 'fast' }] };
+  services.cdnLiveProvider = { resolveStream: jest.fn(async () => [{ title: 'Fast feed', url: 'https://cdn.fixture.test/fast.mp4' }]) };
+  const event = { ...match, sources: [source, { source: 'cdnlive', id: 'fast' }] };
   services.cacheService.findMatch = () => event;
   let first;
   const request = handleStream('tv', 'nuvio_sport_partial', {}).then(value => { first = value; });
@@ -176,11 +176,11 @@ test('a partial positive response gets a short client cache, then a complete war
 test('a cached retryable web fallback hidden by another direct still shortens the client cache', async () => {
   safeFetch.mockRejectedValueOnce(busy());
   await cache.getOrCreate(key, mint);
-  services.watchFootyProvider = { resolveStream: jest.fn(async () => [{ title: 'Fast feed', url: 'https://cdn.fixture.test/fast.mp4' }]) };
-  services.cacheService.findMatch = () => ({ ...match, sources: [source, { source: 'watchfooty', id: 'fast' }] });
+  services.cdnLiveProvider = { resolveStream: jest.fn(async () => [{ title: 'Fast feed', url: 'https://cdn.fixture.test/fast.mp4' }]) };
+  services.cacheService.findMatch = () => ({ ...match, sources: [source, { source: 'cdnlive', id: 'fast' }] });
   const response = await handleStream('tv', 'nuvio_sport_partial', {});
   expect(response.streams).toHaveLength(1);
-  expect(response.streams[0]._source).toBe('watchfooty');
+  expect(response.streams[0]._source).toBe('cdnlive');
   expect(response).toMatchObject({ cacheMaxAge: 2, staleRevalidate: 0, staleError: 0 });
   expect(JSON.stringify(response)).not.toContain(DIRECT_RETRY_HINT);
 });

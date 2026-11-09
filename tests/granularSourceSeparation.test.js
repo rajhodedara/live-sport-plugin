@@ -7,7 +7,7 @@ const { selectSources, KNOWN_LIVE_SOURCES, KNOWN_REPLAY_SOURCES } = require('../
 describe('Granular Live & Replay Source Separation', () => {
   const sampleSources = [
     { source: 'daddylive', id: 'dl_1' },
-    { source: 'watchfooty', id: 'wf_1' },
+    { source: 'cdnlive', id: 'cl_1' },
     { source: 'streamedpk', id: 'spk_1' },
     { source: 'soccerfull', id: 'sf_1' },
     { source: 'fullraces', id: 'fr_1' },
@@ -21,7 +21,7 @@ describe('Granular Live & Replay Source Separation', () => {
       const names = selected.map(s => s.source);
 
       expect(names).toContain('daddylive');
-      expect(names).not.toContain('watchfooty');
+      expect(names).not.toContain('cdnlive');
       expect(names).not.toContain('streamedpk');
 
       // Replay sources should remain untouched
@@ -36,7 +36,7 @@ describe('Granular Live & Replay Source Separation', () => {
       const names = selected.map(s => s.source);
 
       expect(names).not.toContain('daddylive');
-      expect(names).not.toContain('watchfooty');
+      expect(names).not.toContain('cdnlive');
       expect(names).not.toContain('streamedpk');
       expect(names).toContain('soccerfull');
       expect(names).toContain('fullraces');
@@ -52,7 +52,7 @@ describe('Granular Live & Replay Source Separation', () => {
 
       // Live sources should remain untouched
       expect(names).toContain('daddylive');
-      expect(names).toContain('watchfooty');
+      expect(names).toContain('cdnlive');
       expect(names).toContain('streamedpk');
 
       // Only soccerfull should remain from replays
@@ -67,7 +67,7 @@ describe('Granular Live & Replay Source Separation', () => {
       const names = selected.map(s => s.source);
 
       expect(names).toContain('daddylive');
-      expect(names).toContain('watchfooty');
+      expect(names).toContain('cdnlive');
       expect(names).toContain('streamedpk');
       expect(names).not.toContain('soccerfull');
       expect(names).not.toContain('fullraces');
@@ -86,7 +86,7 @@ describe('Granular Live & Replay Source Separation', () => {
 
       expect(names).toContain('daddylive');
       expect(names).toContain('streamedpk');
-      expect(names).not.toContain('watchfooty');
+      expect(names).not.toContain('cdnlive');
 
       expect(names).toContain('fullraces');
       expect(names).not.toContain('soccerfull');
@@ -115,7 +115,7 @@ describe('Granular Live & Replay Source Separation', () => {
       const names = selected.map(s => s.source);
 
       expect(names).toEqual(expect.arrayContaining(['daddylive', 'soccerfull']));
-      expect(names).not.toContain('watchfooty');
+      expect(names).not.toContain('cdnlive');
       expect(names).not.toContain('fullraces');
     });
 
@@ -153,7 +153,7 @@ describe('Granular Live & Replay Source Separation', () => {
     });
 
     test('contains all expected live source checkboxes', () => {
-      for (const src of ['streamedpk', 'daddylive', 'watchfooty', 'cdnlive', 'streamsports99', 'timstreams', 'damitv', 'ppvst', 'sktech']) {
+      for (const src of ['streamedpk', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'damitv', 'ppvst', 'sktech']) {
         expect(html).toMatch(new RegExp(`<input[^>]*value="${src}"`));
       }
     });

@@ -15,7 +15,7 @@ const names=[
 'nativeQueueFairness','nativeRedirectHeaderPolicy','nflVideoRelativeLinks','ppvAlternateOnly','ppvStProvider',
 'replayProviderHostValidation','replayZoneLineEndings','skTechHeaderParsing','soccerFullCardUrls',
 'streamExternalFallback','streamPlaybackHeaders','streamSports99FeedIsolation','streamedPkMalformedEntries',
-'timFeedIsolation','vavooSourceHostValidation','watchFootyFeedIsolation','yamlProviderLinkHandling',
+'timFeedIsolation','vavooSourceHostValidation','yamlProviderLinkHandling',
 'pr61ManifestScenarios','pr61PlaybackScenarios',
 'broadcasterMatchService','broadcasterMappingIdentity','matchMappingIdentity',
 'cacheMatchIdentity','pr61MappingScenarios','cacheServiceFindMatch',

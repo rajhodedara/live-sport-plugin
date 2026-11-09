@@ -3,7 +3,7 @@
 const { randomBytes } = require('node:crypto');
 const SOURCES = new Set(['leaf', 'daddylive', 'vavoo', 'sktech', 'ppvst', 'damitv', 'ak47live',
   'golf', 'delta', 'echo', 'replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo',
-  'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'watchfooty', 'cdnlive', 'streamsports99',
+  'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'cdnlive', 'streamsports99',
   'timstreams', 'streamsports', 'admin', 'streamedpk', 'embedindia', 'embedst', 'pitsport']);
 const normalizeTimingSource = source => SOURCES.has(source) ? source : 'other';
 

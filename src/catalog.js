@@ -1814,8 +1814,8 @@ async function handleMeta(type, id, config) {
   //   - LIVE matches only (replays / upcoming / 24/7 networks are skipped), so we
   //     never mint tokens for content nobody is about to watch;
   //   - ALL sources, not just the top few. Minting only the top 3 meant the
-  //     remaining providers (WatchFooty is commonly 4th) were minted while the
-  //     user was already waiting - which is exactly where the delay came from.
+  //     remaining providers were minted while the user was already waiting -
+  //     which is exactly where the delay came from.
   //   - setImmediate defers the work one event-loop tick so the meta JSON is
   //     fully flushed to the socket before stream-token minting begins.
   try {
