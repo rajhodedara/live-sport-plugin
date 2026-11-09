@@ -3,713 +3,347 @@
 
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0a0a0c">
   <title>Nuvio Live Sports | Setup</title>
+  <script id="theme-init">try{var t=localStorage.getItem('nuvio-theme');if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t)}catch(e){}try{if(localStorage.getItem('nuvio-config-mode')==='wizard')document.documentElement.setAttribute('data-mode','wizard')}catch(e){}try{if(localStorage.getItem('nuvio-sidebar')==='collapsed')document.documentElement.setAttribute('data-sidebar','collapsed')}catch(e){}</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui.css">
   <style>
-    /* ============================================================
-       Nuvio Live Sports | Setup console
-       Design notes
-       - One accent (brand red). Third-party brands (Discord, Ko-fi)
-         may use their own mark colour only on their own link.
-       - Surfaces are separated by 1px hairlines, not drop shadows.
-       - One radius family: 12px panels, 8px controls, 10px buttons.
-       - No emoji as interface icons; all glyphs are inline SVG.
-       ============================================================ */
+    /* Nuvio Live Sports | Setup console. Built on the Nuvio Live Sports design system:
+       solid surfaces, solid focus ring, no gradients, no emoji as icons.
+       Layout: top bar, step sidebar, numbered cards, progress and install rail.
+       Below 1180px the sidebar becomes a sticky step bar and an install bar sticks to the bottom. */
 
-    :root {
-      --bg: #0a0a0c;
-      --surface: #131318;
-      --surface-2: #191920;
-      --line: rgba(255, 255, 255, 0.08);
-      --line-strong: rgba(255, 255, 255, 0.18);
+    /* ---------- Top bar ---------- */
 
-      --text: #f4f4f5;
-      --muted: #a1a1aa;
-      /* Raised from #767680: the old value measured 4.12:1 on the panel
-         surface, under the 4.5:1 floor for small text. */
-      --faint: #8e8e99;
+    /* ---------- Layout ---------- */
+    .sidebar { position: sticky; top: 88px; display: grid; gap: var(--space-4); min-width: 0; }
+    .stepnav { min-width: 0; }
 
-      --accent: #ef4444;
-      /* Darker accent step for filled surfaces. White on #ef4444 measures
-         3.76:1; on this step it measures 4.83:1, clearing AA for 15px text. */
-      --accent-strong: #dc2626;
-      --accent-soft: rgba(239, 68, 68, 0.12);
-      --accent-line: rgba(239, 68, 68, 0.45);
+    .stepnav ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
+    .stepnav a { display: flex; align-items: center; gap: var(--space-3); min-height: 40px; padding: 0 var(--space-3); border-radius: var(--radius-md); color: var(--muted); font-weight: 600; text-decoration: none; border: 2px solid transparent; }
+    .stepnav a:hover { color: var(--text); background: var(--surface); }
+    .stepnav a[aria-current="location"] { background: var(--surface); color: var(--text); border-color: var(--accent-fill); }
+    .step-n { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--line-strong); font: 600 13px/1 var(--font-sans); color: var(--text); }
+    .stepnav a[aria-current="location"] .step-n { background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
 
-      --ok: #22c55e;
-      --warn: #f59e0b;
-      --danger: #ef4444;
+    /* ---------- Hero ---------- */
 
-      /* Third-party brand marks, used only on their own link. */
-      --discord: #5865f2;
-      --kofi: #ff5e5b;
-
-      --r-panel: 12px;
-      --r-control: 8px;
-      --r-btn: 10px;
-
-      --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-display: "Outfit", var(--font-body);
-      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-
-      --shadow-panel: 0 1px 0 rgba(255, 255, 255, 0.03) inset;
-    }
-
-    * { box-sizing: border-box; }
-
-    html { -webkit-text-size-adjust: 100%; }
-
-    body {
-      margin: 0;
-      padding: 32px 20px 64px;
-      background-color: var(--bg);
-      background-image: radial-gradient(120% 60% at 50% -10%, rgba(239, 68, 68, 0.09), transparent 60%);
-      background-repeat: no-repeat;
-      color: var(--text);
-      font-family: var(--font-body);
-      font-size: 15px;
-      line-height: 1.55;
-      -webkit-font-smoothing: antialiased;
-      display: flex;
-      justify-content: center;
-      min-height: 100vh;
-    }
-
-    .shell {
-      width: 100%;
-      max-width: 620px;
-    }
-
-    /* ---------- Masthead ---------- */
-
-    .masthead {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding-bottom: 24px;
-      margin-bottom: 24px;
-      border-bottom: 1px solid var(--line);
-    }
-
-    .masthead img {
-      width: 56px;
-      height: 56px;
-      border-radius: 14px;
-      border: 1px solid var(--line-strong);
-      object-fit: cover;
-      flex: none;
-    }
-
-    .masthead h1 {
-      font-family: var(--font-display);
-      font-weight: 700;
-      font-size: 26px;
-      line-height: 1.15;
-      letter-spacing: -0.02em;
-      margin: 0 0 4px;
-    }
-
-    .masthead .lede {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    /* Scoped to .masthead so it cannot be overridden by .masthead p rules. */
-    .masthead .brandline {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--font-mono);
-      font-size: 11px;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--faint);
-      margin: 0 0 6px;
-    }
-
-    .brandline .pip {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--accent);
-      flex: none;
-    }
     /* ---------- Panels ---------- */
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-6); margin-bottom: var(--space-4); }
+    .panel-head { display: flex; align-items: flex-start; gap: var(--space-4); margin-bottom: var(--space-5); flex-wrap: wrap; }
+    .panel-head .step-n { width: 36px; height: 36px; font-size: 16px; background: var(--accent-fill); border-color: var(--accent-fill); color: var(--on-accent); }
+    .panel-title { flex: 1 1 240px; min-width: 0; }
+    .panel-head h2 { font-weight: 600; font-size: 22px; line-height: 28px; margin: 0 0 2px; }
+    .panel-head p { margin: 0; color: var(--muted); font-size: 14px; }
+    .panel-tools { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+    .count { font: 600 13px/18px var(--font-sans); color: var(--accent); margin-right: var(--space-1); }
+    .btn-sm { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 var(--space-4); border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font: 600 14px/1 var(--font-sans); cursor: pointer; }
+    .btn-sm:hover { background: var(--surface); }
+    .subhead { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin: 0 0 var(--space-3); flex-wrap: wrap; }
+    .subhead > span { font: 600 13px/18px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); }
+    .group { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--line); }
 
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: var(--r-panel);
-      padding: 20px;
-      margin-bottom: 16px;
-      box-shadow: var(--shadow-panel);
-    }
-
-    .panel-primary {
-      border-color: var(--accent-line);
-      background: linear-gradient(180deg, var(--accent-soft), transparent 120px), var(--surface);
-    }
-
-    .panel-head { margin-bottom: 16px; }
-
-    .panel-head h2 {
-      font-family: var(--font-display);
-      font-weight: 600;
-      font-size: 17px;
-      letter-spacing: -0.01em;
-      margin: 0 0 4px;
-    }
-
-    .panel-head p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    /* ---------- Chip grid (sports / sources) ---------- */
-
-    .chip-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
-      gap: 8px;
-    }
-
-    .checkbox-label {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-height: 46px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: var(--r-control);
-      background: var(--surface-2);
-      color: var(--muted);
-      font-size: 14px;
-      font-weight: 500;
-      cursor: pointer;
-      transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
-      user-select: none;
-    }
-
-    .checkbox-label:hover {
-      background: #1f1f27;
-      border-color: var(--line-strong);
-      color: var(--text);
-    }
-
-    .checkbox-label.active {
-      background: var(--accent-soft);
-      border-color: var(--accent-line);
-      color: var(--text);
-    }
-
-    .checkbox-label:focus-within {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    input[type="checkbox"] {
-      appearance: none;
-      -webkit-appearance: none;
-      width: 18px;
-      height: 18px;
-      flex: none;
-      margin: 0;
-      border: 1.5px solid var(--line-strong);
-      border-radius: 5px;
-      background: transparent;
-      cursor: pointer;
-      position: relative;
-      transition: background-color 140ms ease, border-color 140ms ease;
-    }
-
-    input[type="checkbox"]:hover { border-color: var(--muted); }
-
-    input[type="checkbox"]:checked {
-      background: var(--accent);
-      border-color: var(--accent);
-    }
-
-    input[type="checkbox"]:checked::after {
-      content: "";
-      position: absolute;
-      left: 5px;
-      top: 1.5px;
-      width: 4px;
-      height: 8px;
-      border: solid #fff;
-      border-width: 0 2px 2px 0;
-      transform: rotate(45deg);
-    }
+    /* ---------- Selection tiles ---------- */
+    .chip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 1fr)); gap: var(--space-3); }
+    .checkbox-label { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 10px 14px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.25; cursor: pointer; user-select: none; min-width: 0; overflow-wrap: anywhere; }
+    .checkbox-label:hover { background: var(--surface); }
+    .checkbox-label.active { background: var(--surface); border-color: var(--accent-fill); }
+    .checkbox-label:focus-within { outline: 3px solid var(--focus); outline-offset: 3px; }
+    input[type="checkbox"] { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; flex: none; margin: 0; border: 2px solid var(--line-strong); border-radius: 6px; background: var(--surface); cursor: pointer; position: relative; }
+    input[type="checkbox"]:checked { background: var(--accent-fill); border-color: var(--accent-fill); }
+    input[type="checkbox"]:checked::after { content: ""; position: absolute; left: 6px; top: 2px; width: 5px; height: 10px; border: solid var(--on-accent); border-width: 0 2px 2px 0; transform: rotate(45deg); }
 
     /* ---------- Fields ---------- */
-
-    .field { margin-top: 16px; }
-
-    .field:first-of-type { margin-top: 0; }
-
-    .field > label {
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text);
-      margin-bottom: 7px;
-    }
-
-    .hint {
-      margin: 7px 0 0;
-      font-size: 12px;
-      color: var(--faint);
-    }
-
-    input[type="text"],
-    select {
-      width: 100%;
-      min-height: 46px;
-      padding: 11px 13px;
-      background: #0d0d11;
-      border: 1px solid var(--line);
-      border-radius: var(--r-control);
-      color: var(--text);
-      font-size: 15px;
-      font-family: var(--font-body);
-      transition: border-color 160ms ease, box-shadow 160ms ease;
-    }
-
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: var(--space-5) var(--space-8); align-items: start; }
+    .field { margin: 0; min-width: 0; }
+    .field.wide { grid-column: auto; }
+    #replaySourcesContainer, .field.group { grid-column: 1 / -1; }
+    .field > label { display: block; font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+    .hint { margin: 8px 0 0; font-size: 13px; color: var(--faint); }
+    input[type="text"], select { width: 100%; min-height: 48px; padding: 11px 13px; background: var(--surface-2); border: 2px solid var(--line-strong); border-radius: var(--radius-md); color: var(--text); font: 400 15px var(--font-sans); }
     input[type="text"]::placeholder { color: var(--faint); }
-
-    input[type="text"]:focus,
-    select:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-
-    select {
-      cursor: pointer;
-      appearance: none;
-      -webkit-appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%23a1a1aa' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 14px center;
-      padding-right: 38px;
-    }
-
-    select option { background: #16161c; color: var(--text); }
-
-    .mono-field {
-      font-family: var(--font-mono);
-      font-size: 12.5px;
-      letter-spacing: 0.01em;
-    }
+    input[type="text"]:focus, select:focus { outline: 3px solid var(--focus); outline-offset: 3px; }
+    select { cursor: pointer; appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1.5 6 6.5l5-5' fill='none' stroke='%2371717a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; padding-right: 38px; }
+    select option { background: var(--surface); color: var(--text); }
+    .mono-field { font-family: var(--font-mono); font-size: 13px; }
+    .team-picker { position: relative; }
+    @media (max-width: 720px) { #teamSuggest { max-height: 42vh; } }
+    #teamSuggest { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 300px; overflow-y: auto; background: var(--surface); border: 2px solid var(--line-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-card); }
+    #teamSuggest[hidden] { display: none; }
+    #teamSuggest li { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 10px; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 15px; }
+    #teamSuggest li:hover, #teamSuggest li[aria-selected="true"] { background: var(--surface-2); }
+    #teamSuggest .hint-row { color: var(--muted); font-weight: 500; cursor: default; }
+    .team-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+    .team-chips:empty { display: none; }
+    .team-chips li { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 6px 6px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); font-weight: 600; font-size: 14px; }
+    .team-logo { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: 700 12px/1 var(--font-sans); letter-spacing: 0.02em; overflow: hidden; }
+    .team-logo img { width: 100%; height: 100%; object-fit: contain; padding: 3px; }
+    #teamSuggest .team-logo { width: 28px; height: 28px; font-size: 11px; }
+    .team-chips button { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 20px; line-height: 1; cursor: pointer; }
+    .team-chips button:hover { color: var(--text); background: var(--surface); }
 
     /* ---------- Buttons ---------- */
+    .panel .btn, .rail .btn, .actionbar .btn { display: flex; width: 100%; min-height: 52px; padding: 13px 18px; font-size: 15px; font-family: var(--font-display); letter-spacing: 0.01em; text-align: center; }
+    .panel .btn + .btn, .rail .btn + .btn { margin-top: 10px; }
+    .btn-ghost { background: var(--surface-2); border-color: var(--line-strong); color: var(--text); }
+    .btn-ghost:hover { background: var(--surface); }
 
-    .btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 9px;
-      width: 100%;
-      min-height: 50px;
-      padding: 13px 18px;
-      border: 1px solid transparent;
-      border-radius: var(--r-btn);
-      font-family: var(--font-display);
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-      text-align: center;
-      text-decoration: none;
-      cursor: pointer;
-      transition: background-color 160ms ease, border-color 160ms ease, transform 120ms ease;
-    }
+    /* ---------- Rail ---------- */
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: var(--space-5); }
+    .card h2 { margin: 0 0 var(--space-4); font-weight: 600; font-size: 18px; line-height: 24px; }
+    .card-install { border: 2px solid var(--accent-fill); }
+    .progress-top { display: flex; align-items: center; gap: var(--space-4); margin-bottom: var(--space-4); }
+    .ring { position: relative; width: 84px; height: 84px; flex: none; }
+    .ring svg { width: 84px; height: 84px; transform: rotate(-90deg); }
+    .ring circle { fill: none; stroke-width: 8; }
+    .ring .track { stroke: var(--line-strong); opacity: .45; }
+    .ring .bar { stroke: var(--accent-fill); stroke-linecap: round; }
+    .ring b { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 700 20px var(--font-display); }
+    .progress-note { margin: 0; font-size: 14px; color: var(--muted); }
+    .progress-note.is-warn { color: var(--warn); font-weight: 600; }
+    .checklist { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-3); }
+    .checklist li { display: grid; grid-template-columns: 24px 1fr; gap: var(--space-3); align-items: start; font-size: 14px; }
+    .checklist .mark { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--warn); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--warn); }
+    .checklist .is-done .mark { border-color: var(--ok); background: var(--ok); color: var(--bg); }
+    .checklist b { display: block; font-weight: 600; }
+    .checklist small { display: block; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+    .summary { display: grid; gap: 1px; margin: 0 0 var(--space-4); padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; background: var(--line); }
+    .summary li { display: flex; justify-content: space-between; gap: var(--space-3); padding: 9px var(--space-3); background: var(--surface-2); font-size: 14px; color: var(--muted); }
+    .summary b { color: var(--text); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 
-    .btn:active { transform: translateY(1px); }
-
-    .btn:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
-    }
-
-    .btn svg { flex: none; }
-
-    .btn-primary {
-      background: var(--accent-strong);
-      color: #fff;
-    }
-
-    .btn-primary:hover { background: #b91c1c; }
-
-    .btn-ghost {
-      background: var(--surface-2);
-      border-color: var(--line-strong);
-      color: var(--text);
-    }
-
-    .btn-ghost:hover { background: #1f1f27; border-color: var(--muted); }
-
-    .btn + .btn { margin-top: 10px; }
-
-    /* ---------- Config summary ---------- */
-
-    .summary {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px 14px;
-      margin: 0 0 16px;
-      padding: 0;
-      list-style: none;
-      font-family: var(--font-mono);
-      font-size: 11.5px;
-      letter-spacing: 0.04em;
-      color: var(--muted);
-      text-transform: uppercase;
-    }
-
-    .summary li { display: inline-flex; align-items: center; gap: 7px; }
-
-    .summary b {
-      color: var(--text);
-      font-weight: 600;
-    }
-
-    /* ---------- Collections ---------- */
-
-    .steps {
-      margin: 0;
-      padding: 0 0 0 20px;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.75;
-    }
-
-    .steps li { padding-left: 2px; }
-
+    /* ---------- Misc ---------- */
+    .steps { margin: 0 0 var(--space-4); padding: 0 0 0 20px; color: var(--muted); font-size: 14px; line-height: 1.75; }
     .steps strong { color: var(--text); font-weight: 600; }
-
-    /* ---------- Footer / community ---------- */
-
-    .footer {
-      margin-top: 24px;
-      padding-top: 24px;
-      border-top: 1px solid var(--line);
-    }
-
-    .footer h2 {
-      font-family: var(--font-display);
-      font-weight: 600;
-      font-size: 17px;
-      letter-spacing: -0.01em;
-      margin: 0 0 4px;
-    }
-
-    .footer p {
-      margin: 0 0 16px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .link-row {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 12px;
-    }
-
-    .link-btn {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 9px;
-      min-height: 46px;
-      padding: 11px 16px;
-      border: 1px solid var(--line);
-      border-radius: var(--r-btn);
-      background: var(--surface);
-      color: var(--text);
-      font-size: 14px;
-      font-weight: 600;
-      text-decoration: none;
-      transition: background-color 160ms ease, border-color 160ms ease;
-    }
-
-    .link-btn:hover { background: var(--surface-2); border-color: var(--line-strong); }
-
-    .link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-
-    .link-btn svg { flex: none; }
-
-    .link-discord { background: rgba(88, 101, 242, 0.14); border-color: rgba(88, 101, 242, 0.45); }
-    .link-discord:hover { background: rgba(88, 101, 242, 0.22); border-color: var(--discord); }
-    .link-discord svg { color: var(--discord); }
-
-    .support-link {
-      background: rgba(255, 94, 91, 0.1);
-      border-color: rgba(255, 94, 91, 0.4);
-    }
-
-    .support-link:hover { background: rgba(255, 94, 91, 0.18); border-color: rgba(255, 94, 91, 0.65); }
-
-    /* Sports covered by the replay connection. */
-    .sport-list {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin: 0 0 16px;
-      padding: 0;
-      list-style: none;
-    }
-
-    .sport-list li {
-      padding: 5px 11px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--surface-2);
-      color: var(--muted);
-      font-size: 12.5px;
-      font-weight: 500;
-    }
-
-    /* QR codes stay collapsed so the panel does not dominate the page. */
-    .crypto-details {
-      margin-top: 12px;
-      border-top: 1px solid var(--line);
-      padding-top: 12px;
-    }
-
-    .crypto-details > summary {
-      cursor: pointer;
-      font-size: 15px;
-      font-weight: 600;
-      color: #ffffff;
-      list-style: none;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 8px 0;
-      transition: opacity 160ms ease;
-    }
-
+    .sport-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; }
+    .sport-list li { padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--muted); font-size: 13px; font-weight: 500; }
+    .crypto-details { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .crypto-details > summary { cursor: pointer; font-size: 15px; font-weight: 600; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; min-height: 44px; }
     .crypto-details > summary::-webkit-details-marker { display: none; }
-
-    .crypto-details > summary::after {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-right: 1.8px solid currentColor;
-      border-bottom: 1.8px solid currentColor;
-      transform: rotate(45deg);
-      transition: transform 160ms ease;
-      flex: none;
-      margin-top: -3px;
-    }
-
+    .crypto-details > summary::after { content: ""; width: 8px; height: 8px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(45deg); flex: none; margin-top: -3px; }
     .crypto-details[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+    .crypto-details > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+    .crypto-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-top: 12px; }
+    .crypto { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); padding: 10px; min-width: 0; text-align: center; }
+    .crypto img { display: block; width: 100%; max-width: 96px; height: auto; margin: 0 auto 8px; border-radius: 5px; border: 1px solid var(--line); aspect-ratio: 1 / 1; object-fit: contain; }
+    .crypto .crypto-name { font-size: 12px; color: var(--muted); margin-bottom: 4px; line-height: 1.3; }
+    .crypto .crypto-short { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
+    .crypto .crypto-addr { font-family: var(--font-mono); font-size: 12px; line-height: 1.45; color: var(--muted); overflow-wrap: anywhere; user-select: all; }
+    .crypto button.is-copied { background: var(--ok) !important; border-color: var(--ok) !important; color: var(--bg) !important; }
+    .crypto-copy { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; margin-top: 8px; padding: 0 16px; border: 1px solid var(--line-strong); border-radius: var(--radius-pill); background: var(--surface); color: var(--text); font: 600 13px/1 var(--font-sans); cursor: pointer; }
+    .crypto-copy svg { width: 14px; height: 14px; }
+    .status { margin: 10px 0 0; font-size: 14px; min-height: 18px; color: var(--muted); }
+    .status.is-ok { color: var(--ok); } .status.is-err { color: var(--danger); }
 
-    .crypto-details > summary:hover {
-      color: #ffffff;
-      opacity: 0.85;
-    }
-
-    .crypto-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .crypto {
-      border: 1px solid var(--line);
-      border-radius: var(--r-control);
-      background: #0d0d11;
-      padding: 9px;
-      min-width: 0;
-      text-align: center;
-    }
-
-    .crypto img {
-      display: block;
-      width: 100%;
-      max-width: 88px;
-      height: auto;
-      margin: 0 auto 7px;
-      border-radius: 5px;
-      border: 1px solid var(--line-strong);
-      aspect-ratio: 1 / 1;
-      object-fit: contain;
-    }
-
-    .crypto .crypto-name {
-      font-size: 10px;
-      font-weight: 400;
-      color: var(--muted);
-      margin-bottom: 4px;
-      line-height: 1.3;
-    }
-
-    .crypto .crypto-short {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
-
-    .crypto .crypto-addr {
-      font-family: var(--font-mono);
-      font-size: 9.5px;
-      line-height: 1.45;
-      color: var(--muted);
-      overflow-wrap: anywhere;
-      user-select: all;
-    }
-
-    .status {
-      margin: 10px 0 0;
-      font-size: 12.5px;
-      min-height: 18px;
-      color: var(--muted);
-    }
-
-    .status.is-ok { color: var(--ok); }
-    .status.is-err { color: var(--danger); }
+    .actionbar { display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; gap: var(--space-2); padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); }
+    .actionbar .btn { margin: 0; flex: 1; min-height: 48px; }
 
     /* ---------- Responsive ---------- */
+    @media (max-width: 1179px) {
+      .sidebar { position: sticky; top: 64px; z-index: 30; margin: 0 calc(-1 * var(--space-4)); padding: var(--space-2) var(--space-4); background: var(--bg); border-bottom: 1px solid var(--line); }
+      .sidebar .side-card { display: none; }
+      .stepnav ol { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(184px, 1fr); overflow-x: auto; gap: var(--space-2); scrollbar-width: none; }
+      .stepnav a { white-space: nowrap; min-height: 48px; border-radius: var(--radius-pill); background: var(--surface-2); border-color: var(--line-strong); }
+      .stepnav a .step-n { width: 24px; height: 24px; font-size: 12px; }
+      .actionbar { display: flex; }
+    }
+    @media (max-width: 720px) {
+      .panel { padding: var(--space-4); border-radius: var(--radius-md); }
+      .panel-head { gap: var(--space-3); }
+      .panel-tools { width: 100%; }
+      .chip-grid { grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+      .checkbox-label { font-size: 14px; padding: 10px 12px; }
+    }
+    @media (max-width: 480px) { .brand span { display: none; } }
+    @media (max-width: 360px) { .chip-grid { grid-template-columns: 1fr; } }
+  
+    /* ---------- Layout modes: all steps (default) or wizard ---------- */
+    .seg { display: inline-flex; border: 2px solid var(--line-strong); border-radius: var(--radius-md); overflow: hidden; background: var(--surface-2); align-self: flex-start; }
+    .seg button { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 var(--space-4); border: 0; background: none; color: var(--muted); font: 600 14px/1 var(--font-sans); cursor: pointer; }
+    .seg button + button { border-left: 1px solid var(--line-strong); }
+    .seg button:hover { color: var(--text); background: var(--surface); }
+    .seg button[aria-checked="true"] { background: var(--accent-fill); color: var(--on-accent); }
+    .seg button:focus-visible { outline-offset: -3px; }
+    .seg svg { width: 18px; height: 18px; flex: none; }
+    #sec-finish, .wiz-nav { display: none; }
+    #sec-finish .btn { margin-top: 0; }
+    #sec-finish .hint { margin-top: var(--space-3); }
+    :root[data-mode="wizard"] .content > .panel { display: none; }
+    :root[data-mode="wizard"] .content > .panel.is-current { display: block; }
+    :root[data-mode="wizard"] #sec-finish.is-current { display: block; }
+    :root[data-mode="wizard"] .wiz-nav { display: flex; }
+    .wiz-nav { align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-2); }
+    .wiz-nav .btn { width: auto; min-width: 140px; min-height: 52px; margin: 0; display: inline-flex; padding: 13px 24px; font-size: 15px; font-family: var(--font-display); }
+    .wiz-nav .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .wiz-nav [hidden] { display: none !important; }
+    .wiz-count { color: var(--muted); font-size: 14px; }
+    @media (max-width: 1179px) {
+      :root[data-mode="wizard"] .wiz-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; margin: 0; padding: var(--space-3) var(--space-4) calc(var(--space-3) + env(safe-area-inset-bottom)); background: var(--surface); border-top: 1px solid var(--line); }
+      :root[data-mode="wizard"] .actionbar { display: none; }
+      .wiz-nav .btn { flex: 1; min-width: 0; }
+      .wiz-count { display: none; }
+    }
+    @media (max-width: 560px) { .seg { width: 100%; } .seg button { flex: 1; justify-content: center; } }
 
-    @media (max-width: 560px) {
-      body { padding: 20px 14px 48px; font-size: 14.5px; }
-      .masthead { gap: 13px; }
-      .masthead img { width: 48px; height: 48px; border-radius: 12px; }
-      .masthead h1 { font-size: 21px; }
-      .panel { padding: 16px; }
-      .chip-grid { grid-template-columns: 1fr 1fr; }
-      .link-row { grid-template-columns: 1fr; }
+    /* ---------- Install popup ---------- */
+    .install-note { margin: 0 0 var(--space-4); color: var(--muted); font-size: 14px; }
+    dialog.install-dialog { width: min(560px, calc(100% - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; padding: var(--space-6); border: 2px solid var(--accent-fill); border-radius: var(--radius-lg); background: var(--surface); color: var(--text); }
+    dialog.install-dialog::backdrop { background: #0a0a0ccc; }
+    .install-dialog h2 { margin: 0 var(--space-8) var(--space-4) 0; font: 600 22px/28px var(--font-display); }
+    .install-dialog .btn { display: flex; width: 100%; min-height: 52px; padding: 13px 18px; font-size: 15px; font-family: var(--font-display); text-align: center; }
+    .install-dialog .btn + .btn { margin-top: 10px; }
+    .dialog-close { position: absolute; top: var(--space-4); right: var(--space-4); display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 2px solid var(--line-strong); border-radius: var(--radius-md); background: var(--surface-2); color: var(--text); cursor: pointer; }
+    .dialog-close svg { width: 20px; height: 20px; }
+
+    /* Phones and tablets: no step bar or side cards. The bottom bar carries Install and Copy link. */
+    @media (max-width: 1179px) {
+      .sidebar, .rail { display: none; }
+      html { scroll-padding-top: 16px; }
+      /* Keep the last content clear of the fixed bottom bar (Install/Copy, or Back/Next in the wizard). */
+      .layout { padding-bottom: calc(104px + env(safe-area-inset-bottom)); }
     }
 
-    @media (max-width: 360px) {
-      .chip-grid { grid-template-columns: 1fr; }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      * {
-        animation-duration: 0.001ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.001ms !important;
-      }
-    }
+    /* ---------- Install is only enabled for a complete setup ---------- */
+    .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; pointer-events: none; filter: saturate(.5); }
+    .issues { margin: 0 0 var(--space-4); padding: var(--space-4); border: 2px solid var(--warn); border-radius: var(--radius-md); background: var(--surface-2); }
+    .issues[hidden] { display: none; }
+    .issues strong { display: block; margin-bottom: var(--space-2); font: 600 15px/22px var(--font-display); }
+    .issues ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+    .issue-link { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; min-height: 44px; padding: 0 var(--space-3); border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font: 600 14px/1.3 var(--font-sans); text-align: left; cursor: pointer; }
+    .issue-link .go { flex: none; color: var(--accent); font-size: 13px; }
+    .bar-hint { flex: 1 1 100%; margin: 0; color: var(--warn); font: 600 13px/1.3 var(--font-sans); }
+    .bar-hint[hidden] { display: none; }
+    .bar-hint button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }
+    .actionbar { flex-wrap: wrap; }
   </style>
 </head>
 
 <body>
-  <div class="shell">
+  <header class="topbar">
+    <button type="button" class="icon-btn nav-toggle desktop-only" id="navToggle" aria-controls="sidebar" aria-expanded="true" aria-label="Close navigation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+    </button>
+    <a class="brand" href="/" aria-label="Nuvio Live Sports home"><img src="/logo.png" alt=""><span>Nuvio Live Sports</span></a>
+    <nav class="topnav" aria-label="Site">
+      <a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></svg><span class="nav-label">Home</span></a>
+      <a href="/configure" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span class="nav-label">Configure</span></a>
+      <a href="/status"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg><span class="nav-label">Status</span></a>
+      <a href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer" title="Discord (opens in a new tab)"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
+          </svg><span class="nav-label">Discord</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
+      <a class="hide-sm" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer" title="GitHub (opens in a new tab)"><svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="nav-label">GitHub</span><svg class="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
+    </nav>
+    <span class="spacer"></span>
+    <a class="btn icon-only" href="#sec-support" aria-label="Donate">
+      <svg height="14" viewBox="0 0 24 24" width="14" fill="currentColor"><path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z"/></svg>
+      <span class="label">Donate</span>
+    </a>
+    <button type="button" class="icon-btn" id="themeToggle" aria-label="Switch theme">
+        <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+      </button>
+  </header>
 
-    <header class="masthead">
-      <img src="/logo.png" alt="Nuvio Live Sports">
-      <div>
-        <p class="brandline"><span class="pip" aria-hidden="true"></span>Nuvio Live Sports</p>
-        <h1>Set up your sports dashboard</h1>
-        <p class="lede">Pick the sports and stream sources you want, then install the add-on.</p>
-      </div>
-    </header>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <nav class="stepnav" aria-label="Setup steps">
+        <ol>
+          <li><a href="#sec-sports"><span class="step-n" aria-hidden="true">1</span>Sports</a></li>
+          <li><a href="#sec-teams"><span class="step-n" aria-hidden="true">2</span>Teams and time</a></li>
+          <li><a href="#sec-sources"><span class="step-n" aria-hidden="true">3</span>Live sources</a></li>
+          <li><a href="#sec-prefs"><span class="step-n" aria-hidden="true">4</span>Languages</a></li>
+          <li><a href="#sec-collections"><span class="step-n" aria-hidden="true">5</span>Replay connection</a></li>
+          <li><a href="#sec-install"><span class="step-n" aria-hidden="true">6</span>Install</a></li>
+        </ol>
+      </nav>
+      <div class="side-card"><strong>Keep the server running</strong>Support covers the public server and the scrapers behind it. <a href="#sec-support">Ways to help</a></div>
+    </aside>
 
-    <main>
+    <main class="content">
 
-      <!-- 1 · Support -->
-      <section class="panel" aria-labelledby="support-h">
-        <div class="panel-head">
-          <h2 id="support-h">Keep the server running</h2>
-          <p>Support covers the public server and the scrapers behind it.</p>
+      <section class="page-head" aria-labelledby="hero-h">
+        <div>
+          <p class="eyebrow" id="heroEyebrow">Nuvio Live Sports setup</p>
+          <h1 id="hero-h">Configure your sports experience</h1>
+          <p class="lede">Pick the sports and stream sources you want, set your timezone, then install the add-on.</p>
         </div>
-
-        <a class="link-btn support-link" href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--kofi);" aria-hidden="true">
-            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z" />
-          </svg>
-          Support on Ko-fi
-        </a>
-
-        <details class="crypto-details">
-          <summary>Pay with crypto instead</summary>
-          <p class="hint">Tap an address to select it, or scan the QR code from a wallet app.</p>
-          <div class="crypto-grid">
-            <div class="crypto">
-              <img src="/Ethereum.png" alt="Ethereum address QR code">
-              <div class="crypto-short">ETH</div>
-              <div class="crypto-name">Polygon, Arbitrum, Base</div>
-              <div class="crypto-addr" title="Click to select">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
-              <button type="button" onclick="copyCryptoAddr('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)" style="margin-top:6px; background:rgba(255,255,255,0.08); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:3px 8px; font-size:10px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <div class="crypto">
-              <img src="/solana.png" alt="Solana address QR code">
-              <div class="crypto-short">SOL</div>
-              <div class="crypto-name">Solana</div>
-              <div class="crypto-addr" title="Click to select">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
-              <button type="button" onclick="copyCryptoAddr('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)" style="margin-top:6px; background:rgba(255,255,255,0.08); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:3px 8px; font-size:10px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-            <div class="crypto">
-              <img src="/bitcoin.png" alt="Bitcoin address QR code">
-              <div class="crypto-short">BTC</div>
-              <div class="crypto-name">Bitcoin</div>
-              <div class="crypto-addr" title="Click to select">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
-              <button type="button" onclick="copyCryptoAddr('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)" style="margin-top:6px; background:rgba(255,255,255,0.08); border:1px solid var(--line); color:var(--text); border-radius:12px; padding:3px 8px; font-size:10px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:4px;">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-                <span>Copy</span>
-              </button>
-            </div>
-          </div>
-        </details>
+        <div class="seg" role="radiogroup" aria-label="Setup layout" id="modeSeg">
+          <button type="button" role="radio" aria-checked="true" data-mode="all"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>All steps</button>
+          <button type="button" role="radio" aria-checked="false" data-mode="wizard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>Wizard</button>
+        </div>
       </section>
 
-      <!-- 2 · Sports -->
-      <section class="panel" aria-labelledby="sports-h">
+      <!-- 1 · Sports -->
+      <section class="panel" id="sec-sports" aria-labelledby="sports-h">
         <div class="panel-head">
-          <h2 id="sports-h">Sports</h2>
-          <p>All enabled by default. Turn off anything you do not follow.</p>
+          <span class="step-n" aria-hidden="true">1</span>
+          <div class="panel-title"><h2 id="sports-h">Select your sports</h2><p>All enabled by default. Turn off anything you do not follow.</p></div>
+          <div class="panel-tools"><span class="count" id="sportsCount" aria-live="polite"></span><button type="button" class="btn-sm" id="sportsAll">Select all</button><button type="button" class="btn-sm" id="sportsNone">Clear</button></div>
         </div>
         <div class="chip-grid" id="sportsGrid">
-          <label class="checkbox-label active"><input type="checkbox" value="football" checked> Football</label>
-          <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> Basketball</label>
-          <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> Cricket</label>
-          <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> NFL</label>
-          <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> Racing</label>
-          <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> Hockey</label>
-          <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> Baseball</label>
-          <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> Rugby</label>
-          <label class="checkbox-label active"><input type="checkbox" value="college" checked> College</label>
-          <label class="checkbox-label active"><input type="checkbox" value="mma" checked> MMA</label>
-          <label class="checkbox-label active"><input type="checkbox" value="golf" checked> Golf</label>
-          <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> Tennis</label>
-          <label class="checkbox-label active"><input type="checkbox" value="darts" checked> Darts</label>
-          <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
+            <label class="checkbox-label active"><input type="checkbox" value="football" checked> Football</label>
+            <label class="checkbox-label active"><input type="checkbox" value="basketball" checked> Basketball</label>
+            <label class="checkbox-label active"><input type="checkbox" value="cricket" checked> Cricket</label>
+            <label class="checkbox-label active"><input type="checkbox" value="american_football" checked> NFL</label>
+            <label class="checkbox-label active"><input type="checkbox" value="motorsport" checked> Racing</label>
+            <label class="checkbox-label active"><input type="checkbox" value="hockey" checked> Hockey</label>
+            <label class="checkbox-label active"><input type="checkbox" value="baseball" checked> Baseball</label>
+            <label class="checkbox-label active"><input type="checkbox" value="rugby" checked> Rugby</label>
+            <label class="checkbox-label active"><input type="checkbox" value="college" checked> College</label>
+            <label class="checkbox-label active"><input type="checkbox" value="mma" checked> MMA</label>
+            <label class="checkbox-label active"><input type="checkbox" value="golf" checked> Golf</label>
+            <label class="checkbox-label active"><input type="checkbox" value="tennis" checked> Tennis</label>
+            <label class="checkbox-label active"><input type="checkbox" value="darts" checked> Darts</label>
+            <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
         </div>
       </section>
 
-      <!-- 3 · Stream sources -->
-      <section class="panel" aria-labelledby="sources-h">
+      <!-- 2 · Teams and timezone -->
+      <section class="panel" id="sec-teams" aria-labelledby="teams-h">
         <div class="panel-head">
-          <h2 id="sources-h">Live stream sources</h2>
-          <p>Fewer sources means faster, more predictable live results.</p>
+          <span class="step-n" aria-hidden="true">2</span>
+          <div class="panel-title"><h2 id="teams-h">Favourite teams and timezone</h2><p>Used to order fixtures and label kick-off times for you.</p></div>
+          <div class="panel-tools"><span class="count" id="teamsCount" aria-live="polite"></span><button type="button" class="btn-sm" id="teamsClear">Clear</button></div>
+        </div>
+        <div class="fields">
+          <div class="field wide">
+            <label for="teamSearch">Favourite teams</label>
+            <div class="team-picker">
+              <input type="text" id="teamSearch" role="combobox" aria-expanded="false" aria-controls="teamSuggest" aria-autocomplete="list" placeholder="Search a team, or type any name and press Enter" autocomplete="off" spellcheck="false">
+              <ul id="teamSuggest" role="listbox" aria-label="Team suggestions" hidden></ul>
+            </div>
+            <ul class="team-chips" id="teamChips" aria-label="Added teams"></ul>
+            <p class="hint">Suggestions come from today's fixtures. Any name works. Fixtures for your teams are shown first.</p>
+            <details class="crypto-details" style="margin-top:12px">
+              <summary>Edit as comma-separated text</summary>
+              <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false" style="margin-top:8px">
+            </details>
+          </div>
+          <div class="field wide">
+            <label for="timezone">Match time timezone</label>
+            <select id="timezone"></select>
+            <p class="hint">Kick-off times are displayed in this timezone.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3 · Live stream sources -->
+      <section class="panel" id="sec-sources" aria-labelledby="sources-h">
+        <div class="panel-head">
+          <span class="step-n" aria-hidden="true">3</span>
+          <div class="panel-title"><h2 id="sources-h">Live stream sources</h2><p>Fewer sources means faster, more predictable live results.</p></div>
+          
         </div>
         <div id="sourcesGrid">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-            <span style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent);">🔴 Live & 24/7 TV Sources</span>
-            <div style="display: flex; gap: 8px;">
-              <button type="button" class="action-link" id="selectAllLive" style="background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0;">All</button>
-              <span style="color: var(--line-strong);">·</span>
-              <button type="button" class="action-link" id="selectNoneLive" style="background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0;">None</button>
+          <div class="subhead">
+            <span>Live and 24/7 TV sources <span class="count" id="liveCount" aria-live="polite" style="text-transform:none;letter-spacing:0"></span></span>
+            <div class="panel-tools">
+              <button type="button" class="btn-sm action-link" id="selectAllLive">Select all</button>
+              <button type="button" class="btn-sm action-link" id="selectNoneLive">Clear</button>
             </div>
           </div>
           <div class="chip-grid" id="liveSourcesGrid">
@@ -726,35 +360,23 @@
         </div>
       </section>
 
-      <!-- 4 · Personalization -->
-      <section class="panel" aria-labelledby="prefs-h">
+      <!-- 4 · Languages and replays -->
+      <section class="panel" id="sec-prefs" aria-labelledby="prefs-h">
         <div class="panel-head">
-          <h2 id="prefs-h">Personalization</h2>
-          <p>Used to order fixtures and label kick-off times for you.</p>
+          <span class="step-n" aria-hidden="true">4</span>
+          <div class="panel-title"><h2 id="prefs-h">Languages and replays</h2><p>Choose commentary languages, the replay catalog and web streams.</p></div>
+          
         </div>
-
-        <div class="field">
-          <label for="timezone">Match time timezone</label>
-          <select id="timezone"></select>
-          <p class="hint">Kick-off times are displayed in this timezone.</p>
-        </div>
-
-        <div class="field">
-          <label for="teams">Favorite teams</label>
-          <input type="text" id="teams" placeholder="Arsenal, Lakers, Ferrari" autocomplete="off" spellcheck="false">
-          <p class="hint">Comma separated. These fixtures are surfaced first.</p>
-        </div>
-
-
-        <div class="field">
-          <label for="languages">Preferred languages</label>
-          <input type="text" id="languages" placeholder="Spanish, Arabic, Hindi" list="languageOptions" autocomplete="off" spellcheck="false">
-          <datalist id="languageOptions"></datalist>
-          <p class="hint">Comma separated. Names or ISO codes both work, for example Spanish or es. English is always shown first.</p>
+        <div class="fields">
+          <div class="field wide">
+            <label for="languages">Preferred languages</label>
+            <input type="text" id="languages" placeholder="Spanish, Arabic, Hindi" list="languageOptions" autocomplete="off" spellcheck="false">
+            <datalist id="languageOptions"></datalist>
+            <p class="hint">Comma separated. Names or ISO codes both work, for example Spanish or es. English is always shown first.</p>
 
           <details class="crypto-details" style="margin-top:12px">
             <summary>Which languages appear on streams?</summary>
-            <div style="font-size:12.5px; color: var(--faint); line-height:1.6; margin-top:10px">
+            <div style="font-size:13px; color: var(--faint); line-height:1.6; margin-top:10px">
               <p>These are the commentary languages the providers actually serve. English is not listed because it is always shown first.</p>
               <ul class="sport-list" id="languageList" style="margin:10px 0 4px">
                 <li>Loading&hellip;</li>
@@ -762,20 +384,20 @@
               <p>Other languages can still be typed and will be matched, but they are unlikely to appear on any stream.</p>
             </div>
           </details>
-        </div>
+          </div>
 
-        <div class="field">
-          <label for="replayFilter">Replay catalog</label>
-          <select id="replayFilter">
-            <option value="all">All replays</option>
-            <option value="mainstream">Mainstream only</option>
-            <option value="disabled">Hide replays</option>
-          </select>
-          <p class="hint">All replays keeps every fixture the providers list. Mainstream only hides the ones nobody outside the local region follows.</p>
+          <div class="field wide">
+            <label for="replayFilter">Replay catalog</label>
+            <select id="replayFilter">
+              <option value="all">All replays</option>
+              <option value="mainstream">Mainstream only</option>
+              <option value="disabled">Hide replays</option>
+            </select>
+            <p class="hint">All replays keeps every fixture the providers list. Mainstream only hides the ones nobody outside the local region follows.</p>
 
           <details class="crypto-details" style="margin-top:12px">
             <summary>What counts as mainstream?</summary>
-            <div style="font-size:12.5px; color: var(--faint); line-height:1.6; margin-top:10px">
+            <div style="font-size:13px; color: var(--faint); line-height:1.6; margin-top:10px">
               <p><strong style="color:var(--text)">Shown (mainstream)</strong></p>
               <ul class="sport-list" style="margin:8px 0 14px">
                 <li>Premier League</li>
@@ -805,47 +427,47 @@
               <p>Judged from the match name and competition, not from a fixed list. Famous clubs and the major US leagues are always kept, and a lower-division or youth fixture is hidden even when a big club is named in it (e.g. a reserve side like &ldquo;Real Madrid Castilla&rdquo;).</p>
             </div>
           </details>
+          </div>
 
-          <!-- Replay & VOD Sources: collapsed if replayFilter is disabled -->
-          <div id="replaySourcesContainer" style="margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line);">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-              <span style="font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text);">⏪ Replay & VOD Sources</span>
-              <div style="display: flex; gap: 8px;">
-                <button type="button" class="action-link" id="selectAllReplays" style="background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0;">All</button>
-                <span style="color: var(--line-strong);">·</span>
-                <button type="button" class="action-link" id="selectNoneReplays" style="background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; padding: 0;">None</button>
+          <!-- Replay and VOD sources: hidden when replayFilter is disabled -->
+          <div class="field wide group" id="replaySourcesContainer">
+            <div class="subhead">
+              <span>Replay and VOD sources <span class="count" id="replayCount" aria-live="polite" style="text-transform:none;letter-spacing:0"></span></span>
+              <div class="panel-tools">
+                <button type="button" class="btn-sm action-link" id="selectAllReplays">Select all</button>
+                <button type="button" class="btn-sm action-link" id="selectNoneReplays">Clear</button>
               </div>
             </div>
             <div class="chip-grid" id="replaySourcesGrid">
-              <label class="checkbox-label active"><input type="checkbox" value="replayzone" checked> ReplayZone</label>
-              <label class="checkbox-label active"><input type="checkbox" value="soccerfull" checked> SoccerFull</label>
-              <label class="checkbox-label active"><input type="checkbox" value="fullraces" checked> FullRaces</label>
-              <label class="checkbox-label active"><input type="checkbox" value="basketballvideo" checked> BasketballVideo</label>
-              <label class="checkbox-label active"><input type="checkbox" value="nflvideo" checked> NFLVideo</label>
-              <label class="checkbox-label active"><input type="checkbox" value="hockeyreplays" checked> HockeyReplays</label>
-              <label class="checkbox-label active"><input type="checkbox" value="mlblive" checked> MLBLive</label>
-              <label class="checkbox-label active"><input type="checkbox" value="livetv" checked> LiveTV</label>
+            <label class="checkbox-label active"><input type="checkbox" value="replayzone" checked> ReplayZone</label>
+            <label class="checkbox-label active"><input type="checkbox" value="soccerfull" checked> SoccerFull</label>
+            <label class="checkbox-label active"><input type="checkbox" value="fullraces" checked> FullRaces</label>
+            <label class="checkbox-label active"><input type="checkbox" value="basketballvideo" checked> BasketballVideo</label>
+            <label class="checkbox-label active"><input type="checkbox" value="nflvideo" checked> NFLVideo</label>
+            <label class="checkbox-label active"><input type="checkbox" value="hockeyreplays" checked> HockeyReplays</label>
+            <label class="checkbox-label active"><input type="checkbox" value="mlblive" checked> MLBLive</label>
+            <label class="checkbox-label active"><input type="checkbox" value="livetv" checked> LiveTV</label>
             </div>
           </div>
-        </div>
 
-        <div class="field">
-          <label for="webStreams">Web Streams</label>
-          <select id="webStreams">
-            <option value="enabled">Include web streams</option>
-            <option value="disabled">Hide web streams</option>
-          </select>
-          <p class="hint">Web streams open an external browser window. Hide them to only see native streams.</p>
+          <div class="field wide group">
+            <label for="webStreams">Web streams</label>
+            <select id="webStreams">
+              <option value="enabled">Include web streams</option>
+              <option value="disabled">Hide web streams</option>
+            </select>
+            <p class="hint">Web streams open an external browser window. Hide them to only see native streams.</p>
+          </div>
         </div>
       </section>
 
       <!-- 5 · Nuvio Sports Replay Connection -->
-      <section class="panel" aria-labelledby="collections-h">
+      <section class="panel" id="sec-collections" aria-labelledby="collections-h">
         <div class="panel-head">
-          <h2 id="collections-h">Nuvio Sports Replay Connection</h2>
-          <p>Adds a landscape <strong>Sports Replays</strong> row to your Nuvio home screen, with organised replay rows for eight sports. Nothing else to install.</p>
+          <span class="step-n" aria-hidden="true">5</span>
+          <div class="panel-title"><h2 id="collections-h">Nuvio Sports Replay Connection</h2><p>Adds a landscape <strong>Sports Replays</strong> row to your Nuvio home screen, with organised replay rows for eight sports. Nothing else to install.</p></div>
+          
         </div>
-
         <ul class="sport-list">
           <li>Football</li>
           <li>Motorsport</li>
@@ -890,14 +512,109 @@
         </div>
       </section>
 
-      <!-- 6 · Install (primary action, always last) -->
-      <section class="panel panel-primary" aria-labelledby="install-h">
+      <!-- Wizard final step -->
+      <section class="panel" id="sec-finish" aria-labelledby="finish-h">
         <div class="panel-head">
-          <h2 id="install-h">Install add-on</h2>
-          <p>Your link updates automatically as you change the options above.</p>
+          <span class="step-n" aria-hidden="true">6</span>
+          <div class="panel-title"><h2 id="finish-h" tabindex="-1">Review and install</h2><p>Check your choices, then install the add-on.</p></div>
+        </div>
+        <div class="issues" id="finishIssues" role="alert" hidden></div>
+        <ul class="summary" id="finishSummary"></ul>
+        <button type="button" class="btn btn-ghost" id="finishCopy">Copy link for Nuvio app</button>
+        <p class="hint">You can go back to any step from the list on the left.</p>
+      </section>
+
+      <!-- Support -->
+      <section class="panel" id="sec-support" aria-labelledby="support-h">
+        <div class="panel-head">
+          <h2 id="support-h">Keep the server running</h2>
+          <p>Support covers the public server and the scrapers behind it.</p>
         </div>
 
-        <ul class="summary" id="configSummary"></ul>
+        <a class="link-btn support-link" href="https://ko-fi.com/rajodedara" target="_blank" rel="noopener noreferrer">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="color: var(--kofi);" aria-hidden="true">
+            <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.966-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.966 1.909.822 1.838 3.197.723 4.314z" />
+          </svg>
+          Support on Ko-fi
+        </a>
+
+        <details class="crypto-details">
+          <summary>Pay with crypto instead</summary>
+          <p class="hint">Tap an address to select it, or scan the QR code from a wallet app.</p>
+          <div class="crypto-grid">
+            <div class="crypto">
+              <img src="/Ethereum.png" alt="Ethereum address QR code">
+              <div class="crypto-short">ETH</div>
+              <div class="crypto-name">Polygon, Arbitrum, Base</div>
+              <div class="crypto-addr" title="Click to select">0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c</div>
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('0x619eA99F0D725BEE8e0CFe9552d5F4099d15724c', this)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <div class="crypto">
+              <img src="/solana.png" alt="Solana address QR code">
+              <div class="crypto-short">SOL</div>
+              <div class="crypto-name">Solana</div>
+              <div class="crypto-addr" title="Click to select">CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU</div>
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('CmuehW4PQn4yyQeXqguEpR3DjXwPPdS9Qqo4W5aWN8UU', this)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+            <div class="crypto">
+              <img src="/bitcoin.png" alt="Bitcoin address QR code">
+              <div class="crypto-short">BTC</div>
+              <div class="crypto-name">Bitcoin</div>
+              <div class="crypto-addr" title="Click to select">bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u</div>
+              <button type="button" class="crypto-copy" onclick="copyCryptoAddr('bc1q9dd4nflxx8ja0vzy2phzsf8h9tr6590txgd07u', this)">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                <span>Copy</span>
+              </button>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      
+      <div class="wiz-nav" id="wizNav">
+        <button type="button" class="btn btn-ghost" id="wizBack">Back</button>
+        <span class="wiz-count" id="wizCount" aria-live="polite"></span>
+        <button type="button" class="btn btn-primary" id="wizNext">Next</button>
+        <a class="btn btn-primary" id="wizInstall" href="#" hidden>Install add-on</a>
+      </div>
+    </main>
+
+    <aside class="rail" aria-label="Progress and install">
+
+      <section class="card" aria-labelledby="progress-h">
+        <h2 id="progress-h">Setup progress</h2>
+        <div class="progress-top">
+          <div class="ring" role="img" aria-label="Setup progress" id="progressRingBox">
+            <svg viewBox="0 0 84 84" aria-hidden="true"><circle class="track" cx="42" cy="42" r="34"/><circle class="bar" id="progressBar" cx="42" cy="42" r="34" stroke-dasharray="213.63" stroke-dashoffset="213.63"/></svg>
+            <b id="progressText">0/4</b>
+          </div>
+          <p class="progress-note" id="readyHint"></p>
+        </div>
+        <ul class="checklist" id="progressList"></ul>
+      </section>
+
+      <!-- 6 · Install (primary action) -->
+      <section class="card card-install" id="sec-install" aria-labelledby="install-cta-h">
+        <h2 id="install-cta-h">Install add-on</h2>
+        <p class="install-note">Review your choices and get the add-on link for Nuvio.</p>
+        <button type="button" class="btn btn-primary" id="openInstall">Review and install</button>
+      </section>
+    </aside>
+  </div>
+
+
+  <dialog class="install-dialog" id="installDialog" aria-labelledby="install-h">
+    <button type="button" class="dialog-close" id="closeInstall" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+        <h2 id="install-h">Install add-on</h2>
+        <div class="issues" id="installIssues" role="alert" hidden></div>
 
         <a href="#" id="installBtn" class="btn btn-primary">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -916,7 +633,9 @@
           <span id="copyBtnLabel">Copy link for Nuvio app</span>
         </button>
 
-        <div class="field">
+        <ul class="summary" id="configSummary" style="margin-top:16px"></ul>
+
+        <div class="field" style="margin-top:16px">
           <label for="manualUrl">Add-on link</label>
           <input type="text" id="manualUrl" class="mono-field" readonly spellcheck="false" autocomplete="off"
                  title="Click to select the whole link" onclick="this.select()" onfocus="this.select()">
@@ -924,37 +643,17 @@
         </div>
 
         <p class="status" id="installStatus" role="status" aria-live="polite"></p>
-      </section>
+      
+  </dialog>
 
-
-
-    </main>
-
-    <!-- Community -->
-    <footer class="footer">
-      <h2>Community</h2>
-      <p>Get setup help, report a broken stream, or follow releases.</p>
-
-      <div class="link-row">
-        <a class="link-btn link-discord" href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z" />
-          </svg>
-          Discord
-        </a>
-
-        <a class="link-btn" href="https://github.com/rajhodedara/live-sport-plugin" target="_blank" rel="noopener noreferrer">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-            <path fill-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
-          GitHub
-        </a>
-      </div>
-    </footer>
-
-
+  <div class="actionbar">
+    <p class="bar-hint" id="barHint" hidden></p>
+    <a class="btn btn-primary" id="barInstall" href="#">Install add-on</a>
+    <button type="button" class="btn btn-ghost" id="barCopy">Copy link</button>
   </div>
 
+  <script src="/provider-icons.js"></script>
+  <script src="/nav-toggle.js"></script>
   <script>
     const btn = document.getElementById('installBtn');
     const copyBtn = document.getElementById('copyBtn');
@@ -984,6 +683,9 @@
 
     const configSummary = document.getElementById('configSummary');
     const installStatus = document.getElementById('installStatus');
+    const barInstall = document.getElementById('barInstall');
+    const barCopy = document.getElementById('barCopy');
+    const wizInstall = document.getElementById('wizInstall');
 
     // Attempt to load existing config from URL
     let existingConfig = {};
@@ -1127,6 +829,14 @@
       }
     }
 
+    // Provider icon tiles on the source chips (sport glyph or monogram, nothing fetched).
+    if (window.ProviderIcon) {
+      document.querySelectorAll('#liveSourcesGrid .checkbox-label, #replaySourcesGrid .checkbox-label').forEach(l => {
+        const cb = l.querySelector('input');
+        if (cb) cb.insertAdjacentHTML('afterend', window.ProviderIcon(cb.value, l.textContent.trim()));
+      });
+    }
+
     let currentManifestUrl = '';
     let currentCollectionsUrl = '';
     let effectiveOrigin = window.location.origin;
@@ -1231,9 +941,15 @@
       if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
 
       renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams);
+      renderProgress(selectedSports, selectedLive, selectedReplay, teams, tz, replayFilter);
+      applyValidity();
+      const finishSummary = document.getElementById('finishSummary');
+      if (finishSummary && configSummary) finishSummary.innerHTML = configSummary.innerHTML;
 
       const installUrl = manifestUrl.replace(/^https?:\/\//, 'stremio://');
       btn.href = installUrl;
+      if (barInstall) barInstall.href = installUrl;
+      if (wizInstall) wizInstall.href = installUrl;
     }
 
     // navigator.clipboard only exists in a secure context (HTTPS or http://localhost).
@@ -1367,6 +1083,325 @@
       });
     });
 
+    // ---- Dashboard chrome: team chips, counts, progress ring, step navigation ----
+    function parseTeams(value) {
+      return String(value || '').split(',').map(t => t.trim()).filter(Boolean);
+    }
+
+    const teamChips = document.getElementById('teamChips');
+
+    // Team artwork hook: set window.NUVIO_TEAM_LOGOS = { 'arsenal': 'https://...png' } (lower-case
+    // names) to show real logos. Without an entry a team shows its initials.
+    function teamLogoUrl(name) {
+      const map = window.NUVIO_TEAM_LOGOS;
+      return (map && map[String(name).toLowerCase()]) || null;
+    }
+    function teamInitials(name) {
+      const words = String(name).split(/[^A-Za-z0-9\u00C0-\u024F]+/).filter(Boolean);
+      if (!words.length) return '?';
+      return (words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2)).toUpperCase();
+    }
+    function teamLogoEl(name) {
+      const box = document.createElement('span');
+      box.className = 'team-logo';
+      box.setAttribute('aria-hidden', 'true');
+      const url = teamLogoUrl(name);
+      if (url) {
+        const img = document.createElement('img');
+        img.alt = '';
+        img.loading = 'lazy';
+        img.src = url;
+        img.addEventListener('error', () => { box.textContent = teamInitials(name); });
+        box.appendChild(img);
+      } else {
+        box.textContent = teamInitials(name);
+      }
+      return box;
+    }
+
+    function renderTeamChips() {
+      if (!teamChips) return;
+      teamChips.textContent = '';
+      parseTeams(input.value).forEach((team, i) => {
+        const li = document.createElement('li');
+        li.appendChild(teamLogoEl(team));
+        li.appendChild(document.createTextNode(team));
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Remove ' + team);
+        x.textContent = '\u00d7';
+        x.addEventListener('click', () => {
+          const list = parseTeams(input.value);
+          list.splice(i, 1);
+          input.value = list.join(', ');
+          updateLink();
+        });
+        li.appendChild(x);
+        teamChips.appendChild(li);
+      });
+    }
+
+    // ---- Team search with suggestions ----
+    let knownTeams = [];
+    const teamSearch = document.getElementById('teamSearch');
+    const teamSuggest = document.getElementById('teamSuggest');
+    let suggestItems = [];
+    let suggestIndex = -1;
+
+    function addTeam(name) {
+      const clean = String(name || '').replace(/,/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!clean) return;
+      const list = parseTeams(input.value);
+      if (!list.some(t => t.toLowerCase() === clean.toLowerCase())) list.push(clean);
+      input.value = list.join(', ');
+      teamSearch.value = '';
+      closeSuggest();
+      updateLink();
+    }
+    function closeSuggest() {
+      teamSuggest.hidden = true;
+      teamSuggest.textContent = '';
+      suggestItems = [];
+      suggestIndex = -1;
+      teamSearch.setAttribute('aria-expanded', 'false');
+      teamSearch.removeAttribute('aria-activedescendant');
+    }
+    function setActive(i) {
+      suggestIndex = i;
+      Array.from(teamSuggest.children).forEach((li, n) => li.setAttribute('aria-selected', String(n === i)));
+      const active = teamSuggest.children[i];
+      if (active) { teamSearch.setAttribute('aria-activedescendant', active.id); active.scrollIntoView({ block: 'nearest' }); }
+      else teamSearch.removeAttribute('aria-activedescendant');
+    }
+    function openSuggest() {
+      const q = teamSearch.value.trim().toLowerCase();
+      const have = new Set(parseTeams(input.value).map(t => t.toLowerCase()));
+      const matches = knownTeams.filter(t => !have.has(t.toLowerCase()) && (!q || t.toLowerCase().includes(q))).slice(0, 8);
+      suggestItems = matches.slice();
+      const typed = teamSearch.value.trim();
+      const exact = typed && knownTeams.some(t => t.toLowerCase() === typed.toLowerCase());
+      teamSuggest.textContent = '';
+      const rows = matches.map(t => ({ name: t, custom: false }));
+      if (typed && !exact && !have.has(typed.toLowerCase())) rows.push({ name: typed, custom: true });
+      if (!rows.length) { closeSuggest(); return; }
+      rows.forEach((r, n) => {
+        const li = document.createElement('li');
+        li.id = 'teamOpt' + n;
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', 'false');
+        li.appendChild(teamLogoEl(r.name));
+        li.appendChild(document.createTextNode(r.custom ? 'Add \u201c' + r.name + '\u201d' : r.name));
+        li.addEventListener('mousedown', (e) => { e.preventDefault(); addTeam(r.name); });
+        teamSuggest.appendChild(li);
+      });
+      suggestItems = rows.map(r => r.name);
+      teamSuggest.hidden = false;
+      teamSearch.setAttribute('aria-expanded', 'true');
+      setActive(-1);
+    }
+    if (teamSearch) {
+      teamSearch.addEventListener('input', openSuggest);
+      teamSearch.addEventListener('focus', () => {
+        // On phones the list would open behind the fixed bottom bar, so bring the box to the top first.
+        if (window.matchMedia('(max-width: 1179px)').matches) teamSearch.scrollIntoView({ block: 'start' });
+        openSuggest();
+      });
+      teamSearch.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+      teamSearch.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowDown') { e.preventDefault(); if (teamSuggest.hidden) openSuggest(); setActive(Math.min(suggestItems.length - 1, suggestIndex + 1)); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(-1, suggestIndex - 1)); }
+        else if (e.key === 'Enter' || e.key === ',') {
+          e.preventDefault();
+          const picked = suggestIndex >= 0 ? suggestItems[suggestIndex] : teamSearch.value;
+          addTeam(picked);
+        }
+        else if (e.key === 'Escape') { closeSuggest(); }
+        else if (e.key === 'Backspace' && !teamSearch.value) {
+          const list = parseTeams(input.value);
+          if (list.length) { list.pop(); input.value = list.join(', '); updateLink(); }
+        }
+      });
+    }
+
+    // ---- Install is only possible once the configuration is complete ----
+    function configIssues() {
+      const issues = [];
+      if (!Array.from(checkboxes).some(cb => cb.checked)) issues.push({ sec: 'sec-sports', text: 'Choose at least one sport.' });
+      let tzOk = !!timezoneSelect.value;
+      if (tzOk) { try { new Intl.DateTimeFormat('en-US', { timeZone: timezoneSelect.value }); } catch (e) { tzOk = false; } }
+      if (!tzOk) issues.push({ sec: 'sec-teams', text: 'Choose a valid timezone.' });
+      if (!Array.from(liveSourceCheckboxes).some(cb => cb.checked)) issues.push({ sec: 'sec-sources', text: 'Choose at least one live source.' });
+      const replaysOn = !replayFilterSelect || replayFilterSelect.value !== 'disabled';
+      if (replaysOn && !Array.from(replaySourceCheckboxes).some(cb => cb.checked)) {
+        issues.push({ sec: 'sec-prefs', text: 'Choose at least one replay source, or hide replays.' });
+      }
+      return issues;
+    }
+
+    function goToSection(sec) {
+      const dlg = document.getElementById('installDialog');
+      if (dlg && dlg.open) dlg.close();
+      if (window.nuvioGoTo) window.nuvioGoTo(sec);
+    }
+
+    function renderIssues(box, issues) {
+      if (!box) return;
+      box.textContent = '';
+      if (!issues.length) { box.hidden = true; return; }
+      const title = document.createElement('strong');
+      title.textContent = 'Finish setting up before installing';
+      const list = document.createElement('ul');
+      issues.forEach(i => {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'issue-link';
+        const t = document.createElement('span');
+        t.textContent = i.text;
+        const go = document.createElement('span');
+        go.className = 'go';
+        go.textContent = 'Fix';
+        b.append(t, go);
+        b.addEventListener('click', () => goToSection(i.sec));
+        li.appendChild(b);
+        list.appendChild(li);
+      });
+      box.append(title, list);
+      box.hidden = false;
+    }
+
+    function setInstallEnabled(el, enabled) {
+      if (!el) return;
+      if (enabled) { el.removeAttribute('aria-disabled'); el.removeAttribute('tabindex'); }
+      else { el.setAttribute('aria-disabled', 'true'); el.setAttribute('tabindex', '-1'); }
+    }
+
+    function applyValidity() {
+      const issues = configIssues();
+      const ok = issues.length === 0;
+      [btn, barInstall, wizInstall].forEach(el => setInstallEnabled(el, ok));
+      renderIssues(document.getElementById('installIssues'), issues);
+      renderIssues(document.getElementById('finishIssues'), issues);
+      const hint = document.getElementById('barHint');
+      if (hint) {
+        hint.textContent = '';
+        if (issues.length) {
+          hint.append(document.createTextNode(issues[0].text + ' '));
+          const fix = document.createElement('button');
+          fix.type = 'button';
+          fix.textContent = issues.length > 1 ? 'Fix (' + issues.length + ' to go)' : 'Fix';
+          fix.addEventListener('click', () => goToSection(issues[0].sec));
+          hint.appendChild(fix);
+        }
+        hint.hidden = ok;
+      }
+      return ok;
+    }
+    [btn, barInstall, wizInstall].forEach(el => {
+      if (el) el.addEventListener('click', (e) => { if (el.getAttribute('aria-disabled') === 'true') e.preventDefault(); });
+    });
+
+    function setText(id, text) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    }
+
+    function renderProgress(sports, live, replay, teams, tz, replayFilter) {
+      const teamList = parseTeams(teams);
+      renderTeamChips();
+      setText('sportsCount', sports.length + ' selected');
+      setText('liveCount', '(' + live.length + ' selected)');
+      setText('replayCount', '(' + replay.length + ' selected)');
+      setText('teamsCount', teamList.length + (teamList.length === 1 ? ' favourite' : ' favourites'));
+
+      const items = [
+        { label: 'Sports', note: sports.length + ' of ' + checkboxes.length + ' selected', ok: sports.length > 0 },
+        { label: 'Teams and timezone', note: (teamList.length ? teamList.length + ' favourite' + (teamList.length === 1 ? '' : 's') : 'No favourites yet (optional)') + ', ' + (tz || 'no timezone'), ok: !!tz },
+        { label: 'Live sources', note: live.length + ' of ' + liveSourceCheckboxes.length + ' selected', ok: live.length > 0 },
+        { label: 'Languages and replays', note: replayFilter === 'disabled' ? 'Replays hidden' : (replay.length + ' replay source' + (replay.length === 1 ? '' : 's') + ', ' + (replayFilter === 'mainstream' ? 'mainstream' : 'all') + ' replays'), ok: replayFilter === 'disabled' || replay.length > 0 }
+      ];
+      const done = items.filter(i => i.ok).length;
+      const list = document.getElementById('progressList');
+      if (list) {
+        list.textContent = '';
+        items.forEach(i => {
+          const li = document.createElement('li');
+          li.className = i.ok ? 'is-done' : 'is-todo';
+          const mark = document.createElement('span');
+          mark.className = 'mark';
+          mark.setAttribute('aria-hidden', 'true');
+          mark.textContent = i.ok ? '\u2713' : '!';
+          const body = document.createElement('div');
+          const b = document.createElement('b');
+          b.textContent = i.label + (i.ok ? '' : ' (needs attention)');
+          const small = document.createElement('small');
+          small.textContent = i.note;
+          body.appendChild(b);
+          body.appendChild(small);
+          li.appendChild(mark);
+          li.appendChild(body);
+          list.appendChild(li);
+        });
+      }
+      const bar = document.getElementById('progressBar');
+      if (bar) bar.setAttribute('stroke-dashoffset', String(213.63 * (1 - done / items.length)));
+      setText('progressText', done + '/' + items.length);
+      const ring = document.getElementById('progressRingBox');
+      if (ring) ring.setAttribute('aria-label', done + ' of ' + items.length + ' steps ready');
+      const ready = configIssues().length === 0;
+      const hint = document.getElementById('readyHint');
+      if (hint) {
+        hint.textContent = ready ? 'Ready to install. Your link updates as you change options.' : 'Finish the items marked below before installing.';
+        hint.className = 'progress-note' + (ready ? '' : ' is-warn');
+      }
+    }
+
+    const sportsAllBtn = document.getElementById('sportsAll');
+    if (sportsAllBtn) sportsAllBtn.addEventListener('click', () => setCheckboxes(checkboxes, true));
+    const sportsNoneBtn = document.getElementById('sportsNone');
+    if (sportsNoneBtn) sportsNoneBtn.addEventListener('click', () => setCheckboxes(checkboxes, false));
+    const teamsClearBtn = document.getElementById('teamsClear');
+    if (teamsClearBtn) teamsClearBtn.addEventListener('click', () => { input.value = ''; updateLink(); input.focus(); });
+
+    if (barCopy) {
+      barCopy.addEventListener('click', () => {
+        copyBtn.click();
+        setTimeout(() => {
+          const ok = installStatus && installStatus.classList.contains('is-ok');
+          flashLabel(barCopy, ok ? 'Copied' : 'Copy failed', 'Copy link');
+          // Clipboard can be blocked (plain HTTP); the popup has the link field to copy by hand.
+          if (!ok) openInstallDialog();
+        }, 450);
+      });
+    }
+
+    // Highlight the sidebar step for the section nearest the top of the viewport.
+    (function () {
+      const links = Array.from(document.querySelectorAll('.stepnav a'));
+      const targets = links.map(a => document.querySelector(a.getAttribute('href')));
+      function mark(id) {
+        if (document.documentElement.dataset.mode === 'wizard') return;
+        links.forEach(a => {
+          if (a.getAttribute('href') === '#' + id) a.setAttribute('aria-current', 'location');
+          else a.removeAttribute('aria-current');
+        });
+        const cur = document.querySelector('.stepnav a[aria-current]');
+        if (cur && cur.scrollIntoView && window.matchMedia('(max-width: 1179px)').matches) {
+          const ol = cur.closest('ol');
+          if (ol) ol.scrollLeft = Math.max(0, cur.offsetLeft - 16);
+        }
+      }
+      mark('sec-sports');
+      if (!('IntersectionObserver' in window)) return;
+      const visible = new Set();
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach(e => { if (e.isIntersecting) visible.add(e.target.id); else visible.delete(e.target.id); });
+        const first = targets.find(t => t && visible.has(t.id));
+        if (first) mark(first.id);
+      }, { rootMargin: '-25% 0px -60% 0px' });
+      targets.forEach(t => { if (t) io.observe(t); });
+    })();
+
     updateLink();
 
     // Surface the languages the providers actually serve. /api/options derives
@@ -1378,6 +1413,7 @@
         const res = await fetch('/api/options', { cache: 'no-store' });
         if (!res.ok) return;
         const data = await res.json();
+        if (Array.isArray(data.teams)) knownTeams = data.teams.filter(t => typeof t === 'string');
         const langs = Array.isArray(data.languages) ? data.languages : [];
         if (langs.length === 0) return;
 
@@ -1418,13 +1454,11 @@
     window.copyCryptoAddr = function(text, btn) {
       const orig = btn.innerHTML;
       const showSuccess = () => {
-        btn.innerHTML = '<span>✓ Copied!</span>';
-        btn.style.background = '#10b981';
-        btn.style.borderColor = '#10b981';
+        btn.innerHTML = '<span>\u2713 Copied</span>';
+        btn.classList.add('is-copied');
         setTimeout(() => {
           btn.innerHTML = orig;
-          btn.style.background = 'rgba(255,255,255,0.08)';
-          btn.style.borderColor = 'var(--line)';
+          btn.classList.remove('is-copied');
         }, 2000);
       };
       if (navigator.clipboard && window.isSecureContext) {
@@ -1437,6 +1471,127 @@
         showSuccess();
       }
     };
+  
+
+    // ---- Install popup ----
+    function openInstallDialog() {
+      const dlg = document.getElementById('installDialog');
+      if (!dlg || dlg.open) return;
+      if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+    }
+    (function () {
+      const dlg = document.getElementById('installDialog');
+      const open = document.getElementById('openInstall');
+      const close = document.getElementById('closeInstall');
+      if (!dlg || !open) return;
+      function openInstall() {
+        if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
+      }
+      function closeInstall() {
+        if (typeof dlg.close === 'function') dlg.close(); else dlg.removeAttribute('open');
+      }
+      open.addEventListener('click', openInstall);
+      if (close) close.addEventListener('click', closeInstall);
+      dlg.addEventListener('click', (e) => { if (e.target === dlg) closeInstall(); });
+      // The sixth step in the left list opens the popup (in wizard mode it goes to the review step instead).
+      const installLink = document.querySelector('.stepnav a[href="#sec-install"]');
+      if (installLink) installLink.addEventListener('click', (e) => {
+        if (document.documentElement.getAttribute('data-mode') === 'wizard') return;
+        e.preventDefault();
+        openInstall();
+      });
+    })();
+
+    // ---- Layout modes: all steps, or one step at a time ----
+    (function () {
+      const ORDER = ['sec-sports', 'sec-teams', 'sec-sources', 'sec-prefs', 'sec-collections', 'sec-finish'];
+      const root = document.documentElement;
+      const panels = ORDER.map(id => document.getElementById(id));
+      const support = document.getElementById('sec-support');
+      const links = Array.from(document.querySelectorAll('.stepnav a'));
+      const eyebrow = document.getElementById('heroEyebrow');
+      const back = document.getElementById('wizBack');
+      const next = document.getElementById('wizNext');
+      const count = document.getElementById('wizCount');
+      const segButtons = Array.from(document.querySelectorAll('#modeSeg button'));
+      const last = ORDER.length - 1;
+      let mode = root.getAttribute('data-mode') === 'wizard' ? 'wizard' : 'all';
+      let step = 0;
+
+      function render() {
+        root.setAttribute('data-mode', mode);
+        segButtons.forEach(b => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
+        panels.forEach((p, i) => p && p.classList.toggle('is-current', mode === 'wizard' && i === step));
+        if (support) support.classList.toggle('is-current', mode === 'wizard' && step === last);
+        if (eyebrow) eyebrow.textContent = mode === 'wizard' ? 'Step ' + (step + 1) + ' of ' + ORDER.length : 'Nuvio Live Sports setup';
+        if (mode === 'wizard') {
+          links.forEach((a, i) => { if (i === step) a.setAttribute('aria-current', 'location'); else a.removeAttribute('aria-current'); });
+          if (back) back.disabled = step === 0;
+          if (next) next.hidden = step === last;
+          if (wizInstall) wizInstall.hidden = step !== last;
+          if (count) count.textContent = 'Step ' + (step + 1) + ' of ' + ORDER.length;
+        }
+      }
+
+      function go(i) {
+        step = Math.max(0, Math.min(last, i));
+        render();
+        const h = panels[step] && panels[step].querySelector('h2');
+        window.scrollTo({ top: 0 });
+        if (h) h.focus({ preventScroll: true });
+      }
+
+      function setMode(m) {
+        mode = m;
+        try { localStorage.setItem('nuvio-config-mode', m); } catch (e) {}
+        render();
+        window.scrollTo({ top: 0 });
+      }
+
+      segButtons.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+      if (back) back.addEventListener('click', () => go(step - 1));
+      if (next) next.addEventListener('click', () => go(step + 1));
+      links.forEach((a, i) => a.addEventListener('click', (e) => { if (mode === 'wizard') { e.preventDefault(); go(i); } }));
+      document.querySelectorAll('a[href="#sec-support"]').forEach(a => a.addEventListener('click', (e) => { if (mode === 'wizard') { e.preventDefault(); go(last); } }));
+      const finishCopy = document.getElementById('finishCopy');
+      if (finishCopy) finishCopy.addEventListener('click', () => {
+        copyBtn.click();
+        setTimeout(() => {
+          const ok = installStatus && installStatus.classList.contains('is-ok');
+          flashLabel(finishCopy, ok ? 'Copied' : 'Copy failed', 'Copy link for Nuvio app');
+          if (!ok) openInstallDialog();
+        }, 450);
+      });
+      window.nuvioGoTo = function (secId) {
+        const i = ORDER.indexOf(secId);
+        if (mode === 'wizard' && i >= 0) { go(i); return; }
+        const el = document.getElementById(secId);
+        if (el) el.scrollIntoView({ block: 'start' });
+      };
+      render();
+    })();
+
+    (function () {
+      var b = document.getElementById('themeToggle');
+      if (!b) return;
+      var mq = window.matchMedia('(prefers-color-scheme: light)');
+      var root = document.documentElement;
+      function eff() { return root.getAttribute('data-theme') || (mq.matches ? 'light' : 'dark'); }
+      function paint() {
+        var light = eff() === 'light';
+        b.setAttribute('aria-label', light ? 'Switch to dark theme' : 'Switch to light theme');
+        b.querySelector('.ico-sun').toggleAttribute('hidden', light);
+        b.querySelector('.ico-moon').toggleAttribute('hidden', !light);
+      }
+      b.addEventListener('click', function () {
+        var next = eff() === 'light' ? 'dark' : 'light';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem('nuvio-theme', next); } catch (e) {}
+        paint();
+      });
+      if (mq.addEventListener) mq.addEventListener('change', paint);
+      paint();
+    })();
   </script>
 </body>
 

@@ -85,16 +85,23 @@ describe('provider health dashboard wiring', () => {
   const configure = fs.readFileSync(path.join(__dirname, '..', 'public', 'configure.html'), 'utf8');
   const index = fs.readFileSync(path.join(__dirname, '..', 'src', 'index.js'), 'utf8');
 
-  test('home page sidebar fetches and renders the protected endpoint', () => {
-    expect(home).toContain('<aside class="provider-health"');
-    expect(home).toContain('id="providerHealthPanel"');
-    expect(home).toContain("fetch('/api/provider-health'");
-    expect(home).toContain('renderProviderHealth');
+  const status = fs.readFileSync(path.join(__dirname, '..', 'public', 'status.html'), 'utf8');
+
+  test('dedicated status page fetches and renders the protected endpoint', () => {
+    expect(status).toContain('id="providerHealthPanel"');
+    expect(status).toContain("fetch('/api/provider-health'");
+    expect(status).toContain('renderProviderHealth');
   });
 
-  test('dashboard is no longer rendered by the configure page', () => {
-    expect(configure).not.toContain('providerHealthPanel');
-    expect(configure).not.toContain("fetch('/api/provider-health'");
+  test('status page is served at /status', () => {
+    expect(index).toMatch(/app\.get\('\/status'[\s\S]*?status\.html/);
+  });
+
+  test('dashboard is no longer rendered by the home or configure pages', () => {
+    for (const page of [home, configure]) {
+      expect(page).not.toContain('providerHealthPanel');
+      expect(page).not.toContain("fetch('/api/provider-health'");
+    }
   });
 
   test('endpoint is registered before the catch-all resolver proxy', () => {
