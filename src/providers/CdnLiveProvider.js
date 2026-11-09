@@ -103,6 +103,28 @@ class CdnLiveProvider extends BaseProvider {
     });
   }
 
+  _detectResolution(name) {
+    if (!name) return 'HD';
+    const n = String(name).toUpperCase();
+    if (n.includes('4K') || n.includes('UHD')) return '4K';
+    if (n.includes('FHD') || n.includes('1080')) return 'FHD';
+    if (n.includes('HD') || n.includes('720')) return 'HD';
+    if (n.includes('SD') || n.includes('480')) return 'SD';
+    return 'HD';
+  }
+
+  _parseEventTitle(item) {
+    if (!item) return '';
+    let title = (typeof item.name === 'string' && item.name.trim()) || (typeof item.event === 'string' && item.event.trim());
+    if (!title) {
+      const home = (item.homeTeam || '').trim();
+      const away = (item.awayTeam || '').trim();
+      if (home && away) title = `${home} vs ${away}`;
+      else title = home || away || '';
+    }
+    return title === 'vs' ? '' : title;
+  }
+
   async getMatches() {
     const [events, channels] = await Promise.all([
       this.getEventMatches(),
@@ -232,10 +254,10 @@ class CdnLiveProvider extends BaseProvider {
           if (!item || !Array.isArray(item.channels) || item.channels.length === 0) continue;
           if (item.name != null && typeof item.name !== 'string') continue;
           
-          let title = item.name || `${item.homeTeam || ''} vs ${item.awayTeam || ''}`.trim();
-          if (!title || title === 'vs') continue;
+          let title = this._parseEventTitle(item);
+          if (!title) continue;
           
-          const matchId = item.gameID || `${item.homeTeam}-vs-${item.awayTeam}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+          const matchId = item.gameID || `${item.homeTeam || ''}-vs-${item.awayTeam || ''}`.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/^-+|-+$/g, '') || title.toLowerCase().replace(/[^a-z0-9-]/g, '-');
           
           let status = 'upcoming';
           if (item.status === 'live' || item.status === 'in') status = 'live';
@@ -426,7 +448,7 @@ class CdnLiveProvider extends BaseProvider {
             }
           }
         },
-        resolution: 'HD'
+        resolution: this._detectResolution(name)
       }));
     }
 
@@ -435,7 +457,7 @@ class CdnLiveProvider extends BaseProvider {
       name: 'CDNLiveTV',
       title: `CDNLiveTV (${name}) (Web Player)`,
       externalUrl: playerUrl,
-      resolution: 'HD'
+      resolution: this._detectResolution(name)
     });
     webFallback._cdnWeb = true;
     streams.push(webFallback);
