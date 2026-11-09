@@ -151,6 +151,14 @@ function rewriteHlsUri(segmentUri, manifestUrl, opts = {}) {
     return buildManifestProxyUrl(absoluteUrl, opts);
   }
 
+  // Plain-HTTP segments cannot be fetched by Stremio's HTTPS-only proxy client.
+  if (absoluteUrl.startsWith('http://') && absoluteAddonBaseUrl) {
+    let chunkPath = `/api/hlschunk?url=${encodeURIComponent(absoluteUrl)}`;
+    if (referer) chunkPath += `&referer=${encodeURIComponent(referer)}`;
+    if (origin) chunkPath += `&origin=${encodeURIComponent(origin)}`;
+    return new URL(chunkPath, absoluteAddonBaseUrl).toString();
+  }
+
   if (isTikTokCloakedSegment(absoluteUrl)) {
     const mode = segmentAddressMode();
 
