@@ -74,3 +74,23 @@ public/*.json
 .agents/**/*.log
 .agents/**/node_modules/
 .timezone-data/
+
+# --- Local artefacts that must never be published -------------------------
+# Release snapshots, crash dumps, ad-hoc patches and full-repo review clones.
+/*.tar.gz
+/*.tgz
+/*.dex
+/*.diff
+/*.patch
+/review-checkouts/
+/dist_old/
+
+# Per-host investigation evidence (hostnames, /root paths, jest + HTTP logs).
+/docs/evidence-*/
+
+# Manual HLS test pages, superseded by public/*.html
+/public/test_hls_*.html
+
+# Runtime scratch. The .openclaw variant was missing, which is how signed
+# playlist URLs ended up committed.
+.openclaw/**/tmp/
