@@ -1,7 +1,11 @@
 const { request } = require('undici');
 
 async function testFetch() {
-  const m3u8Url = 'https://cdnlivetv.tv/secure/api/v1/6a288d2e81d8192bb76ce89d/playlist.m3u8?token=NmEyODhkMmU4MWQ4MTkyYmI3NmNlODlkOjE3ODgzMTc3ODM2NjM6Y2RubGl2ZXR2LnR2OjNmYWQ5ODFiYzIzZGMxN2UuNDA1ZjIyNzY5YjIwMDdmZDY1YWQ0YzliNjQ5MjJiMmQwNzYzMGE2M2YxZGY1OTM1MGM3ZDgwYWJlYzRhODZkYg';
+  const m3u8Url = process.env.SS99_TEST_M3U8;
+  if (!m3u8Url) {
+    console.error('SS99_TEST_M3U8 is not set; skipping.');
+    return;
+  }
   console.log('Fetching m3u8 playlist...');
   const res = await request(m3u8Url, {
     headers: {

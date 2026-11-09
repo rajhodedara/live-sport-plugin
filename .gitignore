@@ -94,3 +94,18 @@ public/*.json
 # Runtime scratch. The .openclaw variant was missing, which is how signed
 # playlist URLs ended up committed.
 .openclaw/**/tmp/
+
+# --- Publish only human-authored shared state under .agents/ ---------------
+# Overrides the blanket !.agents/** above. Agent runtime state (teamwork runs,
+# caches, sentinel briefs, bootstrap scripts, plugin state) must never ship.
+.agents/**
+!.agents/
+!.agents/context/
+!.agents/context/**
+!.agents/tracks/
+!.agents/tracks/**
+!.agents/rules/
+!.agents/rules/**
+
+# Working audit output for the open-source review; regenerate locally.
+/opensource-audit/
