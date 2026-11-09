@@ -284,6 +284,26 @@ class CdnLiveProvider extends BaseProvider {
    * Decodes the signed M3U8 URL from a CDNLive player page.
    * Caches the decoded URL until token expiry to minimize latency and requests.
    */
+  async _verifyManifest(m3u8Url) {
+    if (!m3u8Url || typeof m3u8Url !== 'string') return false;
+    try {
+      const { safeFetch } = require('../services/ProviderOutbound');
+      const res = await safeFetch(m3u8Url, {
+        headers: {
+          'Origin': 'https://cdnlivetv.tv',
+          'Referer': 'https://cdnlivetv.tv/',
+          'User-Agent': UA
+        },
+        signal: AbortSignal.timeout(3500)
+      });
+      if (!res.ok) return false;
+      const text = await res.text();
+      return text.includes('#EXT');
+    } catch (_) {
+      return false;
+    }
+  }
+
   async decodePlayer(playerUrl) {
     const cached = this._decoded.get(playerUrl);
     if (cached && cached.expiresAt > Date.now()) {
@@ -403,12 +423,16 @@ class CdnLiveProvider extends BaseProvider {
           }
 
           if (m3u8Url && m3u8Url.includes('.m3u8')) {
-            break;
+              break;
           }
         } catch (_) {}
       }
 
       if (m3u8Url) {
+        const isValid = await this._verifyManifest(m3u8Url);
+        if (!isValid) {
+          return '';
+        }
         const exp = tokenExpiry(m3u8Url);
         const ttlMs = 3 * 60 * 60 * 1000;
         const expiresAt = exp ? Math.min(exp - 60000, Date.now() + ttlMs) : Date.now() + ttlMs;

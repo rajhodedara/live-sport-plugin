@@ -32,6 +32,9 @@ describe('CdnLiveProvider — worker budget integration', () => {
       if (url === playerUrl) {
         return { ok: false, status: 403, text: async () => '' };
       }
+      if (url.includes('.m3u8')) {
+        return { ok: true, status: 200, text: async () => '#EXTM3U\nsegment.ts' };
+      }
       // Workers also fail
       return { ok: false, status: 500, text: async () => '' };
     });
@@ -102,6 +105,9 @@ describe('CdnLiveProvider — worker budget integration', () => {
     safeFetch.mockImplementation(async (url) => {
       if (url === playerUrl) {
         return { ok: false, status: 403, text: async () => '' };
+      }
+      if (url.includes('.m3u8')) {
+        return { ok: true, status: 200, text: async () => '#EXTM3U\nsegment.ts' };
       }
       workerCallCount++;
       return {
