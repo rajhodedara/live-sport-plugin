@@ -705,7 +705,9 @@
         rate: rateMatch ? parseFloat(rateMatch[1]) : 0,
         rateText: rateMatch ? rateMatch[1] + ' Mbps' : '',
         extra: isExtra,
-        external: !st.url && !!st.externalUrl
+        // playStreamUrl hands any row carrying externalUrl to the web player,
+        // even when a media URL is present, so the label has to match that.
+        external: !!st.externalUrl
       };
     }
 
