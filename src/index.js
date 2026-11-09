@@ -18,6 +18,7 @@ const cors    = require('cors');
 const { getRouter } = require('stremio-addon-sdk');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const resolverProxyEvents = require('./services/ResolverProxyEvents');
+const { collectTeamNames } = require('./services/TeamSuggestions');
 const { resolverTransport } = require('./services/ResolverTransportRuntime');
 const child_process = require('child_process');
 const path = require('path');
@@ -250,14 +251,7 @@ app.get('/api/options', (req, res) => {
   try {
     const cs = container.resolve('cacheService');
     const cached = (cs && (typeof cs.getMatchesReadOnly === 'function' ? cs.getMatchesReadOnly() : (typeof cs.getMatches === 'function' ? cs.getMatches() : []))) || [];
-    const counts = new Map();
-    for (const m of cached) {
-      for (const t of [m && m.team1, m && m.team2]) {
-        const name = t && typeof t.name === 'string' ? t.name.trim() : '';
-        if (name && name.length <= 60) counts.set(name, (counts.get(name) || 0) + 1);
-      }
-    }
-    teams = [...counts.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, 400).map((e) => e[0]);
+    teams = collectTeamNames(cached);
   } catch (_) {
     teams = [];
   }

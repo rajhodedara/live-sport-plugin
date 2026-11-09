@@ -87,14 +87,22 @@ describe('provider health dashboard wiring', () => {
 
   const status = fs.readFileSync(path.join(__dirname, '..', 'public', 'status.html'), 'utf8');
 
-  test('dedicated status page fetches and renders the protected endpoint', () => {
+  test('dedicated status page fetches and renders the health endpoint', () => {
     expect(status).toContain('id="providerHealthPanel"');
     expect(status).toContain("fetch('/api/provider-health'");
     expect(status).toContain('renderProviderHealth');
   });
 
-  test('status page is served at /status', () => {
+  test('status page is served at /status with its shared assets', () => {
     expect(index).toMatch(/app\.get\('\/status'[\s\S]*?status\.html/);
+    for (const asset of ['status.html', 'ui.css', 'provider-icons.js']) {
+      expect(fs.existsSync(path.join(__dirname, '..', 'public', asset))).toBe(true);
+    }
+  });
+
+  test('response time chart does not plot cache hits as zero latency', () => {
+    // recordCached reports durationMs 0, so cached providers must be filtered out.
+    expect(status).toContain("Number.isFinite(p.durationMs) && p.state !== 'cached'");
   });
 
   test('dashboard is no longer rendered by the home or configure pages', () => {
