@@ -109,3 +109,6 @@ public/*.json
 
 # Working audit output for the open-source review; regenerate locally.
 /opensource-audit/
+
+# Archived bundles and PR evidence dumps
+/docs/*.tgz
