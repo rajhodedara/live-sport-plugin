@@ -171,7 +171,7 @@
         </div>
         <div class="chart-card span-12">
           <h2>Response time <span class="pill">Lower is better</span></h2>
-          <p class="hint">Fastest first, from the last sync. Green under 2s, amber under 5s, red 5s or more. Lines mark 2s and 5s.</p>
+          <p class="hint">Fastest first, from the last sync. Green under 2s, amber under 5s, red 5s or more. Lines mark 2s and 5s. Providers serving cached fixtures are not timed.</p>
           <div id="latencyBars"></div>
         </div>
       </section>
@@ -268,6 +268,10 @@
         counts[i]++;
       });
       const total = providers.length;
+      if (!total) {
+        document.getElementById('healthDonut').innerHTML = '<p class="state-msg">No providers reported yet.</p>';
+        return;
+      }
       const R = 66;
       const C = 2 * Math.PI * R;
       const used = counts.filter((n) => n > 0).length;
@@ -319,9 +323,14 @@
         const icon = window.ProviderIcon ? window.ProviderIcon(p.id || p.name, p.name) : '';
         return '<li class="attn-item">' + icon + '<span><span class="attn-name">' + esc(p.name || p.id || 'Unknown') + '</span>' + (note ? '<span class="attn-note">' + esc(note) + '</span>' : '') + '</span><span class="health-state is-' + esc(p.state || 'unknown') + '">' + esc(p.state || 'unknown') + '</span></li>';
       }).join('');
-      el.innerHTML = '<p class="attn-title">Needs attention</p>' + (bad.length
-        ? '<ul class="attention">' + items + '</ul>' + (bad.length > 8 ? '<p class="attn-ok">and ' + (bad.length - 8) + ' more below.</p>' : '')
-        : '<p class="attn-ok">All providers are healthy.</p>');
+      // An instance with no registered providers has nothing to be healthy about,
+      // so it must not read as a clean bill of health.
+      const summary = !providers.length
+        ? '<p class="attn-ok">No providers reported yet.</p>'
+        : (bad.length
+          ? '<ul class="attention">' + items + '</ul>' + (bad.length > 8 ? '<p class="attn-ok">and ' + (bad.length - 8) + ' more below.</p>' : '')
+          : '<p class="attn-ok">All providers are healthy.</p>');
+      el.innerHTML = '<p class="attn-title">Needs attention</p>' + summary;
     }
 
     function showMessage(text, isError) {
@@ -355,7 +364,9 @@
       renderDonut(providers);
       renderAttention(providers);
       renderBars('fixtureBars', providers.filter((p) => Number.isFinite(p.matchCount)).map((p) => ({ id: p.id || p.name, name: p.name || p.id || 'Unknown', value: p.matchCount })).sort((a, b) => b.value - a.value).slice(0, 12), (v) => v + ' fixtures');
-      renderBars('latencyBars', providers.filter((p) => Number.isFinite(p.durationMs)).map((p) => ({ id: p.id || p.name, name: p.name || p.id || 'Unknown', value: p.durationMs })).sort((a, b) => a.value - b.value), (v) => v >= 1000 ? (v / 1000).toFixed(1) + ' s' : v + ' ms', (v) => v < 2000 ? 'is-ok' : v < 5000 ? 'is-warn' : 'is-bad', (v) => v < 2000 ? 'Fast' : v < 5000 ? 'OK' : 'Slow', [2000, 5000], 2);
+      // recordCached reports durationMs 0, which would rank cache hits as the
+      // fastest upstream. Cached providers are excluded instead of plotted at zero.
+      renderBars('latencyBars', providers.filter((p) => Number.isFinite(p.durationMs) && p.state !== 'cached').map((p) => ({ id: p.id || p.name, name: p.name || p.id || 'Unknown', value: p.durationMs })).sort((a, b) => a.value - b.value), (v) => v >= 1000 ? (v / 1000).toFixed(1) + ' s' : v + ' ms', (v) => v < 2000 ? 'is-ok' : v < 5000 ? 'is-warn' : 'is-bad', (v) => v < 2000 ? 'Fast' : v < 5000 ? 'OK' : 'Slow', [2000, 5000], 2);
 
       providerHealthList.replaceChildren();
       if (!providers.length) showMessage('No providers reported yet.', false);
@@ -382,9 +393,13 @@
         const fixtures = document.createElement('span');
         fixtures.textContent = Number.isFinite(provider.matchCount) ? provider.matchCount + ' fixtures' : 'No fixture data';
         const latency = document.createElement('span');
-        latency.textContent = Number.isFinite(provider.durationMs) ? provider.durationMs + ' ms' : 'Not checked';
+        latency.textContent = provider.state === 'cached'
+          ? 'Served from cache'
+          : (Number.isFinite(provider.durationMs) ? provider.durationMs + ' ms' : 'Not checked');
         const checked = document.createElement('span');
-        checked.textContent = formatHealthAge(provider.lastAttemptAt);
+        // A cache hit never attempts an upstream fetch, so the attempt time is not
+        // meaningful there; the last successful fetch is.
+        checked.textContent = formatHealthAge(provider.state === 'cached' ? provider.lastSuccessAt : provider.lastAttemptAt);
         meta.append(fixtures, latency, checked);
         card.append(head, meta);
 
