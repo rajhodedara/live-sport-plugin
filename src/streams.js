@@ -822,7 +822,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
     }
 
     // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (s.url.includes('cdnlivetv.tv') || s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false)) return s;
+    if (s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false && s._source !== 'cdnlive')) return s;
 
     let targetUrl = s.url;
     let referer = '';
