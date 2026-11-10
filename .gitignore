@@ -112,3 +112,8 @@ public/*.json
 
 # Archived bundles and PR evidence dumps
 /docs/*.tgz
+
+# Android/Gradle build output in the CENC harness (never source)
+/tools/cenc-harness/app/build/
+/tools/cenc-harness/.gradle/
+/tools/cenc-harness/build/
