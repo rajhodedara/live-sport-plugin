@@ -10,7 +10,7 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-const playable = url => ({ url, _source: 'watchfooty', title: 'Main feed' });
+const playable = url => ({ url, _source: 'pitsport', title: 'Main feed' });
 
 describe('handleStream hard response deadline', () => {
   const env = {
@@ -26,7 +26,7 @@ describe('handleStream hard response deadline', () => {
     process.env.DONATION_URL = 'disabled';
     pending = [deferred(), deferred()];
     const match = { id: 'deadline', title: 'Team A vs Team B', category: 'football',
-      sources: [{ source: 'watchfooty', id: 'a' }, { source: 'timstreams', id: 'b' }] };
+      sources: [{ source: 'pitsport', id: 'a' }, { source: 'timstreams', id: 'b' }] };
     const services = {
       cacheService: { findMatch: () => match },
       streamResolveCache: { getOrCreate: jest.fn(key => pending[key.endsWith(':a') ? 0 : 1].promise) },

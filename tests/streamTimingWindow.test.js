@@ -15,7 +15,7 @@ test('stream window records unresolved sources at cutoff and passes its handle t
   const handle = {};
   relations.stream.mockReturnValue(handle);
   const cache = { getOrCreate: jest.fn(() => new Promise(() => {})) };
-  const match = { id: 'fixture', title: 'A vs B', category: 'football', sources: [{ source: 'watchfooty', id: 'a' }] };
+  const match = { id: 'fixture', title: 'A vs B', category: 'football', sources: [{ source: 'pitsport', id: 'a' }] };
   const services = { cacheService: { findMatch: () => match }, streamResolveCache: cache,
     streamScorer: { calculateScore: () => 1 } };
   container.resolve.mockImplementation(name => services[name]);

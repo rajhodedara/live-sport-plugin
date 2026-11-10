@@ -11,6 +11,33 @@ function b64Decode(str) {
   return Buffer.from(str, 'base64');
 }
 
+function isNbaOnTvUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    return ['http:', 'https:'].includes(url.protocol) && !url.username && !url.password &&
+      (url.hostname === 'nbaontv.com' || url.hostname.endsWith('.nbaontv.com'));
+  } catch (_) {
+    return false;
+  }
+}
+
+function isBridgeUrl(value, baseUrl) {
+  try {
+    const url = new URL(value, baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
+      return false;
+    }
+    const h = url.hostname.toLowerCase();
+    return isNbaOnTvUrl(value, baseUrl) ||
+      h === 'nhlgamestoday.com' || h.endsWith('.nhlgamestoday.com') ||
+      h === 'guidedesgemmes.com' || h.endsWith('.guidedesgemmes.com') ||
+      h === 'guideanimaux.com' || h.endsWith('.guideanimaux.com') ||
+      h === 'nflontv.com' || h.endsWith('.nflontv.com');
+  } catch (_) {
+    return false;
+  }
+}
+
 /**
  * NflVideoProvider
  *
@@ -101,18 +128,24 @@ class NflVideoProvider extends BaseProvider {
                           lowerUrl.includes('full-match') ||
                           lowerUrl.includes('-vs-') ||
                           lowerUrl.includes('-at-') ||
+                          lowerUrl.includes('_full_game_replay') ||
+                          lowerUrl.includes('_full_show_replay') ||
+                          lowerUrl.includes('_vs_') ||
+                          lowerUrl.includes('_at_') ||
                           /\b(vs\.?|@)\b/i.test(lowerTitle) ||
                           lowerTitle.includes('redzone');
 
-      // Drop team landing pages and non-fixture links
-      if (!isMatchLink || lowerUrl.endsWith('-full-game-replays')) continue;
+      // Drop category index pages, team landing pages and non-fixture links
+      if (!isMatchLink || lowerUrl.endsWith('-full-game-replays') || /\/\d+$/.test(lowerUrl)) continue;
+      // Drop broken placeholder links that end in multiple dashes (e.g. --- or ----)
+      if (/-{2,}$/.test(rawUrl)) continue;
 
       const fullUrl = rawUrl.startsWith('http') ? rawUrl : `${this.baseUrl}${rawUrl.startsWith('/') ? '' : '/'}${rawUrl}`;
       seenUrls.add(rawUrl);
 
       // Extract match date from title (e.g. October 11, 2026 or September 5, 2025)
       let parsedDate = '';
-      const dateMatch = rawTitle.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}/i);
+      const dateMatch = rawTitle.match(/(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}/i);
       if (dateMatch) {
         try {
           const parsed = new Date(dateMatch[0]);
@@ -172,7 +205,10 @@ class NflVideoProvider extends BaseProvider {
     const endpoints = [
       `${this.baseUrl}/`,
       `${this.baseUrl}/2026`,
-      `${this.baseUrl}/cfb/`
+      `${this.baseUrl}/nfl2025`,
+      `${this.baseUrl}/nfl2024`,
+      `${this.baseUrl}/cfb/`,
+      `${this.baseUrl}/super-bowls`
     ];
 
     const allMatches = [];
@@ -212,16 +248,30 @@ class NflVideoProvider extends BaseProvider {
       const html = await this.fetchPage.fire(targetUrl);
       if (!html) return [];
 
-      const bodyMatch = html.match(/<!--\s*<body>\s*-->([\s\S]*?)<!--\s*<\/body>\s*-->/i);
+      const bodyMatch = html.match(/<!--\s*<body>\s*-->([\s\S]*?)<!--\s*<\/body>\s*-->/i) ||
+                        html.match(/<div[^>]+id="video-player"[^>]*>([\s\S]*?)<\/div>/i) ||
+                        html.match(/<div[^>]+class="[^"]*video-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       const content = bodyMatch ? bodyMatch[1] : html;
 
       // Extract watch and server links
       const linkMatches = [...content.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
       const watchLinks = linkMatches.filter(l => {
+        const dest = (l[1] || '').trim();
         const text = l[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
-        const href = l[1];
-        return /watch|part|server|^ok$|^fm$|^dm$/i.test(text) ||
-               /ok\.ru|byse|vidara|dailymotion|dai\.ly|d\.tube|nhlgamestoday|nbaontv|nflontv|guideanimaux/i.test(href);
+        if (!dest) return false;
+
+        // Skip internal navigation and season category links on nfl-video.com
+        if ((dest.startsWith('/') && !dest.startsWith('//')) || (dest.includes('nfl-video.com') && !dest.includes('#'))) {
+          if (!this._isByseUrl(dest) && !dest.includes('ok.ru') && !/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
+            return false;
+          }
+        }
+
+        const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || isBridgeUrl(dest, targetUrl) ||
+          /nhlgamestoday|guidedesgemmes|guideanimaux|nflontv|nbaontv|vidara|dailymotion|dai\.ly|d\.tube/i.test(dest) ||
+          /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+        const isVideoText = /watch|part|server|quarter|half|replay|full game|^ok$|^fm$|^dm$/i.test(text);
+        return isVideoDest || isVideoText;
       });
 
       // Extract direct iframes embedded in page
@@ -241,7 +291,20 @@ class NflVideoProvider extends BaseProvider {
       for (let i = 0; i < watchLinks.length; i++) {
         let dest = watchLinks[i][1];
         const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
-        const partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
+        let partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
+
+        // If partName is generic "Watch", attempt to find preceding server heading in content HTML
+        if (/^watch$/i.test(partName)) {
+          const safeDest = dest.split('?')[0].split('#')[0];
+          const preIdx = content.indexOf(safeDest);
+          if (preIdx > 0) {
+            const snippet = content.slice(Math.max(0, preIdx - 500), preIdx);
+            const headingMatches = [...snippet.matchAll(/(?:<b>|<span[^>]*>|<h\d[^>]*>|<p[^>]*>)([^<]*(?:server|part|half|quarter|condensed|full|1st|2nd|3rd|4th)[^<]*)(?:<\/b>|<\/span>|<\/h\d>|<\/p>)/gi)];
+            if (headingMatches.length > 0) {
+              partName = headingMatches[headingMatches.length - 1][1].trim();
+            }
+          }
+        }
 
         try {
           const parsed = new URL(dest, targetUrl);
@@ -255,15 +318,24 @@ class NflVideoProvider extends BaseProvider {
           // Unwrap bridge page if dest is not a direct video/embed provider
           const isDirectProvider = this._isVidaraUrl(dest) || this._isByseUrl(dest) ||
             this._isDailymotionUrl(dest) || ['ok.ru', 'd.tube'].some(host => matchesHost(playerHostname(dest), host)) ||
-            /\.(m3u8|mp4)$/i.test(new URL(dest).pathname);
-          if (!isDirectProvider && /^https?:\/\//i.test(dest)) {
+            /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+
+          if (!isDirectProvider && (isBridgeUrl(dest, targetUrl) || /^https?:\/\//i.test(dest))) {
+            let isInternal = false;
             try {
-              const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://nfl-video.com/' });
-              const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
-                /\.(m3u8|mp4)$/i.test(url.pathname) || isByseHost(url.hostname) ||
-                ['vidara.so', 'dailymotion.com', 'dai.ly', 'd.tube', 'ok.ru'].some(domain => matchesHost(url.hostname, domain)));
-              if (iframeUrl) dest = iframeUrl;
+              const parsedHost = new URL(dest, targetUrl).hostname.toLowerCase();
+              if (parsedHost === 'nfl-video.com' || parsedHost.endsWith('.nfl-video.com')) isInternal = true;
             } catch (_) {}
+
+            if (!isInternal) {
+              try {
+                const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://nfl-video.com/' });
+                const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
+                  /\.(m3u8|mp4)(?:[?#]|$)/i.test(url.pathname) || isByseHost(url.hostname) ||
+                  ['vidara.so', 'dailymotion.com', 'dai.ly', 'd.tube', 'ok.ru'].some(domain => matchesHost(url.hostname, domain)));
+                if (iframeUrl) dest = iframeUrl;
+              } catch (_) {}
+            }
           }
 
           // 1. Vidara API resolution
