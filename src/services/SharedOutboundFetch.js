@@ -10,6 +10,27 @@ let singleton, nativePool;
 // the process winds down would otherwise spawn children the shutdown never sees.
 let finalClosed = false;
 
+// Every rejected request used to print the full 4-slot diagnostic; under load that
+// is hundreds of lines a minute (a 10 MB pm2 log every ~40 min). Print one per
+// interval and report how many were suppressed in between.
+const capacityIntervalRaw = process.env.NATIVE_CAPACITY_LOG_INTERVAL_MS;
+const CAPACITY_LOG_INTERVAL_MS = capacityIntervalRaw !== undefined && capacityIntervalRaw !== '' &&
+  Number.isFinite(Number(capacityIntervalRaw)) && Number(capacityIntervalRaw) >= 0 ? Number(capacityIntervalRaw) : 30000;
+let capacityLogAt = -Infinity;
+let capacitySuppressed = 0;
+
+function logNativeCapacity(failure, now = Date.now()) {
+  if (now - capacityLogAt < CAPACITY_LOG_INTERVAL_MS) { capacitySuppressed++; return false; }
+  const diagnostic = failure?.capacityDiagnostic || { reason: failure?.code };
+  console.warn('[GuardedOutbound] Native capacity',
+    JSON.stringify(capacitySuppressed ? { ...diagnostic, suppressed: capacitySuppressed } : diagnostic));
+  capacityLogAt = now;
+  capacitySuppressed = 0;
+  return true;
+}
+
+function _resetCapacityLogForTests() { capacityLogAt = -Infinity; capacitySuppressed = 0; }
+
 function abortableDelay(ms, signal) {
   return new Promise((resolve, reject) => {
     signal.throwIfAborted();
@@ -80,7 +101,7 @@ function createSharedOutboundFetch({ nativeFetch, fallbackFetch, delay = abortab
             /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/.test(failure?.code || '') ||
             /capacity|native pool/i.test(String(failure?.message || ''));
           if (isCapacity) {
-            console.warn('[GuardedOutbound] Native capacity', JSON.stringify(failure.capacityDiagnostic || { reason: failure.code }));
+            logNativeCapacity(failure);
             if (proxyUrl) {
               lastError = Object.assign(failure, { transportCode: failure.code, code: 'ERR_OUTBOUND_CAPACITY', isFatal: true, statusCode: 503 });
               if (attempt < attempts) {
@@ -133,4 +154,4 @@ async function closeSharedOutbound({ final = false } = {}) {
   }
 }
 
-module.exports = { createSharedOutboundFetch, fetchSharedOutbound, closeSharedOutbound };
+module.exports = { createSharedOutboundFetch, fetchSharedOutbound, closeSharedOutbound, logNativeCapacity, _resetCapacityLogForTests };
