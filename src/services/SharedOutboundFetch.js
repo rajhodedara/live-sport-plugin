@@ -4,6 +4,11 @@ const { providerRequestHeaders } = require('./ProviderRequestHeaders');
 const { selectGuardedEgress } = require('./GuardedEgressPolicy');
 const DEFAULT_LIMIT = 1024 * 1024;
 let singleton, nativePool;
+// Set only by a final close (process shutdown). A plain close keeps its old meaning
+// (tests and hot paths may close and reuse), but after a final close nothing may
+// create a new native pool: an in-flight retry or a request that arrives while
+// the process winds down would otherwise spawn children the shutdown never sees.
+let finalClosed = false;
 
 function abortableDelay(ms, signal) {
   return new Promise((resolve, reject) => {
@@ -104,6 +109,7 @@ async function fetchSharedOutbound(url, options) {
   if (!singleton) {
     singleton = createSharedOutboundFetch({
       nativeFetch: (target, configuration) => {
+        if (finalClosed) throw Object.assign(new Error('Native pool closed'), { code: 'ERR_NATIVE_POOL_CLOSED' });
         if (!nativePool) {
           nativePool = process.env.GUARDED_NATIVE_ISOLATION === 'true'
             ? require('./IsolatedNativePoolCandidate').createIsolatedNativePoolCandidate()
@@ -117,7 +123,8 @@ async function fetchSharedOutbound(url, options) {
   return singleton(url, options);
 }
 
-async function closeSharedOutbound() {
+async function closeSharedOutbound({ final = false } = {}) {
+  if (final) finalClosed = true;
   const pool = nativePool;
   singleton = undefined;
   if (pool) {

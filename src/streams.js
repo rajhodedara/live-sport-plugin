@@ -86,6 +86,7 @@ const SOURCE_PRIORITY = {
 };
 
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
+const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
 const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
@@ -264,7 +265,8 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     try {
       const provider = container.resolve('damiTvProvider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-      console.info('[DamiTV] Dispatch finished', JSON.stringify({ ms: Date.now() - startedAt, streams: Array.isArray(resStreams) ? resStreams.length : 0 }));
+      // `streams` counts the web-player fallback too, so `playable` is what separates a real stream from an empty extraction.
+      console.info('[DamiTV] Dispatch finished', JSON.stringify({ ms: Date.now() - startedAt, streams: Array.isArray(resStreams) ? resStreams.length : 0, playable: Array.isArray(resStreams) ? resStreams.filter(s => s && s.url).length : 0 }));
     } catch (failure) {
       const kind = ['TimeoutError', 'AbortError', 'TypeError', 'SyntaxError'].includes(failure?.name) ? failure.name : 'Error';
       console.warn('[DamiTV] Dispatch failed', JSON.stringify({ ms: Date.now() - startedAt, kind }));
@@ -953,7 +955,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
-      if (!isMpd && !isMp4 && !bodySample.includes('#EXT') && !bodyTruncated) {
+      if (lacksPlaylistEvidence({ isMpd, isMp4, bodySample, bodyTruncated })) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;

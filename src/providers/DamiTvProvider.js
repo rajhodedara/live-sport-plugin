@@ -30,6 +30,14 @@ const HLS_TOKEN_URL = 'https://damitv.st/papi/hls-token';
 // One token authorises every /c/ channel for ~12h, so a single mint serves a
 // whole sync. Refresh this far ahead of expiry instead of mid-playback.
 const TOKEN_SAFETY_WINDOW_S = 300;
+let disabledLogged = false;
+// Same sanitisation the extraction path uses: a class name and an ERR_* code, never err.message
+// (transport errors can carry hosts, proxy URLs or tokens).
+function describeFailure(err) {
+  const kind = ['SyntaxError', 'TimeoutError', 'AbortError', 'TypeError'].includes(err?.name) ? err.name : 'Error';
+  const code = typeof err?.code === 'string' && /^(ERR_[A-Z0-9_]{1,64}|ETIMEDOUT|ECONNRESET|ABORT_ERR)$/.test(err.code) ? err.code : undefined;
+  return { kind, ...(code ? { code } : {}) };
+}
 
 const UA_CHROME131 = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 const DAMITV_REFERER = 'https://damitv.st/';
@@ -238,9 +246,12 @@ class DamiTvProvider extends BaseProvider {
           this._hlsToken = { tk: data.tk, e: data.e };
           return this._hlsToken;
         }
+        console.warn(`[${this.name}] hls token response carried no token`);
+      } else {
+        console.warn(`[${this.name}] hls token request returned a non-success response`, JSON.stringify({ status: res.status }));
       }
     } catch (err) {
-      console.warn(`[${this.name}] hls token mint failed:`, err.message);
+      console.warn(`[${this.name}] hls token mint failed`, JSON.stringify(describeFailure(err)));
     }
     return this._hlsToken || null;
   }
@@ -474,7 +485,13 @@ class DamiTvProvider extends BaseProvider {
 
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
     const streams = [];
-    if (!this.isEnabled()) return streams;
+    if (!this.isEnabled()) {
+      if (!disabledLogged) {
+        disabledLogged = true;
+        console.info('[DamiTV] Resolve skipped', JSON.stringify({ reason: 'disabled' }));
+      }
+      return streams;
+    }
 
     const embedUrl = src.url || src.embedUrl || sourceId;
     if (typeof embedUrl !== 'string' || !embedUrl.startsWith('http')) {
@@ -487,6 +504,7 @@ class DamiTvProvider extends BaseProvider {
     if (channel) {
       const stream = await this._resolveChannel(channel, matchTitle);
       if (stream) streams.push(stream);
+      else console.info('[DamiTV] Channel resolve skipped', JSON.stringify({ reason: 'no_token' }));
     }
 
     let matchId = null;
@@ -538,6 +556,8 @@ class DamiTvProvider extends BaseProvider {
               }
               streams.push(s);
             }
+          } else {
+            console.info('[DamiTV] Extraction returned no sources', JSON.stringify({ success: false }));
           }
         } else {
           console.warn(`[${this.name}] API extraction returned a non-success response`, JSON.stringify({ status: extractRes.status }));
