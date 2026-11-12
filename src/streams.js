@@ -2,6 +2,7 @@ const container = require('./container');
 const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
 const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutError } = require('./services/retry');
+const { mapWithConcurrency } = require('./services/BoundedMap');
 const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
   inconclusiveStreamsReason } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
@@ -86,6 +87,7 @@ const SOURCE_PRIORITY = {
 };
 
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
+const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
 const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
@@ -264,7 +266,8 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     try {
       const provider = container.resolve('damiTvProvider');
       resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-      console.info('[DamiTV] Dispatch finished', JSON.stringify({ ms: Date.now() - startedAt, streams: Array.isArray(resStreams) ? resStreams.length : 0 }));
+      // `streams` counts the web-player fallback too, so `playable` is what separates a real stream from an empty extraction.
+      console.info('[DamiTV] Dispatch finished', JSON.stringify({ ms: Date.now() - startedAt, streams: Array.isArray(resStreams) ? resStreams.length : 0, playable: Array.isArray(resStreams) ? resStreams.filter(s => s && s.url).length : 0 }));
     } catch (failure) {
       const kind = ['TimeoutError', 'AbortError', 'TypeError', 'SyntaxError'].includes(failure?.name) ? failure.name : 'Error';
       console.warn('[DamiTV] Dispatch failed', JSON.stringify({ ms: Date.now() - startedAt, kind }));
@@ -414,6 +417,9 @@ const { safeFetch: _safeFetch, streamingFetch: _streamingFetch } = require('./se
 const VERIFY_TIMEOUT_MS = Number(process.env.VERIFY_TIMEOUT_MS || 5000);
 const VERIFY_TOTAL_BUDGET_MS = Number(process.env.VERIFY_TOTAL_BUDGET_MS || 9000);
 const VERIFY_ATTEMPTS = Number(process.env.VERIFY_ATTEMPTS || 3);
+// Probes share the 4-slot native pool with manifest/segment traffic, so firing one
+// per source at once (10+ sources on a busy match) makes admissions expire.
+const VERIFY_CONCURRENCY = Math.min(8, Math.max(1, Math.floor(Number(process.env.VERIFY_CONCURRENCY)) || 3));
 
 // Speed probe: one ranged segment fetch per stream, used to derive speedScore.
 // The range must be large enough that transfer time dominates TTFB, otherwise
@@ -793,8 +799,12 @@ async function runVerificationAttempt(targetUrl, headers, deadlineAt, options) {
 }
 
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
+  // No new probe starts after the shared budget is spent; those streams are kept
+  // unverified (same policy as a 403 with no referer) instead of being dropped.
+  const probeStartDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
+  let keptUnverified = 0;
 
-  const checkedStreams = await Promise.all(streams.map(async (s) => {
+  const checkedStreams = await mapWithConcurrency(streams, VERIFY_CONCURRENCY, async (s) => {
     if (!s) return null;
     // Web-player results are represented by externalUrl, not a media URL.
     // They do not need an HLS probe and must survive the verification step.
@@ -866,6 +876,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // sample used to drop a stream that plays perfectly well, and then
       // negative-cache it. Retry the transient answers, within a budget that
       // keeps the whole verification inside handleStream's soft deadline.
+      if (Date.now() >= probeStartDeadlineAt) { keptUnverified++; return s; }
       const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
       try {
         const result = await withRetry(
@@ -953,7 +964,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
-      if (!isMpd && !isMp4 && !bodySample.includes('#EXT') && !bodyTruncated) {
+      if (lacksPlaylistEvidence({ isMpd, isMp4, bodySample, bodyTruncated })) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
@@ -1044,8 +1055,11 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       console.log(`[Filter] Dropped timeout/error stream: ${targetUrl} - ${err.message}`);
       return null;
     }
-  }));
+  });
 
+  if (keptUnverified > 0) {
+    console.log(`[Filter] Verify budget spent before probing ${keptUnverified} stream(s); kept unverified`);
+  }
   return checkedStreams.filter(Boolean);
 }
 

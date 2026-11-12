@@ -177,7 +177,7 @@ async function shutdownOnSignal() {
   console.info('[Shutdown] Cleanup started', JSON.stringify({ resolverOwned: !!ownedResolver }));
   shutdownResolver();
   const [closed, resolverClosed, transportClosed] = await Promise.all([
-    closeNativePool(() => require('./services/SharedOutboundFetch').closeSharedOutbound()),
+    closeNativePool(() => require('./services/SharedOutboundFetch').closeSharedOutbound({ final: true })),
     closeNativePool(() => resolverExit),
     closeNativePool(() => process.env.RESOLVER_TRANSPORT === 'systemd-unix-tls'
       ? require('./services/ResolverTransportRuntime').resolverTransport.close() : undefined)

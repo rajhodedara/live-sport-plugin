@@ -20,9 +20,15 @@ function trackChild(child) {
   child.once('exit', remove); child.once('close', remove);
   if (!exitHookInstalled) { exitHookInstalled = true; process.once('exit', killTrackedChildren); }
 }
+let warnedInvalidSlots = false;
 function configuredSlots(raw = process.env.GUARDED_NATIVE_MAX_SLOTS) {
   const value = Number(raw);
-  return Number.isInteger(value) && value >= 1 && value <= 8 ? value : 4;
+  if (Number.isInteger(value) && value >= 1 && value <= 8) return value;
+  if (raw !== undefined && raw !== '' && !warnedInvalidSlots) {
+    warnedInvalidSlots = true;
+    console.warn('[NativePool] Ignoring invalid GUARDED_NATIVE_MAX_SLOTS; using 4', JSON.stringify({ allowed: '1-8' }));
+  }
+  return 4;
 }
 
 function childScriptPath(base = __dirname, exists = fs.existsSync) {
@@ -37,6 +43,9 @@ function createIsolatedNativePoolCandidate({ maxSlots = configuredSlots(), admis
   if (!Number.isInteger(maxSlots) || maxSlots < 1 || maxSlots > 8) throw new RangeError('Invalid native pool size');
   if (!Number.isFinite(admissionWaitMs) || admissionWaitMs < 0 || admissionWaitMs > 30000 || !Number.isInteger(maxWaiters) || maxWaiters < 1 || maxWaiters > 512) throw new RangeError('Invalid native admission limits');
   const children = new Map(), waiters = [], poolId = randomBytes(4).toString('hex');
+  // Pools are per THREAD (main + each WASM worker), so the live-children ceiling is
+  // instances x pools x limit. One line per pool lets an operator count them.
+  console.info('[NativePool] Isolated pool created', JSON.stringify({ poolId, threadId, limit: maxSlots }));
   let closed = false, closing, nextSlotId = 1, admitted = 0;
   const stopTimingSnapshots = timing.enabled ? require('./TimingSnapshotTimer').startTimingSnapshotTimer(() => timing.report?.(poolId)) : () => {};
   const capacityError = () => {

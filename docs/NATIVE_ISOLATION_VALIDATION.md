@@ -8,6 +8,21 @@ mocked tests as confirmation that the production problem is fixed.
 
 The candidate starts a child per native request and caps tracked children at
 four per pool by default; `GUARDED_NATIVE_MAX_SLOTS` may select 1–8 per pool.
+
+Pools are per thread, not per process: the main thread and every Streamed WASM
+worker thread (`STREAMED_WORKER_POOL_SIZE`, default 2, maximum 4) lazily create
+their own, and PM2 runs `instances: 2`. The ceiling on live children is
+therefore `instances x (1 + wasm workers) x GUARDED_NATIVE_MAX_SLOTS`: 24 at the
+defaults, 48 with 8 slots and 2 workers, 80 with 8 slots and 4 workers. PM2's
+`max_memory_restart` does not count child RSS. Pick the slot count from that
+product, and count `[NativePool] Isolated pool created` log lines (`poolId`,
+`threadId`) to see how many pools really exist.
+
+The SIGTERM path closes the main thread's pool only, and a Worker's
+`process.on('exit')` hook does not run when the process exits, so a child owned
+by a WASM worker thread is covered solely by its IPC `disconnect` and its
+timers. Both need the child's event loop, so a blocked child owned by a worker
+thread can outlive the process.
 On completion or cancellation, it requests child termination;
 capacity is returned only when child exit or close is observed. A child that
 does not exit remains counted. This deliberately avoids exceeding the cap,

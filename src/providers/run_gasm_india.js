@@ -38,7 +38,10 @@ const path = require('path');
 
 // Copied alongside this child script in dist; keeps the numeric exit protocol
 // and the guarded error classifier shared with the parent provider.
-const { wasmFailureExitCode } = require('./PpvStWasmExit');
+const { wasmFailureExitCode, startChildWatchdog } = require('./PpvStWasmExit');
+
+// Self-terminate if the parent dies or this child outlives its 15 s execFile budget.
+startChildWatchdog({ maxLifetimeMs: Number(process.env.GASM_CHILD_MAX_LIFETIME_MS) || 25000 });
 
 class EventTarget {
   constructor() { this.listeners = {}; }

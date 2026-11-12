@@ -26,6 +26,13 @@ const { validateLeafManifestUrl } = require('../services/GuardedEgressPolicy');
 // produce a broken stream.
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
 const BUDGET_MS = 8000;
+// The catalog shares the 4-slot native pool with verification probes. A capacity
+// rejection is local and transient, so retry it briefly instead of letting the
+// whole sync round run without Leaf.
+const CATALOG_CAPACITY_RETRIES = 2;
+const CATALOG_CAPACITY_RETRY_DELAY_MS = 400;
+const CATALOG_DEADLINE_MS = 15000;
+const CATALOG_MIN_RETRY_WINDOW_MS = 2000;
 const MAX_BODY_BYTES = 256 * 1024;
 const MAX_CANDIDATES = 8;
 
@@ -238,13 +245,26 @@ class LeafProvider extends BaseProvider {
     this.lastCatalogOk = false;
     if (!config.configured) return [];
     const url = `${config.apiBase}/catalog/sport/sports_live.json`;
-    const res = await impitClient.safeFetch(url, {
-      headers: {
-        'User-Agent': USER_AGENT, Accept: 'application/json',
-        Origin: config.origin, Referer: `${config.origin}/`
-      },
-      timeoutMs: BUDGET_MS, maxBodyBytes: MAX_BODY_BYTES, attempts: 1
-    });
+    const deadlineAt = Date.now() + CATALOG_DEADLINE_MS;
+    let res;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        res = await impitClient.safeFetch(url, {
+          headers: {
+            'User-Agent': USER_AGENT, Accept: 'application/json',
+            Origin: config.origin, Referer: `${config.origin}/`
+          },
+          timeoutMs: Math.min(BUDGET_MS, deadlineAt - Date.now()), maxBodyBytes: MAX_BODY_BYTES, attempts: 1,
+          diagnosticOwner: 'catalog'
+        });
+        break;
+      } catch (err) {
+        const pause = CATALOG_CAPACITY_RETRY_DELAY_MS * attempt;
+        if (err?.code !== 'ERR_OUTBOUND_CAPACITY' || attempt > CATALOG_CAPACITY_RETRIES ||
+            deadlineAt - Date.now() - pause < CATALOG_MIN_RETRY_WINDOW_MS) throw err;
+        await new Promise(resolve => setTimeout(resolve, pause));
+      }
+    }
 
     if (!res || !res.ok) {
       throw Object.assign(new Error('Leaf catalog request failed'), { code: 'ERR_LEAF_CATALOG_STATUS', upstreamStatus: res?.status || 0 });

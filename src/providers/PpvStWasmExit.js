@@ -35,7 +35,32 @@ function isLocalCapacityFailure(error) {
   return wasmFailureExitCode(error) === LOCAL_CAPACITY_EXIT_CODE;
 }
 
+/**
+ * Orphan guard for the WASM child. The parent spawns it with a 15 s execFile
+ * timeout, but if the parent dies first (restart, crash, OOM kill) nobody sends
+ * that signal and a stuck child lives for days. The child therefore ends itself
+ * when it outlives `maxLifetimeMs` (exit 76, timeout) or when its parent is
+ * gone (exit 77, cancelled). Timers are unref'd so they never keep a finished
+ * child alive. Needs a free event loop: it does not help a child blocked in a
+ * synchronous loop.
+ */
+function startChildWatchdog({
+  maxLifetimeMs = 25000,
+  pollMs = 2000,
+  getParentPid = () => process.ppid,
+  exit = (code) => process.exit(code)
+} = {}) {
+  const initialParent = getParentPid();
+  const lifetime = setTimeout(() => exit(LOCAL_TIMEOUT_EXIT_CODE), maxLifetimeMs);
+  const poll = setInterval(() => {
+    if (getParentPid() !== initialParent) exit(LOCAL_CANCELLED_EXIT_CODE);
+  }, pollMs);
+  lifetime.unref();
+  poll.unref();
+  return () => { clearTimeout(lifetime); clearInterval(poll); };
+}
+
 module.exports = {
   LOCAL_CAPACITY_EXIT_CODE, LOCAL_TIMEOUT_EXIT_CODE, LOCAL_CANCELLED_EXIT_CODE,
-  wasmFailureExitCode, isLocalCapacityFailure
+  wasmFailureExitCode, isLocalCapacityFailure, startChildWatchdog
 };
