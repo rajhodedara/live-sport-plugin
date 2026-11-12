@@ -2,6 +2,7 @@
 
 const { providerRequestHeaders } = require('./ProviderRequestHeaders');
 const { selectGuardedEgress } = require('./GuardedEgressPolicy');
+const { createCapacityWindow } = require('./CapacityDiagnostics');
 const DEFAULT_LIMIT = 1024 * 1024;
 let singleton, nativePool;
 // Set only by a final close (process shutdown). A plain close keeps its old meaning
@@ -18,18 +19,23 @@ const CAPACITY_LOG_INTERVAL_MS = capacityIntervalRaw !== undefined && capacityIn
   Number.isFinite(Number(capacityIntervalRaw)) && Number(capacityIntervalRaw) >= 0 ? Number(capacityIntervalRaw) : 30000;
 let capacityLogAt = -Infinity;
 let capacitySuppressed = 0;
+const capacityWindow = createCapacityWindow();
 
 function logNativeCapacity(failure, now = Date.now()) {
+  // Every rejection is counted (printed or not) so the next printed line can say
+  // who asked and for which host over the whole interval, not just for this one.
+  capacityWindow.record(failure);
   if (now - capacityLogAt < CAPACITY_LOG_INTERVAL_MS) { capacitySuppressed++; return false; }
   const diagnostic = failure?.capacityDiagnostic || { reason: failure?.code };
+  const window = capacityWindow.snapshot();
   console.warn('[GuardedOutbound] Native capacity',
-    JSON.stringify(capacitySuppressed ? { ...diagnostic, suppressed: capacitySuppressed } : diagnostic));
+    JSON.stringify(capacitySuppressed ? { ...diagnostic, suppressed: capacitySuppressed, window } : { ...diagnostic, window }));
   capacityLogAt = now;
   capacitySuppressed = 0;
   return true;
 }
 
-function _resetCapacityLogForTests() { capacityLogAt = -Infinity; capacitySuppressed = 0; }
+function _resetCapacityLogForTests() { capacityLogAt = -Infinity; capacitySuppressed = 0; capacityWindow.reset(); }
 
 function abortableDelay(ms, signal) {
   return new Promise((resolve, reject) => {

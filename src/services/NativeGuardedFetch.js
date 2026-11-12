@@ -10,11 +10,17 @@ const { OutboundBlockedError, assertOutboundUrl } = require('./GuardedOutbound')
 const { filterRedirectHeaders, shouldDropRedirectBody } = require('./RedirectHeaderPolicy');
 const { selectGuardedEgress, isDamitvMediaTarget } = require('./GuardedEgressPolicy');
 const { createGuardedCurlModule } = require('./GuardedCurlClient');
+const { attachDiagnosticHost } = require('./CapacityDiagnostics');
 const guardedCurlModule = createGuardedCurlModule();
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const DEFAULT_BODY_LIMIT = 1024 * 1024;
 const HARD_BODY_LIMIT = 8 * 1024 * 1024;
 const error = (code, message) => Object.assign(new Error(message), { code });
+
+
+// Labels are diagnostic only: they name who held or wanted a slot in the capacity
+// log. They never reserve capacity or change admission.
+const DIAGNOSTIC_OWNERS = new Set(['catalog', 'manifest', 'wasm', 'verify', 'provider']);
 
 async function withSignal(operation, signal) {
   let abort;
@@ -196,8 +202,14 @@ function createNativeGuardedFetch({ maxSlots = 4, maxWaiters = 128, admissionWai
           // Reject before native module/client allocation. The slot and its
           // connector still validate independently at lease and dial time.
           await withSignal(assertOutboundUrl(url.href, { resolve: slotOptions.resolve }), signal);
-          const owner = ['catalog', 'manifest', 'wasm'].includes(options.diagnosticOwner) ? options.diagnosticOwner : 'other';
-          const record = await acquire(key, configuration, signal, owner, performance.now() + admissionWaitMs);
+          const owner = DIAGNOSTIC_OWNERS.has(options.diagnosticOwner) ? options.diagnosticOwner : 'other';
+          let record;
+          try {
+            record = await acquire(key, configuration, signal, owner, performance.now() + admissionWaitMs);
+          } catch (failure) {
+            attachDiagnosticHost(failure, url.hostname);
+            throw failure;
+          }
           let received;
           try {
             signal.throwIfAborted();

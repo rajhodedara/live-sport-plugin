@@ -12,7 +12,7 @@ const inconclusive = reason => ({ status: 'inconclusive', reason });
 function defaultFetch(url, options) {
   // Retain the existing guarded native transport, Leaf egress and fingerprint.
   // Loading this module does not load a native client or start a worker.
-  return require('./ProviderOutbound').safeFetch(url, options);
+  return require('./ProviderOutbound').safeFetch(url, { diagnosticOwner: 'verify', ...options });
 }
 
 function fatalFailure(error) {

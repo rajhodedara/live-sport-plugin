@@ -784,7 +784,7 @@ async function runVerificationAttempt(targetUrl, headers, deadlineAt, options) {
       signal.throwIfAborted();
       const response = await _safeFetch(targetUrl, {
         method: 'GET', headers, signal, timeoutMs, attempts: 1,
-        maxBodyBytes: VERIFY_BODY_MAX_BYTES
+        maxBodyBytes: VERIFY_BODY_MAX_BYTES, diagnosticOwner: 'verify'
       });
       signal.throwIfAborted();
       const body = await response.text();

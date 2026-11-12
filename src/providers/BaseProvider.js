@@ -120,7 +120,7 @@ class BaseProvider {
       signal: options.signal,
       timeoutMs: options.timeoutMs || 15000,
       attempts: options.attempts,
-      diagnosticOwner: options.diagnosticOwner,
+      diagnosticOwner: options.diagnosticOwner || 'provider',
       maxBodyBytes: options.maxBodyBytes,
     };
 
