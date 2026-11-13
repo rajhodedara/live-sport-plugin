@@ -14,6 +14,7 @@ const { createHash } = require('node:crypto');
 const { checkDaddyLiveMedia } = require('../services/DaddyLiveMediaCheck');
 const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
+const { extractPlayerPhpRefs } = require('./DaddyLivePlayerRef');
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36';
 const MEDIA_CHECK_BUDGET_MS = 1200;
 
@@ -507,13 +508,14 @@ class DaddyLiveProvider extends BaseProvider {
     const channelId = (idFromCall && idFromCall[1]) || (idFromAttr && idFromAttr[1]) || idFromQuery || null;
 
     let phpUrl = null;
-    if (html.includes('player.php')) {
-      const concrete = html.match(/([^"'\s]*player\.php\?[^"'\s]*[?&]id=\d+[^"'\s]*)/i);
-      const endpointRef = html.match(/([^"']*player\.php)/i);
-      if (concrete && concrete[1]) {
-        try { phpUrl = new URL(concrete[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
-      } else if (channelId && endpointRef && endpointRef[1]) {
-        try { phpUrl = new URL(endpointRef[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+    {
+      // Bounded extraction (see DaddyLivePlayerRef): includes() alone still left a
+      // quadratic scan for pages that mention player.php after a long quote-free run.
+      const { concrete, endpointRef } = extractPlayerPhpRefs(html);
+      if (concrete) {
+        try { phpUrl = new URL(concrete, pageUrl).toString(); } catch (_) { phpUrl = null; }
+      } else if (channelId && endpointRef) {
+        try { phpUrl = new URL(endpointRef, pageUrl).toString(); } catch (_) { phpUrl = null; }
       }
     }
 
