@@ -15,6 +15,7 @@ const { OVERLAY_SOURCE: LEAF_OVERLAY_SOURCE } = require('./LiveOverlayService');
 const ChannelIdentityService = require('./ChannelIdentityService');
 const MatchEntity = require('../domain/MatchEntity');
 const { eventSquadIdentity, canonicalizeAge } = require('./EventSquadIdentity');
+const { findDroppedLiveFixtures, formatDropLine } = require('./LiveDropReport');
 
 /**
  * Parses a provider-supplied match date into epoch milliseconds.
@@ -2052,6 +2053,19 @@ class MatchAggregator {
       }
     } catch (carryErr) {
       console.error('[MatchAggregator] Provider carry-forward failed:', carryErr.message);
+    }
+
+    // Observability only: say which previously-live fixtures vanished this sync.
+    try {
+      if (process.env.LIVE_DROP_LOG !== '0') {
+        const prevRows = (this.cacheService && typeof this.cacheService.getMatchesReadOnly === 'function')
+          ? (this.cacheService.getMatchesReadOnly() || []) : [];
+        const report = findDroppedLiveFixtures(prevRows, activeMatches, { now: Date.now(), parseDate: _parseEventDate });
+        for (const row of report.rows) console.log(formatDropLine(row));
+        if (report.total > report.rows.length) console.log(`[LiveDrop] ...and ${report.total - report.rows.length} more (total=${report.total})`);
+      }
+    } catch (dropErr) {
+      console.warn('[MatchAggregator] live-drop report failed:', dropErr.message);
     }
 
     if (anyProviderSucceeded) {
