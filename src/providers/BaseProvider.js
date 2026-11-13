@@ -45,6 +45,13 @@ class BaseProvider {
     if (typeof cat === 'object' && !Array.isArray(cat)) {
       cat = cat.name || cat.title || 'other';
     }
+    // Whole-word view of the same text. Short cricket codes (t20, odi, ipl ...)
+    // must not be matched as substrings of the punctuation-stripped string:
+    // "Premier Padel. Dubai (T2026)" strips to "...dubait2026..." and used to
+    // land in cricket. DaddyLive feeds a whole blob (category + league + title
+    // + channel names) through here, so the stripped form is long and noisy.
+    const words = String(cat).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+    const hasCricketCode = words.some((w) => /^(?:t20i?s?|odis?)$/.test(w) || /^(?:ipl|bbl|psl|cpl)(?:\d{2,4})?$/.test(w));
     cat = String(cat).toLowerCase().replace(/[^a-z0-9]/g, '');
     if (cat.includes('ncaa') || cat.includes('college')) return 'college';
     if (cat.includes('americanfootball') || cat.includes('nfl') || cat.includes('afl') || cat.includes('gridiron') || cat.includes('aussierules')) return 'american_football';
@@ -59,7 +66,7 @@ class BaseProvider {
     if (cat.includes('basketball') || cat.includes('nba') || cat.includes('wnba') || cat.includes('euroleague') || cat.includes('eurocup') || cat.includes('fiba')) return 'basketball';
     if (cat.includes('pga') || cat.includes('golf') || cat.includes('livgolf') || cat.includes('rydercup')) return 'golf';
     if (cat.includes('rugby') || cat.includes('sixnations') || cat.includes('superleague') || cat.includes('nrl')) return 'rugby';
-    if (cat.includes('cricket') || cat.includes('ipl') || cat.includes('t20') || cat.includes('odi') || cat.includes('bbl') || cat.includes('psl') || cat.includes('cpl')) return 'cricket';
+    if (cat.includes('cricket') || hasCricketCode) return 'cricket';
     if (cat.includes('tennis') || cat.includes('atp') || cat.includes('wta') || cat.includes('wimbledon') || cat.includes('rolandgarros') || cat.includes('usopen') || cat.includes('australianopen') || cat.includes('daviscup') || cat.includes('masters1000')) return 'tennis';
     if (cat.includes('hockey') || cat.includes('nhl') || cat.includes('khl')) return 'hockey';
     if (cat.includes('baseball') || cat.includes('mlb') || cat.includes('npb') || cat.includes('kbo')) return 'baseball';
