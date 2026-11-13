@@ -506,13 +506,15 @@ class DaddyLiveProvider extends BaseProvider {
     try { idFromQuery = new URL(pageUrl).searchParams.get('id'); } catch (_) {}
     const channelId = (idFromCall && idFromCall[1]) || (idFromAttr && idFromAttr[1]) || idFromQuery || null;
 
-    const endpointRef = html.match(/([^"']*player\.php)/i);
     let phpUrl = null;
-    const concrete = html.match(/([^"'\s]*player\.php\?[^"'\s]*[?&]id=\d+[^"'\s]*)/i);
-    if (concrete && concrete[1]) {
-      try { phpUrl = new URL(concrete[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
-    } else if (channelId && endpointRef && endpointRef[1]) {
-      try { phpUrl = new URL(endpointRef[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+    if (html.includes('player.php')) {
+      const concrete = html.match(/([^"'\s]*player\.php\?[^"'\s]*[?&]id=\d+[^"'\s]*)/i);
+      const endpointRef = html.match(/([^"']*player\.php)/i);
+      if (concrete && concrete[1]) {
+        try { phpUrl = new URL(concrete[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+      } else if (channelId && endpointRef && endpointRef[1]) {
+        try { phpUrl = new URL(endpointRef[1], pageUrl).toString(); } catch (_) { phpUrl = null; }
+      }
     }
 
     if (phpUrl) {
