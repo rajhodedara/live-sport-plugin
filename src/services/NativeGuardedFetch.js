@@ -20,7 +20,7 @@ const error = (code, message) => Object.assign(new Error(message), { code });
 
 // Labels are diagnostic only: they name who held or wanted a slot in the capacity
 // log. They never reserve capacity or change admission.
-const DIAGNOSTIC_OWNERS = new Set(['catalog', 'manifest', 'wasm', 'verify', 'provider']);
+const DIAGNOSTIC_OWNERS = new Set(['catalog', 'manifest', 'wasm', 'verify', 'provider', 'logo']);
 
 async function withSignal(operation, signal) {
   let abort;

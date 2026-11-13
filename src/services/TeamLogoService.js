@@ -15,6 +15,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { safeFetch } = require('./ProviderOutbound');
+const { createLookupGate, isCapacityError } = require('./OutboundLookupGate');
 
 // The committed SEED of curated crests. Read-only at runtime; it is the base
 // every instance starts from.
@@ -67,7 +68,19 @@ function resolveCacheFile() {
 
 const CACHE_FILE = resolveCacheFile();
 const MAX_CACHE_SIZE = 5000;
-const NEGATIVE_TTL_MS = 5 * 60 * 1000; // 5 min — short enough to self-heal after transient failures
+// TTL for a GENUINE miss: TheSportsDB answered 200 and has no such team. Transient
+// failures (pool refusal, 429, 5xx, timeout) are never cached as misses; they get a
+// per-key backoff and a process-wide breaker instead (see OutboundLookupGate), so
+// this TTL no longer needs to be short to "self-heal". It was lowered from 24 h to
+// 5 min (a2815e6) back when failures could be cached; with failures handled
+// separately, 5 min only meant re-querying every unknown team on every sync.
+const envMs = (name, fallback, min) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= min ? value : fallback;
+};
+const NEGATIVE_TTL_MS = envMs('LOGO_NEGATIVE_TTL_MS', 6 * 60 * 60 * 1000, 60 * 1000);
+const LOOKUP_CONCURRENCY = Math.min(4, Math.max(1, Math.floor(Number(process.env.LOGO_LOOKUP_CONCURRENCY)) || 2));
+const LOOKUP_MAX_QUEUE = Math.min(2000, Math.max(0, Math.floor(Number(process.env.LOGO_LOOKUP_MAX_QUEUE)) || 200));
 
 // ─── 1. Curated League & Competition Badges ─────────────────────────────────────
 const LEAGUE_EMBLEMS = {
@@ -566,6 +579,8 @@ class TeamLogoService {
   constructor() {
     this.cache = new Map(); // key -> { url, expiresAt }
     this.inFlight = new Map(); // key -> Promise<string|null>
+    // Bounds network lookups: concurrency cap, per-key backoff, shared breaker.
+    this._lookupGate = createLookupGate({ concurrency: LOOKUP_CONCURRENCY, maxQueue: LOOKUP_MAX_QUEUE });
     // Optional callback fired (debounced) whenever a NEW team badge is found,
     // so generation-keyed caches (catalog page memo) can rebuild pages that
     // were built before this crest was available.
@@ -837,8 +852,17 @@ class TeamLogoService {
       return await this.inFlight.get(key);
     }
 
+    // A recent failure for this key, or an overloaded upstream/pool, means "try
+    // later": no network call, and nothing is cached as a miss.
+    if (this._lookupGate.blockedReason(key)) return null;
+
     const fetchPromise = (async () => {
+      let release = null;
       try {
+        release = await this._lookupGate.acquire();
+        if (!release) return null;                     // wait queue full: drop, a later request retries
+        // The breaker may have opened while this lookup was waiting for a slot.
+        if (this._lookupGate.blockedReason(key)) return null;
         const queryName = TEAM_ALIASES[rawLower] || teamName;
         const cleanQuery = this._cleanName(queryName) || queryName;
 
@@ -849,7 +873,8 @@ class TeamLogoService {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
             'Accept': 'application/json'
           },
-          signal: AbortSignal.timeout(6000)
+          signal: AbortSignal.timeout(6000),
+          diagnosticOwner: 'logo'
         });
 
         if (res && res.ok) {
@@ -857,6 +882,9 @@ class TeamLogoService {
           try {
             data = typeof res.json === 'function' ? await res.json() : JSON.parse(res.text);
           } catch (_) { data = null; }
+          // A 200 we can read is proof the upstream and the pool are healthy.
+          if (data) this._lookupGate.recordSuccess(key);
+          else this._lookupGate.recordFailure(key);   // unreadable body: retry later, not a miss
 
           if (data && Array.isArray(data.teams) && data.teams.length > 0) {
             const queryLower = cleanQuery.toLowerCase();
@@ -887,11 +915,19 @@ class TeamLogoService {
           return null;
         }
 
-        // On rate-limits (429) or server errors, do not write a negative cache entry
+        // On rate-limits (429) or server errors, do not write a negative cache entry;
+        // back this key off, and pause every lookup when the upstream is overloaded.
+        const status = res && Number(res.status);
+        // 401/403 means we are blocked, which is as global as an overload.
+        this._lookupGate.recordFailure(key, { trip: status === 429 || status === 401 || status === 403 || status >= 500 });
         return null;
-      } catch (_) {
+      } catch (error) {
+        // Pool refusal or timeout: the signal that we are the ones adding pressure.
+        const timedOut = error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+        this._lookupGate.recordFailure(key, { trip: isCapacityError(error) || timedOut });
         return null;
       } finally {
+        if (release) release();
         this.inFlight.delete(key);
       }
     })();
