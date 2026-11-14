@@ -13,6 +13,21 @@ const { BREAKER_TIMEOUT_MS } = require('../services/CircuitBreakerService');
 const { createHash } = require('node:crypto');
 const { checkDaddyLiveMedia } = require('../services/DaddyLiveMediaCheck');
 const FolderProbeBreaker = require('../services/FolderProbeBreaker');
+
+/**
+ * Verified DaddyLive channel id -> HDM1 (wideiptv.top) slug map.
+ *
+ * For these channels the folder page is not needed to learn the slug: the
+ * player page `wideiptv.top/player/<slug>` (~10 KB) carries the stream URL, and
+ * the folder page costs ~685 KB per uncached resolution. Every entry was
+ * validated offline (strict digit and country rules, playable MPEG-TS). Ids
+ * whose slug is ambiguous (274, 362) are intentionally absent. A mapped
+ * channel that fails on this route still falls back to the folder probes.
+ * DADDYLIVE_HDM1_FASTPATH=0 disables it.
+ */
+let HDM1_SLUGS = {};
+try { HDM1_SLUGS = require('../data/hdm1_slugs.json'); } catch (_) { HDM1_SLUGS = {}; }
+const HDM1_SLUG_RE = /^[A-Za-z0-9]{1,64}$/;
 const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
 const { extractPlayerPhpRefs } = require('./DaddyLivePlayerRef');
@@ -295,6 +310,7 @@ class DaddyLiveProvider extends BaseProvider {
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
     // Stops re-downloading the ~650 KB folder page of a folder that has missed
     // for every recent channel. DADDYLIVE_FOLDER_BREAKER=0 disables it.
+    this.hdm1Slugs = process.env.DADDYLIVE_HDM1_FASTPATH === '0' ? {} : HDM1_SLUGS;
     this.folderBreaker = process.env.DADDYLIVE_FOLDER_BREAKER === '0'
       ? null
       : new FolderProbeBreaker({
@@ -1030,9 +1046,14 @@ class DaddyLiveProvider extends BaseProvider {
     return matches;
   }
 
+  _hdm1SlugFor(sourceId) {
+    const slug = this.hdm1Slugs && this.hdm1Slugs[String(sourceId)];
+    return typeof slug === 'string' && HDM1_SLUG_RE.test(slug) ? slug : null;
+  }
+
   _recordFolderVerdict(key, folder, verdict) {
     const b = this.folderBreaker;
-    if (!b) return;
+    if (!b || !key) return;
     if (verdict === 'hit') {
       if (b.recordHit(key)) console.warn(`[${this.name}] Folder probe resumed`, JSON.stringify({ folder }));
     } else if (verdict === 'miss') {
@@ -1080,32 +1101,51 @@ class DaddyLiveProvider extends BaseProvider {
     // result stops the scan and keeps the web fallback briefly retryable.
     let fallbackStream = null;
 
+    // Verified-slug route first (one small page instead of a ~685 KB folder
+    // page); the folders remain the fallback for anything it cannot resolve.
+    const directSlug = this._hdm1SlugFor(sId);
+    const probes = [];
+    if (directSlug) probes.push({ direct: directSlug });
+    for (const f of this.folders) probes.push({ folder: f });
+    let directTried = false;
+
     // Probe folders across mirror domains
     for (const base of this.baseDomains) {
       if (foundDirect || fallbackStream || retryReason) break;
 
-      for (const folder of this.folders) {
+      for (const probe of probes) {
+        const isDirect = Boolean(probe.direct);
+        if (isDirect && directTried) continue;
+        const folder = probe.folder;
         // Stop at the first manifest rather than hunting the rest of the matrix
         // for a registry-known terminal host (see the bound explained above).
         if (foundDirect || fallbackStream || retryReason) break;
 
-        const playerUrl = `${base}/${folder}/stream-${sourceId}.php`;
-        const breakerKey = `${base}|${folder}`;
-        if (this.folderBreaker && this.folderBreaker.shouldSkip(breakerKey)) continue;
+        const playerUrl = isDirect
+          ? `https://wideiptv.top/daddy.php?stream=${probe.direct}`
+          : `${base}/${folder}/stream-${sourceId}.php`;
+        const breakerKey = isDirect ? null : `${base}|${folder}`;
+        if (breakerKey && this.folderBreaker && this.folderBreaker.shouldSkip(breakerKey)) continue;
         let folderVerdict = null; // 'hit' | 'miss' | null (no verdict: error, abort, HTTP failure)
         try {
           throwIfStopped(control);
-          const res = await discoveryRequest(this, playerUrl, {
-            headers: {
-              'User-Agent': UA,
-              'Referer': `${base}/`,
-              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-            },
-          }, control);
+          let html;
+          if (isDirect) {
+            directTried = true;
+            html = `<iframe src="https://wideiptv.top/player/${probe.direct}"></iframe>`;
+          } else {
+            const res = await discoveryRequest(this, playerUrl, {
+              headers: {
+                'User-Agent': UA,
+                'Referer': `${base}/`,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+              },
+            }, control);
 
-          if (!res.ok) continue;
+            if (!res.ok) continue;
 
-          const html = await discoveryText(res, control);
+            html = await discoveryText(res, control);
+          }
           throwIfStopped(control);
           const allIframeMatches = [...html.matchAll(/<iframe[^>]+src=["']?([^"'\s>]+)["']?/gi)].map((m) => m[1]);
           if (!allIframeMatches.length) { folderVerdict = 'miss'; continue; }
