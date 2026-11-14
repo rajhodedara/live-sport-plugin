@@ -85,15 +85,23 @@ class SkTechMatchResolver {
    * Helper to normalize category names into canonical Nuvio sport categories
    */
   normalizeCategory(cat, title = '') {
-    const combined = `${cat || ''} ${title || ''}`.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const rawText = `${cat || ''} ${title || ''}`.toLowerCase();
+    const combined = rawText.replace(/[^a-z0-9]/g, '');
+    // Whole words only for the short cricket codes: stripped substrings matched
+    // "T2026" (t20) and "Championship" (champions) and sent padel/golf to cricket.
+    const rawWords = rawText.split(/[^a-z0-9]+/).filter(Boolean);
+    const cricketWord = rawWords.some((w) => /^(?:t20i?s?|odis?|namibia|uganda)$/.test(w) || /^ipl(?:\d{2,4})?$/.test(w))
+      || /\bchampions\s+trophy\b/.test(rawText); // the cricket one; "Champions League" is not cricket
     if (combined.includes('soccer') || combined.includes('football') || combined.includes('laliga') || combined.includes('seriea') || combined.includes('bundesliga') || combined.includes('premierleague') || combined.includes('uefa')) return 'football';
-    if (combined.includes('cricket') || combined.includes('ipl') || combined.includes('t20') || combined.includes('odi') || combined.includes('namibia') || combined.includes('uganda') || combined.includes('champions')) return 'cricket';
+    if (combined.includes('cricket') || cricketWord) return 'cricket';
     if (combined.includes('basketball') || combined.includes('nba')) return 'basketball';
     if (combined.includes('boxing') || combined.includes('wwe') || combined.includes('aew') || combined.includes('ufc') || combined.includes('fight') || combined.includes('mma') || combined.includes('tna')) return 'mma';
     if (combined.includes('motogp') || combined.includes('formula1') || combined.includes('f1') || combined.includes('racing') || combined.includes('rally') || combined.includes('cycling')) return 'motorsport';
     if (combined.includes('tennis') || combined.includes('atp') || combined.includes('wta')) return 'tennis';
     if (combined.includes('baseball') || combined.includes('mlb')) return 'baseball';
     if (combined.includes('hockey') || combined.includes('nhl')) return 'hockey';
+    // After the specific sports above, so "Champions Hockey League" stays hockey.
+    if (/\bchampions\s+league\b/.test(rawText)) return 'football';
     return 'other';
   }
 

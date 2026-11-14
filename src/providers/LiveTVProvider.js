@@ -87,7 +87,10 @@ function normalizeCategory(raw) {
   // Ice-hockey families that did not match the explicit checks above. Word
   // boundaries keep short codes (DEL, SHL, NBL) from matching inside longer
   // football league names such as Estonia Meistriliiga.
-  if (/\b(?:khl|vhl|mhl|whl|ohl|qmjhl|ahl|nhl|del|shl|ebel)\b/i.test(c) || c.includes('ice hockey') || c.includes('hockey') || /\bliiga\b/i.test(c) || c.includes('extraleague')) return 'hockey';
+  // 'del' is the German DEL, but it is also Spanish/Italian "del" (Copa del Rey),
+  // so it only counts when the text is just "del" or names Germany.
+  const isGermanDel = /\bdel\b/i.test(c) && (c.trim() === 'del' || /german|deutsch/i.test(c));
+  if (isGermanDel || /\b(?:khl|vhl|mhl|whl|ohl|qmjhl|ahl|nhl|shl|ebel)\b/i.test(c) || c.includes('ice hockey') || c.includes('hockey') || /\bliiga\b/i.test(c) || c.includes('extraleague')) return 'hockey';
   if (/\b(?:wnbl|nbl|enbl|lnb|lkl|tbl|acb|kbl|kbsl|bsl|pba)\b/i.test(c) || c.includes('ldb')) return 'basketball';
   // Football/soccer is the dominant archive sport; match on competition naming
   // patterns before falling back, so leagues don't land in "Other Sports".
@@ -777,3 +780,4 @@ class LiveTVProvider {
 
 LiveTVProvider.parseArchive = parseArchive;
 module.exports = LiveTVProvider;
+module.exports.normalizeCategory = normalizeCategory;
