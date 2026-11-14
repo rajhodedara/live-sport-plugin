@@ -12,6 +12,7 @@ const os = require('os');
 const { BREAKER_TIMEOUT_MS } = require('../services/CircuitBreakerService');
 const { createHash } = require('node:crypto');
 const { checkDaddyLiveMedia } = require('../services/DaddyLiveMediaCheck');
+const FolderProbeBreaker = require('../services/FolderProbeBreaker');
 const { inconclusiveErrorReason, markInconclusiveStreams } = require('../services/StreamResolutionOutcome');
 
 const { extractPlayerPhpRefs } = require('./DaddyLivePlayerRef');
@@ -292,6 +293,15 @@ class DaddyLiveProvider extends BaseProvider {
     // Its other target (ksohls.ru) is dead and is skipped per host below.
     this.folders = ['player', 'cast', 'plus', 'casting'];
     this._decoded = new Map(); // sourceId -> { streams, expiresAt }
+    // Stops re-downloading the ~650 KB folder page of a folder that has missed
+    // for every recent channel. DADDYLIVE_FOLDER_BREAKER=0 disables it.
+    this.folderBreaker = process.env.DADDYLIVE_FOLDER_BREAKER === '0'
+      ? null
+      : new FolderProbeBreaker({
+        failureThreshold: Number(process.env.DADDYLIVE_FOLDER_MISS_THRESHOLD) || 15,
+        openMs: Number(process.env.DADDYLIVE_FOLDER_OPEN_MS) || 180000,
+        quietMs: Number(process.env.DADDYLIVE_FOLDER_QUIET_MS) || 900000
+      });
 
     // Self-healing domain knowledge. The container injects `iframeDomainRegistry`
     // by proxy name; loading lazily otherwise keeps unit tests that construct the
@@ -1020,6 +1030,20 @@ class DaddyLiveProvider extends BaseProvider {
     return matches;
   }
 
+  _recordFolderVerdict(key, folder, verdict) {
+    const b = this.folderBreaker;
+    if (!b) return;
+    if (verdict === 'hit') {
+      if (b.recordHit(key)) console.warn(`[${this.name}] Folder probe resumed`, JSON.stringify({ folder }));
+    } else if (verdict === 'miss') {
+      if (b.recordMiss(key)) {
+        console.warn(`[${this.name}] Folder probe paused after repeated misses`, JSON.stringify({ folder, pauseMs: b.openMs }));
+      }
+    } else {
+      b.recordInconclusive(key);
+    }
+  }
+
   async resolveStream(sourceId, matchCategory, matchTitle, src = {}, opts = {}) {
     const control = { signal: opts?.signal };
     try {
@@ -1066,6 +1090,9 @@ class DaddyLiveProvider extends BaseProvider {
         if (foundDirect || fallbackStream || retryReason) break;
 
         const playerUrl = `${base}/${folder}/stream-${sourceId}.php`;
+        const breakerKey = `${base}|${folder}`;
+        if (this.folderBreaker && this.folderBreaker.shouldSkip(breakerKey)) continue;
+        let folderVerdict = null; // 'hit' | 'miss' | null (no verdict: error, abort, HTTP failure)
         try {
           throwIfStopped(control);
           const res = await discoveryRequest(this, playerUrl, {
@@ -1081,7 +1108,7 @@ class DaddyLiveProvider extends BaseProvider {
           const html = await discoveryText(res, control);
           throwIfStopped(control);
           const allIframeMatches = [...html.matchAll(/<iframe[^>]+src=["']?([^"'\s>]+)["']?/gi)].map((m) => m[1]);
-          if (!allIframeMatches.length) continue;
+          if (!allIframeMatches.length) { folderVerdict = 'miss'; continue; }
 
           let candidateUrls = allIframeMatches.map((raw) => {
             if (raw.startsWith('//')) return 'https:' + raw;
@@ -1197,12 +1224,15 @@ class DaddyLiveProvider extends BaseProvider {
               continue;
             }
           }
+          folderVerdict = (foundDirect || fallbackStream) ? 'hit' : (retryReason ? null : 'miss');
         } catch (error) {
           control.signal?.throwIfAborted();
           if (hardResolutionFailure(error)) throw error;
           const reason = inconclusiveErrorReason(error);
           if (reason) { retryReason = reason; break; }
           // Continue trying next folder/domain
+        } finally {
+          this._recordFolderVerdict(breakerKey, folder, folderVerdict);
         }
       }
     }
