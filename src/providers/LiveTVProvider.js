@@ -264,6 +264,48 @@ function ymdDash(ymd) {
   return ymd.slice(0, 4) + '-' + ymd.slice(4, 6) + '-' + ymd.slice(6, 8);
 }
 
+// The archive page groups competitions under a sport title (<span class="whitetitle">).
+// The competition name alone cannot say which sport it is: "Champions League" exists
+// in football, ice hockey, basketball, handball, volleyball and table tennis, and
+// normalizeCategory() sends any unknown "...league" to football. When the page tells
+// us the sport, believe it. Unknown titles return null so the old guess still applies.
+const SPORT_TITLE_CATEGORY = Object.freeze({
+  'football': 'football',
+  'ice hockey': 'hockey',
+  'basketball': 'basketball',
+  'basketball 3x3': 'basketball',
+  'tennis': 'tennis',
+  'racing': 'motorsport',
+  'cricket': 'cricket',
+  'baseball': 'baseball',
+  'american football': 'american_football',
+  'rugby union': 'rugby',
+  'rugby sevens': 'rugby',
+  'golf': 'golf',
+  'darts': 'darts',
+  'boxing': 'mma',
+  'mma': 'mma',
+  'combat sport': 'mma',
+  // Sports with no category of their own here: say so instead of guessing football.
+  'table tennis': 'other',
+  'volleyball': 'other',
+  'beach volleyball': 'other',
+  'futsal': 'other',
+  'handball': 'other',
+  'winter sport': 'other',
+  'badminton': 'other',
+  'water sports': 'other',
+  'water polo': 'other',
+  'fencing': 'other',
+  'dancesport': 'other',
+  'other': 'other',
+});
+
+function categoryFromSportTitle(title) {
+  const key = String(title || '').trim().toLowerCase();
+  return Object.hasOwn(SPORT_TITLE_CATEGORY, key) ? SPORT_TITLE_CATEGORY[key] : null;
+}
+
 function parseArchive(html, ymd) {
   const headerRe = /<a class="main" href="\/enx\/videotourney\/(\d+)\/"><b>([\s\S]*?)<\/b><\/a>/g;
   const headers = [];
@@ -274,6 +316,18 @@ function parseArchive(html, ymd) {
   const compFor = (idx) => {
     let cur = null;
     for (const h of headers) { if (h.index < idx) cur = h; else break; }
+    return cur ? cur.name : '';
+  };
+
+  const sportTitles = [];
+  const sportRe = /<span class="whitetitle">([^<]{2,40})<\/span>/g;
+  let sm;
+  while ((sm = sportRe.exec(html)) !== null) sportTitles.push({ name: clean(sm[1]), index: sm.index });
+  // The page opens with a menu listing every sport, followed by the real sections, so
+  // the last title before a block is always its own section.
+  const sportFor = (idx) => {
+    let cur = null;
+    for (const t of sportTitles) { if (t.index < idx) cur = t; else break; }
     return cur ? cur.name : '';
   };
 
@@ -307,7 +361,8 @@ function parseArchive(html, ymd) {
 
     const rawHome = decode(teams[1]).trim();
     const rawAway = decode(teams[2]).trim();
-    const cat = normalizeCategory(league);
+    const sportCat = categoryFromSportTitle(sportFor(currentBlockIndex !== -1 ? currentBlockIndex : i));
+    const cat = sportCat || normalizeCategory(league);
     const isNba = cat === 'basketball' && (/\bnba\b/i.test(league) || NBA_FRANCHISES[rawHome.toLowerCase()] || NBA_FRANCHISES[rawAway.toLowerCase()]);
     const isNhl = cat === 'hockey' && (/\bnhl\b/i.test(league) || NHL_FRANCHISES[rawHome.toLowerCase()] || NHL_FRANCHISES[rawAway.toLowerCase()]);
     const isMlb = cat === 'baseball' && (/\bmlb\b/i.test(league) || MLB_FRANCHISES[rawHome.toLowerCase()] || MLB_FRANCHISES[rawAway.toLowerCase()]);
