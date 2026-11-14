@@ -49,4 +49,22 @@ describe('formatDropLine', () => {
     expect(line).toContain('answered=none');
     expect(line).toContain('min_since_kickoff=300');
   });
+
+  test('appends a bounded one-line title and keeps the earlier fields first', () => {
+    const base = { id: 'x', category: 'tennis', minutesSinceKickoff: 243, providers: ['daddylive'], providersAnswered: ['daddylive'] };
+    const line = formatDropLine({ ...base, title: 'Player A vs Player B - ATP\nParis "Masters" ' + 'x'.repeat(100) });
+    expect(line).not.toContain('\n');
+    expect(line.indexOf('answered=daddylive') < line.indexOf('title="')).toBe(true);
+    expect(line.slice(line.indexOf('title="') + 7, -1).length <= 60).toBe(true);
+    expect(line.endsWith('"')).toBe(true);
+    expect(line.slice(line.indexOf('title="') + 7, -1)).not.toContain('"');
+  });
+  test('omits the title field when there is none', () => {
+    const line = formatDropLine({ id: 'x', category: 'tennis', minutesSinceKickoff: 1, providers: ['a'], providersAnswered: [], title: '' });
+    expect(line).not.toContain('title=');
+  });
+  test('findDroppedLiveFixtures carries the title through', () => {
+    const r = run([row('a', 2, { title: 'Team A vs Team B' })], []);
+    expect(r.rows[0].title).toBe('Team A vs Team B');
+  });
 });

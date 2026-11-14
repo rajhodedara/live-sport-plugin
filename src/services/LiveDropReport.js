@@ -58,6 +58,7 @@ function findDroppedLiveFixtures(previousRows, freshRows, opts) {
     dropped.push({
       id: String(prev.id || ''),
       category: String(prev.category || 'unknown'),
+      title: String(prev.title || ''),
       minutesSinceKickoff: Math.round(elapsed / 60000),
       providers,
       providersAnswered: providers.filter((p) => freshProviders.has(p)),
@@ -67,10 +68,18 @@ function findDroppedLiveFixtures(previousRows, freshRows, opts) {
   return { total: dropped.length, rows: dropped.slice(0, maxRows) };
 }
 
+// One line, no quotes or control characters, bounded: a title is public match text
+// but it still must not be able to break the log line it is printed in.
+function safeTitle(title) {
+  return String(title || '').replace(/[\u0000-\u001f\u007f"]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+}
+
 function formatDropLine(row) {
   const safeId = row.id.replace(/[^\w.:-]/g, '_').slice(0, 80);
+  const title = safeTitle(row.title);
   return `[LiveDrop] id=${safeId} category=${row.category} min_since_kickoff=${row.minutesSinceKickoff} `
-    + `providers=${row.providers.join(',')} answered=${row.providersAnswered.join(',') || 'none'}`;
+    + `providers=${row.providers.join(',')} answered=${row.providersAnswered.join(',') || 'none'}`
+    + (title ? ` title="${title}"` : '');
 }
 
 module.exports = { findDroppedLiveFixtures, formatDropLine, DEFAULT_LIVE_WINDOW_MS };
