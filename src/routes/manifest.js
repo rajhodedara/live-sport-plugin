@@ -19,6 +19,7 @@ const { rewriteHlsUri, rewriteHlsPlaylist, preprobeManifestSegments } = require(
 const { safeFetch: _safeFetch } = require('../impitClient');
 const { getRequestBaseUrl } = require('../config');
 const { manifestUserAgent } = require('../services/ManifestUserAgent');
+const { describeManifestError } = require('../services/ManifestDiag');
 
 // Variant BANDWIDTH declarations seen in master playlists, keyed by the
 // absolute upstream URL of the child media playlist. When that child is served
@@ -242,7 +243,7 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
       manifestCacheSetNegative(cacheKey, 404, 'Stream not found or expired');
       return res.status(404).send('Stream not found or expired');
     }
-    console.error('[ManifestProxy] Error:', err.message);
+    console.error('[ManifestProxy] Error:', err.message, describeManifestError(targetUrl, rck));
     manifestCacheSetNegative(cacheKey, 502, 'Manifest proxy error: ' + err.message);
     return res.status(502).send('Manifest proxy error: ' + err.message);
   }
