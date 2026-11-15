@@ -42,12 +42,18 @@
 11. **PR #94 (Manifest Error Diagnostics & Attribution)**:
     - Merged commit `465810b` / `6248e85` (`src/remint.js`, `src/routes/manifest.js`, `src/services/ManifestDiag.js`, `tests/manifestDiag.test.js`).
     - Appends `source=<name> host=<upstream>` to `[ManifestProxy]` errors and `source=<name> ms=<elapsed>` to re-mint failures and slow re-mints (>= 4s).
-12. **DaddyLive HDM1 Catalog Expansion**:
+12. **DaddyLive HDM1 Catalog Expansion (Phase 1)**:
     - Discovered and verified 53 new active channels across DaddyLive 24/7 catalog and external enumeration ledgers (`map.json`, `combined_hdm1_slugs.json`).
     - Catalog in `src/data/hdm1_slugs.json` expanded from 144 to 197 strictly verified channels (+36.8%).
     - Every added channel validated through 6-stage playability pipeline: master M3U8, variant sub-playlist, range request on live `.ts` chunks with `0x47` MPEG-TS sync byte check.
     - Enforced strict digit invariance, country invariance, and zero duplicate slugs (197 unique slugs across 197 IDs). Ambiguous IDs 274 and 362 preserved as excluded per contract.
+13. **DaddyLive HDM1 Catalog Expansion (Phase 2 - 26 Verified Channels)**:
+    - Cross-referenced live 24/7 channels ledger from `livelive24.com/tv.json` and DaddyLive numerical channel registry (`thedaddy.li/24-7-channels.php`).
+    - Filtered 52 high-confidence unmapped candidate channels and put every single one through the strict 6-stage MPEG-TS playability test suite (hitting `wideiptv.top/player/<slug>`, master M3U8, variant sub-playlist, and validating `0x47` sync byte on live `.ts` chunk range request).
+    - Dropped 26 inactive/404 channels and merged 26 verified 100% playable channels into `src/data/hdm1_slugs.json`, expanding the verified fastpath catalog from 197 to **223 channels** (+13.2%).
+    - High-value additions: USA Network (`343`: `USANETEAST`), RMC Sport 1 FR (`119`: `RMCSPORT1FR`), beIN Sports 2 & 3 FR (`117`: `BEINSPORT2FR`, `118`: `BEINSPORT3FR`), beIN Sports 4 TR (`67`: `BEINSPORT4TR`), Movistar Liga de Campeones (`435`: `MLIGADECAMPEONES`), Arena Sport Premium 1 & 3 (`134`: `ARENASPORT1PREMIUMRS`, `139`: `ARENASPORT3PREMIUMRS`), Canal+ Sport Afrique 2, 4, 5 (`487`, `489`, `490`), ESPN Argentina 1-3 (`149`, `150`, `798`), Eurosport 1 & 2 Sweden/France/Italy, Polsat Sport 2 & Premium 2, Sport 2 CZ, Sky History UK, and Sky Sport Austria.
+    - Enforced all contracts: strict digit invariance, zero duplicate slugs, zero duplicate IDs, ambiguous IDs 274 & 362 excluded.
 
 ## Verification
-- Tests: 32 passed on `tests/daddyLiveFolderBreaker.test.js`, `tests/daddyLivePlayerRef.test.js`, `tests/daddyLiveHdm1FastPath.test.js`. 66 passed on `tests/localRequest.test.js`.
+- Tests: 32 passed on `tests/daddyLiveFolderBreaker.test.js`, `tests/daddyLivePlayerRef.test.js`, `tests/daddyLiveHdm1FastPath.test.js`. 66 passed on `tests/localRequest.test.js`. All 8 tests passed in `tests/daddyLiveHdm1FastPath.test.js` validating the expanded 223 channel catalog.
 - VPS status: PM2 cluster running clean, 0% CPU on workers, `/manifest.json` latency 10.8ms, `/health` 10.1ms.
