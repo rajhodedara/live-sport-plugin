@@ -723,8 +723,8 @@ class MatchAggregator {
           existingVavooUrls.add(vavooSource.id);
           match.sources.push(vavooSource);
           injectedForThisMatch++;
-          const maxVavoo = Number(process.env.VAVOO_INJECTION_CAP || 3);
-          if (injectedForThisMatch >= maxVavoo) break; // Allow up to 3 broadcast feeds per match across regions (capped down from 8)
+          const maxVavoo = Number(process.env.VAVOO_INJECTION_CAP || 6);
+          if (injectedForThisMatch >= maxVavoo) break; // Allow up to 6 broadcast feeds per match across regions
         }
       }
 

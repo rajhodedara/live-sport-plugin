@@ -173,7 +173,7 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
   });
 
   describe('Incident 2: Provider Priority & Mirror Capping', () => {
-    it('caps DaddyLive mirrors to maximum 4 diverse feeds per fixture in selectSources', () => {
+    it('preserves all DaddyLive mirrors per fixture in selectSources without artificial 4-feed cap', () => {
       const mirrors = [];
       const channels = [
         'Sky Sports Premier League', 'TNT Sports 1', 'Canal+ Foot', 'DAZN 1',
@@ -196,14 +196,14 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
 
       const selected = selectSources(sources, null);
       const daddySelected = selected.filter(s => s.source === 'daddylive');
-      expect(daddySelected).toHaveLength(4);
+      expect(daddySelected).toHaveLength(16);
 
       // Verify that higher priority sources are preserved and ordered ahead of DaddyLive
       expect(selected[0].source).toBe('leaf');
       expect(selected[1].source).toBe('timstreams');
     });
 
-    it('maintains priority order leaf > timstreams > daddylive > vavoo when daddylive is capped', () => {
+    it('maintains priority order leaf > timstreams > daddylive > vavoo with uncapped daddylive mirrors', () => {
       const sources = [
         { source: 'vavoo', id: 'v1' },
         { source: 'daddylive', id: 'dl1', channelName: 'Sky 1' },
@@ -216,7 +216,7 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
       ];
       const selected = selectSources(sources, null);
       const sourceOrder = selected.map(s => s.source);
-      expect(sourceOrder).toEqual(['leaf', 'timstreams', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'vavoo']);
+      expect(sourceOrder).toEqual(['leaf', 'timstreams', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'vavoo']);
     });
 
     it('scores stream sources following leaf > timstreams > ppvst > pitsport > daddylive > vavoo > sktech', () => {

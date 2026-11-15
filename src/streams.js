@@ -172,28 +172,6 @@ function selectSources(matchSources, config, match = null) {
     return 0;
   });
 
-  // Cap DaddyLive mirrors to max 4 diverse broadcaster feeds per fixture
-  const dlSources = sortedSources.filter(s => s && s.source === 'daddylive');
-  let acceptedDl = null;
-  if (dlSources.length > 4) {
-    const dlSeenChannels = new Set();
-    const diverse = [];
-    const remaining = [];
-    for (const src of dlSources) {
-      const chKey = (src.channelName || src.channel || src.name || src.id || '').toLowerCase().trim();
-      if (!dlSeenChannels.has(chKey) && diverse.length < 4) {
-        dlSeenChannels.add(chKey);
-        diverse.push(src);
-      } else {
-        remaining.push(src);
-      }
-    }
-    acceptedDl = new Set(diverse.concat(remaining).slice(0, 4));
-  }
-  const cappedSources = acceptedDl
-    ? sortedSources.filter(src => src.source !== 'daddylive' || acceptedDl.has(src))
-    : sortedSources;
-
   const checkAllowed = (srcName, enabledList) => {
     if (srcName.startsWith('yaml_')) return true;
     if (srcName === 'embedindia' || srcName === 'embedst') return enabledList.includes('streamedpk');
@@ -213,7 +191,7 @@ function selectSources(matchSources, config, match = null) {
       ? config.replaySources.split(',').map(s => s.trim())
       : (hasReplayConfig && config.replaySources === 'none' ? [] : null);
 
-    return cappedSources.filter(src => {
+    return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isReplay = isReplaySource(src.source);
       if (isReplay) {
@@ -231,10 +209,10 @@ function selectSources(matchSources, config, match = null) {
   // Case 2: Legacy combined sources configuration (config.sources)
   if (config && typeof config.sources === 'string') {
     if (config.sources === 'none') {
-      return cappedSources.filter(src => src.source.startsWith('yaml_'));
+      return sortedSources.filter(src => src.source.startsWith('yaml_'));
     }
     const enabled = config.sources.split(',').map(s => s.trim());
-    return cappedSources.filter(src => {
+    return sortedSources.filter(src => {
       if (src.source.startsWith('yaml_')) return true;
       const isFallback = KNOWN_FALLBACKS.includes(src.source);
       if (!isFallback) return false;
@@ -243,7 +221,7 @@ function selectSources(matchSources, config, match = null) {
   }
 
   // Default path (no config in URL) — allow all known active providers
-  return cappedSources.filter(src => {
+  return sortedSources.filter(src => {
     if (src.source.startsWith('yaml_')) return true;
     return KNOWN_FALLBACKS.includes(src.source);
   });

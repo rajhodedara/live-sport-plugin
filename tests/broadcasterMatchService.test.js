@@ -149,6 +149,29 @@ describe('MatchAggregator Broadcaster Fixture Enrichment', () => {
     expect(channelNames).not.toContain('CANAL SPORT');
   });
 
+  test('injects up to 6 Vavoo broadcast feeds per match when multiple broadcasters match', () => {
+    const liveMatch = {
+      id: 'dlv_multichannel_test',
+      title: 'El Clasico',
+      category: 'football',
+      sources: [
+        { source: 'daddylive', id: '1', channelName: 'Sky Sports Premier League' },
+        { source: 'daddylive', id: '2', channelName: 'TNT Sports 1' },
+        { source: 'daddylive', id: '3', channelName: 'TNT Sports 2' },
+        { source: 'daddylive', id: '4', channelName: 'Canal+ Live 3 France' },
+        { source: 'daddylive', id: '5', channelName: 'Canal+ Extra 2 Poland' },
+        { source: 'daddylive', id: '6', channelName: 'DAZN 1 Spain' },
+        { source: 'daddylive', id: '7', channelName: 'beIN Sports 1 France' },
+        { source: 'daddylive', id: '8', channelName: 'Sport TV 1 Portugal' }
+      ]
+    };
+
+    aggregator._enrichMatchesWithBroadcasters([liveMatch]);
+
+    const vavooSources = liveMatch.sources.filter(s => s.source === 'vavoo');
+    expect(vavooSources.length).toBe(6);
+  });
+
   test('does not enrich 24/7 channels or VOD replays', () => {
     const channelMatch = {
       id: 'vavoo_ch_123',
