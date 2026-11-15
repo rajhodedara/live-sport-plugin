@@ -5,6 +5,7 @@
  * Do not edit logic here without re-verifying /watch + route responses.
  */
 const container = require('./container');
+const { sourceOfRck } = require('./services/ManifestDiag');
 
 // ─── Silent upstream-token re-mint ──────────────────────────────────
 // Proxied stream URLs embed a time-limited upstream token. When it expires the
@@ -181,7 +182,21 @@ function rckCandidates(rck) {
   return out;
 }
 
+// A re-mint that succeeds but takes this long is logged, so slow ones can be
+// attributed to a source before they turn into timeouts (REMINT_TIMEOUT_MS).
+const REMINT_SLOW_LOG_MS = 4000;
+
 async function attemptRemint(rck, heldUrl = '') {
+  const startedAt = Date.now();
+  const fresh = await attemptRemintInner(rck, heldUrl, startedAt);
+  const elapsed = Date.now() - startedAt;
+  if (fresh && elapsed >= REMINT_SLOW_LOG_MS) {
+    console.warn(`[ManifestProxy] re-mint slow: source=${sourceOfRck(rck)} ms=${elapsed}`);
+  }
+  return fresh;
+}
+
+async function attemptRemintInner(rck, heldUrl, startedAt) {
   try {
     if (!rck || typeof rck !== 'string') return null;
     const candidates = rckCandidates(rck);
@@ -317,7 +332,7 @@ async function attemptRemint(rck, heldUrl = '') {
 
     return freshUrls[0];
   } catch (e) {
-    console.warn('[ManifestProxy] re-mint failed:', e.message);
+    console.warn('[ManifestProxy] re-mint failed:', e.message, `source=${sourceOfRck(rck)} ms=${Date.now() - startedAt}`);
     return null;
   }
 }
