@@ -345,6 +345,12 @@ function compareStreams(a, b, priorities) {
     const timeshiftDelta = (aIsTimeshift ? 1 : 0) - (bIsTimeshift ? 1 : 0);
     if (timeshiftDelta) return timeshiftDelta;
 
+    // Prefer full replay feeds before condensed game versions so both are cleanly partitioned
+    const aIsCondensed = Boolean(a && (a.isCondensed || a._isCondensed || (a.title && /\bcondensed\b/i.test(a.title))));
+    const bIsCondensed = Boolean(b && (b.isCondensed || b._isCondensed || (b.title && /\bcondensed\b/i.test(b.title))));
+    const condensedDelta = (aIsCondensed ? 1 : 0) - (bIsCondensed ? 1 : 0);
+    if (condensedDelta) return condensedDelta;
+
     // Prefer highest quality / resolution
     const qualityDelta = getResolutionRank(b) - getResolutionRank(a);
     if (qualityDelta) return qualityDelta;

@@ -53,7 +53,12 @@
     - Dropped 26 inactive/404 channels and merged 26 verified 100% playable channels into `src/data/hdm1_slugs.json`, expanding the verified fastpath catalog from 197 to **223 channels** (+13.2%).
     - High-value additions: USA Network (`343`: `USANETEAST`), RMC Sport 1 FR (`119`: `RMCSPORT1FR`), beIN Sports 2 & 3 FR (`117`: `BEINSPORT2FR`, `118`: `BEINSPORT3FR`), beIN Sports 4 TR (`67`: `BEINSPORT4TR`), Movistar Liga de Campeones (`435`: `MLIGADECAMPEONES`), Arena Sport Premium 1 & 3 (`134`: `ARENASPORT1PREMIUMRS`, `139`: `ARENASPORT3PREMIUMRS`), Canal+ Sport Afrique 2, 4, 5 (`487`, `489`, `490`), ESPN Argentina 1-3 (`149`, `150`, `798`), Eurosport 1 & 2 Sweden/France/Italy, Polsat Sport 2 & Premium 2, Sport 2 CZ, Sky History UK, and Sky Sport Austria.
     - Enforced all contracts: strict digit invariance, zero duplicate slugs, zero duplicate IDs, ambiguous IDs 274 & 362 excluded.
+14. **NFL-Video Condensed vs Full Game Stream Selection**:
+    - Added partition detection in `src/providers/NflVideoProvider.js` to identify `Condensed Game` sections and server headings.
+    - Tagged emitted streams with `isCondensed` on `StreamEntity.js` and set explicit `partName` (e.g. `Full Game (Server #1 OK)`, `Condensed Game (OK)`).
+    - Updated `src/streams.js` regex to recognize `Full Game` and `Condensed Game` badges (`🎬 Full Game`, `🎬 Condensed Game`) and isolated binge groups (`nuvio_sport_${matchId}_full` vs `nuvio_sport_${matchId}_condensed`).
+    - Added priority sorting in `src/services/LanguagePriorityService.js` placing Full Game streams first, followed by Condensed Game streams.
 
 ## Verification
-- Tests: 32 passed on `tests/daddyLiveFolderBreaker.test.js`, `tests/daddyLivePlayerRef.test.js`, `tests/daddyLiveHdm1FastPath.test.js`. 66 passed on `tests/localRequest.test.js`. All 8 tests passed in `tests/daddyLiveHdm1FastPath.test.js` validating the expanded 223 channel catalog.
-- VPS status: PM2 cluster running clean, 0% CPU on workers, `/manifest.json` latency 10.8ms, `/health` 10.1ms.
+- Tests: 25 passed in `tests/nflVideoProvider.test.js` (including new 'Condensed Game vs Full Game Replay Extraction' suite). 120 passed in `tests/languagePriority.test.js`. Clean `node --check` across all modified files.
+- Zero server bandwidth: direct CDN playback (`okcdn.ru`, `SprintCDN`) preserved per Invariant I1.

@@ -376,6 +376,78 @@ describe('NflVideoProvider', () => {
     });
   });
 
+  describe('Condensed Game vs Full Game Replay Extraction', () => {
+    test('extracts and cleanly partitions Full Game vs Condensed Game streams with isCondensed tags', async () => {
+      const matchPageHtml = `
+        <div class="content" id="video-player">
+          <p><span>Server #1 OK</span><br><a href="https://nhlgamestoday.com/bridge1">Watch</a></p>
+          <p><span>Server #3 FM</span><br><a href="https://guideanimaux.com/bridge3">Watch</a></p>
+          <p>-------------------------------------</p>
+          <p><span>Condensed Game</span><br>
+            <a href="https://nbaontv.com/condensed-ok">OK</a>&nbsp;
+            <a href="https://nbaontv.com/condensed-fm">FM</a>
+          </p>
+        </div>
+      `;
+
+      provider._extractOkRu = jest.fn((dest, partName) => [
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: `${partName} (1080p) [OK.ru]`,
+          resolution: '1080p',
+          url: `https://okcdn.ru/${dest.includes('condensed') ? 'condensed' : 'full'}.mp4`,
+          isCondensed: /condensed/i.test(partName)
+        })
+      ]);
+
+      provider._extractByse = jest.fn((dest, partName) => [
+        new StreamEntity({
+          name: 'NFLVideo',
+          title: `${partName} (1080p) [SprintCDN]`,
+          resolution: '1080p',
+          url: `https://sprintcdn.com/${dest.includes('condensed') ? 'condensed' : 'full'}.m3u8`,
+          isCondensed: /condensed/i.test(partName)
+        })
+      ]);
+
+      provider.fetchPage = {
+        fire: jest.fn(async (url) => {
+          if (url.includes('nfl-video.com')) return matchPageHtml;
+          if (url.includes('bridge1')) return '<iframe src="//ok.ru/videoembed/111"></iframe>';
+          if (url.includes('bridge3')) return '<iframe src="https://byse.example/e/333"></iframe>';
+          if (url.includes('condensed-ok')) return '<iframe src="//ok.ru/videoembed/condensed1"></iframe>';
+          if (url.includes('condensed-fm')) return '<iframe src="https://byse.example/e/condensed2"></iframe>';
+          throw new Error(`Unexpected url: ${url}`);
+        })
+      };
+
+      const streams = await provider.resolveStream('https://nfl-video.com/tb-vs-chi-replay');
+      expect(streams).toHaveLength(4);
+
+      // Verify Full Game streams
+      const fullOk = streams.find(s => s.url.includes('full.mp4'));
+      expect(fullOk).toBeDefined();
+      expect(fullOk.title).toContain('Full Game (Server #1 OK)');
+      expect(fullOk.isCondensed).toBe(false);
+
+      const fullFm = streams.find(s => s.url.includes('full.m3u8'));
+      expect(fullFm).toBeDefined();
+      expect(fullFm.title).toContain('Full Game (Server #3 FM)');
+      expect(fullFm.isCondensed).toBe(false);
+
+      // Verify Condensed Game streams
+      const condOk = streams.find(s => s.url.includes('condensed.mp4'));
+      expect(condOk).toBeDefined();
+      expect(condOk.title).toContain('Condensed Game (OK)');
+      expect(condOk.isCondensed).toBe(true);
+
+      const condFm = streams.find(s => s.url.includes('condensed.m3u8'));
+      expect(condFm).toBeDefined();
+      expect(condFm.title).toContain('Condensed Game (FM)');
+      expect(condFm.isCondensed).toBe(true);
+    });
+  });
+
   describe('Container & System Integration', () => {
     test('nflVideoProvider is properly registered in IoC container', () => {
       const p = container.resolve('nflVideoProvider');

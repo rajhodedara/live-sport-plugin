@@ -1819,7 +1819,7 @@ async function handleStream(type, id, config) {
     }
 
     let partLabel = '';
-    const partMatch = originalTitle.match(/(?:^|[\s\[\]])(Part\s*\d+|[12]nd\s*Half|[12]st\s*Half|Full\s*Match|Full\s*Replay|Long\s*Highlights?|Highlights?|\d+:\d+)(?:[\s\]\()]|$)/i);
+    const partMatch = originalTitle.match(/(?:^|[\s\[\]|])(Part\s*\d+|[12]nd\s*Half|[12]st\s*Half|Full\s*Match|Full\s*Replay|Full\s*Game|Condensed\s*Game|Condensed|Long\s*Highlights?|Highlights?|\d+:\d+)(?:[\s\]\(\-–—|]|$)/i);
     if (partMatch) {
       partLabel = partMatch[1].trim();
     }
@@ -1852,7 +1852,8 @@ async function handleStream(type, id, config) {
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};
-    s.behaviorHints.bingeGroup = `nuvio_sport_${matchId}`;
+    const isCondensedStream = Boolean(s.isCondensed || s._isCondensed || (s.title && /\bcondensed\b/i.test(s.title)));
+    s.behaviorHints.bingeGroup = isCondensedStream ? `nuvio_sport_${matchId}_condensed` : `nuvio_sport_${matchId}_full`;
     
     // Change only the published path, after withResolveKey has tagged provider
     // results. Cached provider URLs and recovery-key generation retain their form.

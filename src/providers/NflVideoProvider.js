@@ -253,6 +253,10 @@ class NflVideoProvider extends BaseProvider {
                         html.match(/<div[^>]+class="[^"]*video-content[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
       const content = bodyMatch ? bodyMatch[1] : html;
 
+      // Detect Condensed Game section within content
+      const condensedHeadingMatch = content.match(/<[^>]+>[^<]*\bcondensed(?:\s+game)?\b[^<]*<\/[^>]+>/i);
+      const condensedIndex = condensedHeadingMatch ? condensedHeadingMatch.index : -1;
+
       // Extract watch and server links
       const linkMatches = [...content.matchAll(/<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)];
       const watchLinks = linkMatches.filter(l => {
@@ -260,12 +264,21 @@ class NflVideoProvider extends BaseProvider {
         const text = l[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
         if (!dest) return false;
 
-        // Skip internal navigation and season category links on nfl-video.com
-        if ((dest.startsWith('/') && !dest.startsWith('//')) || (dest.includes('nfl-video.com') && !dest.includes('#'))) {
-          if (!this._isByseUrl(dest) && !dest.includes('ok.ru') && !/\.(m3u8|mp4)(?:[?#]|$)/i.test(dest)) {
-            return false;
+        // Skip internal navigation, other fixture pages, and season category links on nfl-video.com
+        let isInternalNav = false;
+        try {
+          const parsedNav = new URL(dest, targetUrl);
+          const navHost = parsedNav.hostname.toLowerCase();
+          if (navHost === 'nfl-video.com' || navHost.endsWith('.nfl-video.com')) {
+            const navPath = parsedNav.pathname.toLowerCase();
+            const isMatchOrCat = /-(?:full-game-)?replays?$|-vs-|-at-|\/(?:terms|privacy|news|archive|super-bowls|\d{4})\b/i.test(navPath) || parsedNav.href === targetUrl;
+            const isBridgeOrMedia = /\/bridge\b|\/\d+-\d+$|\.(m3u8|mp4)(?:[?#]|$)/i.test(navPath) || this._isByseUrl(dest) || dest.includes('ok.ru');
+            if (isMatchOrCat && !isBridgeOrMedia) {
+              isInternalNav = true;
+            }
           }
-        }
+        } catch (_) {}
+        if (isInternalNav) return false;
 
         const isVideoDest = this._isByseUrl(dest) || dest.includes('ok.ru') || isBridgeUrl(dest, targetUrl) ||
           /nhlgamestoday|guidedesgemmes|guideanimaux|nflontv|nbaontv|vidara|dailymotion|dai\.ly|d\.tube/i.test(dest) ||
@@ -289,20 +302,44 @@ class NflVideoProvider extends BaseProvider {
       const seenUrls = new Set();
 
       for (let i = 0; i < watchLinks.length; i++) {
-        let dest = watchLinks[i][1];
-        const rawPart = watchLinks[i][2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
-        let partName = rawPart ? rawPart.replace(/\s+/g, ' ') : `Part ${i + 1}`;
+        const linkMatchObj = watchLinks[i];
+        let dest = linkMatchObj[1];
+        const rawPart = linkMatchObj[2].replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').trim();
+        const linkIndex = typeof linkMatchObj.index === 'number' ? linkMatchObj.index : -1;
+        const isCondensed = condensedIndex !== -1 && linkIndex > condensedIndex;
 
-        // If partName is generic "Watch", attempt to find preceding server heading in content HTML
-        if (/^watch$/i.test(partName)) {
-          const safeDest = dest.split('?')[0].split('#')[0];
-          const preIdx = content.indexOf(safeDest);
-          if (preIdx > 0) {
-            const snippet = content.slice(Math.max(0, preIdx - 500), preIdx);
-            const headingMatches = [...snippet.matchAll(/(?:<b>|<span[^>]*>|<h\d[^>]*>|<p[^>]*>)([^<]*(?:server|part|half|quarter|condensed|full|1st|2nd|3rd|4th)[^<]*)(?:<\/b>|<\/span>|<\/h\d>|<\/p>)/gi)];
-            if (headingMatches.length > 0) {
-              partName = headingMatches[headingMatches.length - 1][1].trim();
+        // Scan backwards from link index for server / part heading
+        const preIdx = linkIndex > 0 ? linkIndex : (dest ? content.indexOf(dest.split('?')[0].split('#')[0]) : -1);
+        const snippet = preIdx > 0 ? content.slice(Math.max(0, preIdx - 500), preIdx) : '';
+        const headingMatches = [...snippet.matchAll(/(?:<b>|<strong[^>]*>|<span[^>]*>|<h\d[^>]*>|<p[^>]*>)([^<]*(?:server|part|half|quarter|condensed|full|1st|2nd|3rd|4th)[^<]*)(?:<\/b>|<\/strong>|<\/span>|<\/h\d>|<\/p>)/gi)];
+        let heading = '';
+        if (headingMatches.length > 0) {
+          for (let j = headingMatches.length - 1; j >= 0; j--) {
+            const hText = headingMatches[j][1].replace(/&nbsp;/g, ' ').trim();
+            if (/^(?:watch|ok|fm|dm|link)$/i.test(hText)) continue;
+            heading = hText;
+            break;
+          }
+        }
+
+        let partName = '';
+        if (isCondensed) {
+          if (/^(?:ok|fm|dm)$/i.test(rawPart)) {
+            partName = `Condensed Game (${rawPart.toUpperCase()})`;
+          } else if (heading && !/condensed/i.test(heading)) {
+            partName = `Condensed Game (${heading})`;
+          } else {
+            partName = 'Condensed Game';
+          }
+        } else {
+          if (/^(?:watch|link)$/i.test(rawPart) || !rawPart) {
+            if (heading) {
+              partName = /full/i.test(heading) ? heading : `Full Game (${heading})`;
+            } else {
+              partName = rawPart || 'Full Game';
             }
+          } else {
+            partName = /full|part|half|quarter/i.test(rawPart) ? rawPart : `Full Game (${rawPart})`;
           }
         }
 
@@ -316,18 +353,29 @@ class NflVideoProvider extends BaseProvider {
 
         try {
           // Unwrap bridge page if dest is not a direct video/embed provider
+          let isDirectMedia = false;
+          try {
+            isDirectMedia = /\.(m3u8|mp4)$/i.test(new URL(dest).pathname);
+          } catch (_) {}
+
           const isDirectProvider = this._isVidaraUrl(dest) || this._isByseUrl(dest) ||
             this._isDailymotionUrl(dest) || ['ok.ru', 'd.tube'].some(host => matchesHost(playerHostname(dest), host)) ||
-            /\.(m3u8|mp4)(?:[?#]|$)/i.test(dest);
+            isDirectMedia;
 
           if (!isDirectProvider && (isBridgeUrl(dest, targetUrl) || /^https?:\/\//i.test(dest))) {
-            let isInternal = false;
+            let isInternalNav = false;
             try {
-              const parsedHost = new URL(dest, targetUrl).hostname.toLowerCase();
-              if (parsedHost === 'nfl-video.com' || parsedHost.endsWith('.nfl-video.com')) isInternal = true;
+              const parsedHost = new URL(dest, targetUrl);
+              const h = parsedHost.hostname.toLowerCase();
+              if (h === 'nfl-video.com' || h.endsWith('.nfl-video.com')) {
+                const navPath = parsedHost.pathname.toLowerCase();
+                if (/-(?:full-game-)?replays?$|-vs-|-at-|\/(?:terms|privacy|news|archive|super-bowls|\d{4})\b/i.test(navPath) || parsedHost.href === targetUrl) {
+                  isInternalNav = true;
+                }
+              }
             } catch (_) {}
 
-            if (!isInternal) {
+            if (!isInternalNav) {
               try {
                 const bridgeHtml = await this.fetchPage.fire(dest, { 'Referer': 'https://nfl-video.com/' });
                 const iframeUrl = findBridgeIframe(bridgeHtml, dest, url =>
@@ -342,6 +390,7 @@ class NflVideoProvider extends BaseProvider {
           if (this._isVidaraUrl(dest)) {
             const extracted = await this._extractVidara(dest, partName);
             for (const s of extracted) {
+              if (isCondensed) s.isCondensed = true;
               if (!seenUrls.has(s.url)) {
                 seenUrls.add(s.url);
                 vidaraStreams.push(s);
@@ -354,6 +403,7 @@ class NflVideoProvider extends BaseProvider {
           if (this._isByseUrl(dest)) {
             const extracted = await this._extractByse(dest, partName);
             for (const s of extracted) {
+              if (isCondensed) s.isCondensed = true;
               if (!seenUrls.has(s.url)) {
                 seenUrls.add(s.url);
                 byseStreams.push(s);
@@ -366,6 +416,7 @@ class NflVideoProvider extends BaseProvider {
           if (this._isDailymotionUrl(dest)) {
             const extracted = await this._extractDailymotion(dest, partName);
             for (const s of extracted) {
+              if (isCondensed) s.isCondensed = true;
               if (!seenUrls.has(s.url)) {
                 seenUrls.add(s.url);
                 dmStreams.push(s);
@@ -378,6 +429,7 @@ class NflVideoProvider extends BaseProvider {
           if (this._isDTubeUrl(dest)) {
             const extracted = await this._extractDTube(dest, partName);
             for (const s of extracted) {
+              if (isCondensed) s.isCondensed = true;
               if (!seenUrls.has(s.url)) {
                 seenUrls.add(s.url);
                 dtubeStreams.push(s);
@@ -390,6 +442,7 @@ class NflVideoProvider extends BaseProvider {
           if (matchesHost(playerHostname(dest), 'ok.ru')) {
             const extracted = await this._extractOkRu(dest, partName);
             for (const s of extracted) {
+              if (isCondensed) s.isCondensed = true;
               if (!seenUrls.has(s.url)) {
                 seenUrls.add(s.url);
                 okStreams.push(s);
@@ -407,6 +460,7 @@ class NflVideoProvider extends BaseProvider {
                 title: `${partName} (Direct)`,
                 resolution: '1080p',
                 url: dest,
+                isCondensed: Boolean(isCondensed),
                 behaviorHints: { notWebReady: false }
               }));
             }
@@ -467,6 +521,7 @@ class NflVideoProvider extends BaseProvider {
 
       const streams = [];
       const cleanPart = partName.trim();
+      const isCondensed = Boolean(cleanPart && /condensed/i.test(cleanPart));
 
       const qualityMap = {
         'full': '1080p',
@@ -495,6 +550,7 @@ class NflVideoProvider extends BaseProvider {
             title,
             resolution: label,
             url: v.url,
+            isCondensed: Boolean(isCondensed),
             behaviorHints: {
               notWebReady: false,
               proxyHeaders: okProxyHeaders
@@ -510,6 +566,7 @@ class NflVideoProvider extends BaseProvider {
           title: cleanPart ? `${cleanPart} (Auto HLS) [OK.ru]` : 'Full Game (Auto HLS) [OK.ru]',
           resolution: 'Auto',
           url: metaObj.hlsManifestUrl,
+          isCondensed: Boolean(isCondensed),
           behaviorHints: {
             notWebReady: false,
             proxyHeaders: okProxyHeaders
@@ -606,6 +663,7 @@ class NflVideoProvider extends BaseProvider {
 
       const streams = [];
       const cleanPart = partName.trim();
+      const isCondensed = Boolean(cleanPart && /condensed/i.test(cleanPart));
 
       for (const s of decrypted.sources) {
         if (!s.url) continue;
@@ -617,6 +675,7 @@ class NflVideoProvider extends BaseProvider {
           title: streamTitle,
           resolution: resLabel,
           url: s.url,
+          isCondensed: Boolean(isCondensed),
           behaviorHints: {
             notWebReady: false,
             proxyHeaders: {
@@ -693,6 +752,7 @@ class NflVideoProvider extends BaseProvider {
         title: streamTitle,
         resolution: '1080p',
         url: data.streaming_url,
+        isCondensed: Boolean(isCondensed),
         behaviorHints: {
           notWebReady: false,
           proxyHeaders: {
@@ -732,6 +792,7 @@ class NflVideoProvider extends BaseProvider {
 
       const streams = [];
       const cleanPart = partName.trim();
+      const isCondensed = Boolean(cleanPart && /condensed/i.test(cleanPart));
 
       if (meta.qualities && meta.qualities.auto && meta.qualities.auto[0] && meta.qualities.auto[0].url) {
         const m3u8Url = meta.qualities.auto[0].url;
@@ -742,6 +803,7 @@ class NflVideoProvider extends BaseProvider {
           title: streamTitle,
           resolution: '1080p',
           url: m3u8Url,
+          isCondensed: Boolean(isCondensed),
           behaviorHints: {
             notWebReady: false,
             proxyHeaders: {
@@ -789,6 +851,7 @@ class NflVideoProvider extends BaseProvider {
               title: streamTitle,
               resolution: '1080p',
               url: m3u8Url,
+              isCondensed: Boolean(isCondensed),
               behaviorHints: {
                 notWebReady: false,
                 proxyHeaders: {

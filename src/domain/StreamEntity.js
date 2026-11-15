@@ -53,6 +53,9 @@ class StreamEntity {
     if (data.isTimeshift !== undefined) {
       this.isTimeshift = data.isTimeshift;
     }
+    if (data.isCondensed !== undefined) {
+      this.isCondensed = data.isCondensed;
+    }
     if (data.speedScore !== undefined) {
       this.speedScore = data.speedScore;
     }
