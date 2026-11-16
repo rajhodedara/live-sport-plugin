@@ -66,7 +66,14 @@
       - Supported direct external HLS CDNs, self-hosted `.txt` playlists routed via `/api/soccerfull/manifest`, and direct `.mp4` / `.m3u8` iframes.
       - Enhanced `_formatPartLabel` to cleanly normalize language tags (e.g. `(EN)`, `(ES)`, `(RU)`, `(AR)`).
     - Passed `opts` to `soccerFullProvider.resolveStream` in `src/streams.js`.
+16. **UEFA Nations League Replay Ranking and Discovery**:
+    - Investigated why UEFA Nations League replays were not appearing at the top of football replays or in the UEFA sub-catalog on `nuviosports.xyz` even after syncing matches.
+    - Discovered 4 contributing root causes:
+      - `MatchAggregator.js` Smart Trending Engine was injecting `popular = '1'` onto finished replays whose titles matched trending club keywords (Real Madrid, Barcelona, Manchester, Arsenal), causing older club matches to leapfrog new international replays.
+      - `sortCatalogMatches` in `src/catalog.js` fell back to input order when replay dates were identical. Added O(1) precomputed SoccerFull sequential numeric ID comparison (`sfIdB - sfIdA`) to guarantee the newest uploads (e.g. `sf_5008` Spain vs England, `sf_5007` Croatia vs Czechia) rank first.
+      - Replay sync cadence in `MatchAggregator.js` was locked to 12 hours for all replay providers; added a 1-hour fast cadence for SoccerFull (`FAST_REPLAY_SYNC_INTERVAL_MS`) and a `forceReplays` override for manual syncs.
+      - Added dedicated `nuvio_sports_replays_football_nations_league` sub-catalog in `collections.js` and `index.js`, and expanded the `ucl` filter in `catalog.js` to match `nations league` fixtures.
 
 ## Verification
-- Tests: 51 passed in `tests/soccerFullProvider.test.js` (3 new tests for Clappr external CDN with escaped slashes, self-hosted vod text playlist, and direct mp4 iframe). 52 passed across all related soccerfull suites. Clean `node --check`. Verified real live resolution on match `sf_4973` (9 playable streams) and `sf_4961` (6 playable streams).
-- Zero server bandwidth: direct CDN playback (`proxyHeaders`, open CORS) preserved per Invariant I1.
+- Tests: 10 passed in `tests/replayCollectionsFix.test.js` (including new tests for SoccerFull numeric ID sorting and Nations League catalog filtering). 51 passed in `tests/soccerFullProvider.test.js`. 71 passed across full replay and concurrency suite.
+- Invariants: I1 (zero video proxy bytes), I6 (O(1) precomputed integer comparison in Schwartzian Transform, zero regex inside comparator loop) strictly preserved. Clean `node --check`.

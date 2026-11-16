@@ -135,4 +135,53 @@ describe('Replay Collections & Provider Isolation Suite', () => {
     expect(res).toBeDefined();
     expect(Array.isArray(res.metas)).toBe(true);
   });
+
+  it('ranks newest SoccerFull replays by numeric ID at the top within same day', () => {
+    const { sortCatalogMatches } = require('../src/catalog');
+    const fixtures = [
+      { id: 'sf_4973', title: 'Atlético Madrid vs Barcelona', league: 'LaLiga', status: 'finished', date: '2026-11-16', sources: [{ source: 'soccerfull' }] },
+      { id: 'sf_4837', title: 'Slavia Prague vs Arsenal', league: 'Champions League', status: 'finished', date: '2026-11-16', sources: [{ source: 'soccerfull' }] },
+      { id: 'sf_5008', title: 'Spain vs England', league: 'UEFA Nations League A Grp. 3', status: 'finished', date: '2026-11-16', sources: [{ source: 'soccerfull' }] },
+      { id: 'sf_5007', title: 'Croatia vs Czechia', league: 'UEFA Nations League A Grp. 3', status: 'finished', date: '2026-11-16', sources: [{ source: 'soccerfull' }] }
+    ];
+
+    const sorted = sortCatalogMatches(fixtures, true);
+    expect(sorted[0].id).toBe('sf_5008');
+    expect(sorted[1].id).toBe('sf_5007');
+    expect(sorted[2].id).toBe('sf_4973');
+    expect(sorted[3].id).toBe('sf_4837');
+  });
+
+  it('filters Nations League replays into both nations_league and ucl sub-catalogs', async () => {
+    const unlMatches = [
+      {
+        id: 'sf_5008',
+        title: 'Spain vs England',
+        category: 'football',
+        league: 'UEFA Nations League A Grp. 3',
+        status: 'finished',
+        date: '2026-11-16',
+        sources: [{ source: 'soccerfull', id: '/spain-vs-england-5008.html' }]
+      },
+      {
+        id: 'sf_4973',
+        title: 'Atlético Madrid vs Barcelona',
+        category: 'football',
+        league: 'LaLiga',
+        status: 'finished',
+        date: '2026-11-16',
+        sources: [{ source: 'soccerfull', id: '/atletico-madrid-vs-barcelona-4973.html' }]
+      }
+    ];
+
+    container.resolve('cacheService').setMatches(unlMatches);
+
+    const nlRes = await handleReplayCatalog('nuvio_sports_replays_football_nations_league', { skip: '0' }, {});
+    expect(nlRes.metas).toHaveLength(1);
+    expect(nlRes.metas[0].id).toBe('nuvio_sport_sf_5008');
+
+    const uclRes = await handleReplayCatalog('nuvio_sports_replays_football_ucl', { skip: '0' }, {});
+    expect(uclRes.metas).toHaveLength(1);
+    expect(uclRes.metas[0].id).toBe('nuvio_sport_sf_5008');
+  });
 });

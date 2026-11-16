@@ -19,6 +19,7 @@ const FOLDER_DEFINITIONS = [
       { id: 'nuvio_sports_replays_football_today', name: "📅 Today's Replays" },
       { id: 'nuvio_sports_replays_football_yesterday', name: "📅 Yesterday's Replays" },
       { id: 'nuvio_sports_replays_football_this_week', name: "📅 This Week's Replays" },
+      { id: 'nuvio_sports_replays_football_nations_league', name: '🏆 Nations League' },
       { id: 'nuvio_sports_replays_football_premier_league', name: '🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League Replays' },
       { id: 'nuvio_sports_replays_football_ucl', name: '⭐ Champions League & UEFA' },
       { id: 'nuvio_sports_replays_football_older', name: '📅 Older Replays' },

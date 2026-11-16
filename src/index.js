@@ -109,6 +109,7 @@ const REPLAY_MANIFEST_ROWS = [
   { type: 'tv', id: 'nuvio_sports_replays_football_yesterday', name: "📅 Yesterday's Replays", extra: [{ name: 'skip', isRequired: true }] },
   { type: 'tv', id: 'nuvio_sports_replays_football_this_week', name: "📅 This Week's Replays", extra: [{ name: 'skip', isRequired: true }] },
   { type: 'tv', id: 'nuvio_sports_replays_football_older', name: "📅 Older Replays", extra: [{ name: 'skip', isRequired: true }] },
+  { type: 'tv', id: 'nuvio_sports_replays_football_nations_league', name: "🏆 Nations League", extra: [{ name: 'skip', isRequired: true }] },
   { type: 'tv', id: 'nuvio_sports_replays_football_premier_league', name: "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League", extra: [{ name: 'skip', isRequired: true }] },
   { type: 'tv', id: 'nuvio_sports_replays_football_ucl', name: "⭐ Champions League", extra: [{ name: 'skip', isRequired: true }] },
   { type: 'tv', id: 'nuvio_sports_replays_football_recent', name: "🔥 Recent Replays", extra: [{ name: 'skip', isRequired: true }] },

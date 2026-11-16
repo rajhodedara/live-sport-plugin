@@ -1269,8 +1269,9 @@ class MatchAggregator {
     }
   }
 
-  async syncMatches() {
-    console.log('[MatchAggregator] Fetching from all providers...');
+  async syncMatches(options = {}) {
+    const forceReplays = typeof options === 'boolean' ? options : Boolean(options && options.forceReplays);
+    console.log('[MatchAggregator] Fetching from all providers...' + (forceReplays ? ' (forceReplays=true)' : ''));
     if (this.providerHealthService) this.providerHealthService.startSync();
     const finalMatches = [];
     const finalPres = []; // precomputed identity for each accepted match
@@ -1672,7 +1673,8 @@ class MatchAggregator {
     // or sync burns significant CPU, network, and RAM. Reuse cached replays if they
     // were synced within the last 12 hours.
     const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap']);
-    const REPLAY_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
+    const REPLAY_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours for heavy mirrors
+    const FAST_REPLAY_SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour for lightweight scrapers (SoccerFull)
 
     const previousRO = (this.cacheService && typeof this.cacheService.getMatchesReadOnly === 'function')
       ? (this.cacheService.getMatchesReadOnly() || [])
@@ -1720,7 +1722,7 @@ class MatchAggregator {
       }
     }
 
-    const isReplayFresh = previousReplays.length > 0 && this.lastReplaySync && (Date.now() - this.lastReplaySync < REPLAY_SYNC_INTERVAL_MS);
+    const isReplayFresh = !forceReplays && previousReplays.length > 0 && this.lastReplaySync && (Date.now() - this.lastReplaySync < REPLAY_SYNC_INTERVAL_MS);
 
     if (isReplayFresh) {
       console.log(`[MatchAggregator] Reusing ${previousReplays.length} cached replay events (synced ${Math.round((Date.now() - this.lastReplaySync) / 60000)}m ago; 12h cadence).`);
@@ -1745,6 +1747,10 @@ class MatchAggregator {
       const name = p.sourceName || p.name || '';
       // Only skip replay provider if it was already present in fresh cache
       if (REPLAY_PROVIDERS.has(name) && isReplayFresh && (cachedProviderCounts.get(name) || 0) > 0) {
+        if (name === 'soccerfull') {
+          const sfFresh = !forceReplays && this.lastSoccerFullSync && (Date.now() - this.lastSoccerFullSync < FAST_REPLAY_SYNC_INTERVAL_MS);
+          if (!sfFresh) return true; // Scrape SoccerFull if older than 1 hour or forced
+        }
         return false;
       }
       return true;
@@ -1756,6 +1762,9 @@ class MatchAggregator {
         try {
           const providerMatches = await this._fetchProviderMatches(p);
           if (Array.isArray(providerMatches) && providerMatches.length > 0) anyProviderSucceeded = true;
+          if (p && (p.sourceName === 'soccerfull' || p.name === 'soccerfull')) {
+            this.lastSoccerFullSync = Date.now();
+          }
           await processProviderMatches(providerMatches);
         } catch (err) {
           console.error(`[MatchAggregator] Provider fetch failed:`, err.message);
@@ -1795,6 +1804,10 @@ class MatchAggregator {
         const promiseResult = results[index];
         if (promiseResult.status === 'fulfilled') {
           if (Array.isArray(promiseResult.value) && promiseResult.value.length > 0) anyProviderSucceeded = true;
+          const p = providersToQuery[index];
+          if (p && (p.sourceName === 'soccerfull' || p.name === 'soccerfull')) {
+            this.lastSoccerFullSync = Date.now();
+          }
           await processProviderMatches(promiseResult.value);
         } else {
           console.error(`[MatchAggregator] Provider ${index} failed:`, promiseResult.reason);
@@ -1807,6 +1820,10 @@ class MatchAggregator {
     const TRENDING_KEYWORDS = ['bein', 'real madrid', 'barcelona', 'manchester', 'arsenal', 'liverpool', 'chelsea', 'bayern', 'psg', 'lakers', 'warriors', 'mcgregor', 'super bowl', 'champions league', 'el clasico', 'f1', 'formula 1', 'grand prix'];
 
     finalMatches.forEach(match => {
+      // Replays are past fixtures; do not artificially inject live trending flags onto them
+      if (match.status === 'finished' || match.status === 'ended') {
+        return;
+      }
       const titleLower = match.title.toLowerCase();
 
       // Parse kickoff date (default to 0 if none provided, assume live)

@@ -337,15 +337,24 @@ function compareCatalogMatches(a, b, isReplayMode = false) {
   // Sort upcoming by closest kickoff first, replays and live by newest first
   if (dateA > 0 && dateB > 0) {
     if (isReplayMode || aIsLive) {
-      return dateB - dateA;
+      if (dateA !== dateB) return dateB - dateA;
     } else {
-      return dateA - dateB;
+      if (dateA !== dateB) return dateA - dateB;
     }
   } else if (dateA > 0 && dateB === 0) {
     return -1; // A (with date) comes before B (without date)
   } else if (dateA === 0 && dateB > 0) {
     return 1; // B (with date) comes before A (without date)
   }
+
+  if (isReplayMode) {
+    const sfIdA = (a && a.id && a.id.startsWith('sf_')) ? (parseInt(a.id.slice(3), 10) || 0) : 0;
+    const sfIdB = (b && b.id && b.id.startsWith('sf_')) ? (parseInt(b.id.slice(3), 10) || 0) : 0;
+    if (sfIdA > 0 && sfIdB > 0 && sfIdA !== sfIdB) {
+      return sfIdB - sfIdA;
+    }
+  }
+
   return 0;
 }
 
@@ -371,6 +380,7 @@ function sortCatalogMatches(matches, isReplayMode = false) {
       tier: (m && m.category === 'networks') ? 99 : getMatchTier(m),
       pop: m && m.popular === '1' ? 1 : 0,
       kickoff: m && m.date ? getKickoff(m.date) : 0,
+      sfId: (m && m.id && m.id.startsWith('sf_')) ? (parseInt(m.id.slice(3), 10) || 0) : 0,
       idx: i,
     };
   }
@@ -399,10 +409,14 @@ function sortCatalogMatches(matches, isReplayMode = false) {
       if (dayA > 0 && dayB === 0) return -1;
       if (dayA === 0 && dayB > 0) return 1;
       if (a.tier !== b.tier) return a.tier - b.tier; // Mainstream (NHL/NBA) before Minor/Junior within the day
-      if (a.pop !== b.pop) return b.pop - a.pop;
       if (a.kickoff > 0 && b.kickoff > 0 && a.kickoff !== b.kickoff) {
         return b.kickoff - a.kickoff;
       }
+      // For SoccerFull replays without explicit kickoff, numeric ID indicates recency (higher is newer)
+      if (a.sfId > 0 && b.sfId > 0 && a.sfId !== b.sfId) {
+        return b.sfId - a.sfId;
+      }
+      if (a.pop !== b.pop) return b.pop - a.pop;
       return a.idx - b.idx;
     }
 
@@ -1390,8 +1404,10 @@ async function handleReplayCatalog(id, extra, config, reqType = 'tv') {
     matches = recent.length >= 10 ? recent : matches.slice(0, 40);
   } else if (filterType === 'premier_league' || filterType === 'epl') {
     matches = matches.filter(m => (m.league && /premier/i.test(m.league)) || /premier\s*league/i.test(m.title));
+  } else if (filterType === 'nations_league' || filterType === 'international') {
+    matches = matches.filter(m => (m.league && /nations\s*league|world\s*cup|euro(?:pean)?\s*championship|copa\s*america|international/i.test(m.league)) || /nations\s*league|world\s*cup|international/i.test(m.title));
   } else if (filterType === 'ucl' || filterType === 'champions_league') {
-    matches = matches.filter(m => (m.league && /champions|europa|conference|uefa/i.test(m.league)) || /champions\s*league|europa\s*league/i.test(m.title));
+    matches = matches.filter(m => (m.league && /champions|europa|conference|uefa|nations\s*league/i.test(m.league)) || /champions\s*league|europa\s*league|nations\s*league/i.test(m.title));
   } else if (filterType === 'european') {
     matches = matches.filter(m => (m.league && /la\s*liga|serie\s*a|bundesliga|ligue\s*1/i.test(m.league)));
   } else if (filterType === 'f1') {
