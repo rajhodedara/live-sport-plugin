@@ -220,7 +220,7 @@ class SoccerFullProvider extends BaseProvider {
    * Resolves replay streams for a match.
    * Scrapes match page buttons, ignores live broadcasts, resolves Vixeo & Vidara direct HLS.
    */
-  async resolveStream(sourceId, matchCategory, matchTitle, src) {
+  async resolveStream(sourceId, matchCategory, matchTitle, src, opts = {}) {
     const targetPath = (src && src.url) || sourceId || '';
     if (!targetPath) return [];
 
@@ -241,7 +241,7 @@ class SoccerFullProvider extends BaseProvider {
       }
 
       // Resolve each server option concurrently
-      const resolvePromises = servers.map(server => this._resolveServerStream(server, fullUrl));
+      const resolvePromises = servers.map(server => this._resolveServerStream(server, fullUrl, opts));
       const results = await Promise.allSettled(resolvePromises);
 
       const streams = [];
@@ -330,7 +330,7 @@ class SoccerFullProvider extends BaseProvider {
   /**
    * Resolves a single server SID into StreamEntity objects.
    */
-  async _resolveServerStream(server, refererUrl) {
+  async _resolveServerStream(server, refererUrl, opts = {}) {
     const { sid, label } = server;
     const playUrl = `${this.baseUrl}/play/${sid}`;
 
@@ -350,68 +350,73 @@ class SoccerFullProvider extends BaseProvider {
       if (res.statusCode !== 200) return [];
       const html = await res.body.text();
 
-      // Extract iframe src
-      const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-      if (!iframeMatch) {
-        // Shape A: ArtPlayer app with var m3u8Url = "/hls/<sid>.m3u8" or external CDN
-        const m3u8Match = html.match(/var\s+m3u8Url\s*=\s*["']([^"']+)["']/i);
-        if (m3u8Match) {
-          const rawM3u8 = m3u8Match[1].trim();
-          if (rawM3u8.includes('.m3u8')) {
-            const cleanLabel = this._formatPartLabel(label);
-            const isExternalCdn = /^https?:\/\//i.test(rawM3u8) && !rawM3u8.includes('soccerfull.net');
-            if (isExternalCdn) {
-              // Quick lightweight probe to discard upstream dead/404 playlists
-              try {
-                const probeRes = await undici.request(rawM3u8, {
-                  method: 'GET',
-                  headers: {
-                    ...this.defaultHeaders,
-                    Referer: `${this.baseUrl}/`
-                  },
-                  headersTimeout: 3000,
-                  bodyTimeout: 3000
-                });
-                if (probeRes.statusCode === 404) return [];
-              } catch (_) {}
+      const cleanLabel = this._formatPartLabel(label);
+      const appBaseUrl = opts.baseUrl || BASE_URL;
 
-              const directStream = new StreamEntity({
-                name: 'SoccerFull',
-                title: `SoccerFull | ${cleanLabel} (Auto)`,
-                resolution: 'Auto',
-                url: rawM3u8,
-                behaviorHints: {
-                  notWebReady: false,
-                  proxyHeaders: {
-                    request: {
-                      'User-Agent': this.defaultHeaders['User-Agent'],
-                      Referer: `${this.baseUrl}/`
-                    }
+      // 1. Direct playlist/stream in script (Clappr, ArtPlayer, inline player)
+      const directSourceMatch = html.match(/(?:source|m3u8Url|file|streamUrl)\s*[:=]\s*["']([^"']+)["']/i) ||
+                                html.match(/["']((?:https?:)?\\?\/\\?\/[^\s"']+\.(?:m3u8|txt)(?:\?[^\s"']*)?)["']/i);
+      if (directSourceMatch) {
+        const rawUrl = directSourceMatch[1].replace(/\\\//g, '/').replace(/\\/g, '').trim();
+        const fullUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, this.baseUrl).toString();
+
+        if (fullUrl.includes('.m3u8') || fullUrl.includes('.txt') || fullUrl.includes('/vod/')) {
+          const isExternalCdn = /^https?:\/\//i.test(fullUrl) && !fullUrl.includes('soccerfull.net');
+          if (isExternalCdn) {
+            // Quick lightweight probe to discard upstream dead/404 playlists
+            try {
+              const probeRes = await undici.request(fullUrl, {
+                method: 'GET',
+                headers: {
+                  ...this.defaultHeaders,
+                  Referer: `${this.baseUrl}/`
+                },
+                headersTimeout: 3000,
+                bodyTimeout: 3000
+              });
+              if (probeRes.statusCode === 404) return [];
+            } catch (_) {}
+
+            const directStream = new StreamEntity({
+              name: 'SoccerFull',
+              title: `SoccerFull | ${cleanLabel} (Auto)`,
+              resolution: 'Auto',
+              url: fullUrl,
+              behaviorHints: {
+                notWebReady: false,
+                proxyHeaders: {
+                  request: {
+                    'User-Agent': this.defaultHeaders['User-Agent'],
+                    Referer: `${this.baseUrl}/`
                   }
                 }
-              });
-              this._setCache(this._streamCache, playUrl, [directStream], 30 * 60 * 1000);
-              return [directStream];
-            } else {
-              const fullM3u8 = new URL(rawM3u8, this.baseUrl).toString();
-              // Self-hosted playlist on soccerfull.net: served without CORS headers and with
-              // TikTok-cloaked segments, so it is published through /api/soccerfull/manifest.
-              const playlistUrl = `${BASE_URL}/api/soccerfull/manifest?url=${encodeURIComponent(fullM3u8)}`;
-              const artStream = new StreamEntity({
-                name: 'SoccerFull',
-                title: `SoccerFull | ${cleanLabel} (Auto)`,
-                resolution: 'Auto',
-                url: playlistUrl,
-                isTikTok: true,
-                behaviorHints: {
-                  notWebReady: false
-                }
-              });
-              this._setCache(this._streamCache, playUrl, [artStream], 30 * 60 * 1000);
-              return [artStream];
-            }
+              }
+            });
+            this._setCache(this._streamCache, playUrl, [directStream], 30 * 60 * 1000);
+            return [directStream];
+          } else {
+            // Self-hosted playlist on soccerfull.net: served without CORS headers and with
+            // TikTok-cloaked segments, so it is published through /api/soccerfull/manifest.
+            const playlistUrl = `${appBaseUrl}/api/soccerfull/manifest?url=${encodeURIComponent(fullUrl)}`;
+            const artStream = new StreamEntity({
+              name: 'SoccerFull',
+              title: `SoccerFull | ${cleanLabel} (Auto)`,
+              resolution: 'Auto',
+              url: playlistUrl,
+              isTikTok: true,
+              behaviorHints: {
+                notWebReady: false
+              }
+            });
+            this._setCache(this._streamCache, playUrl, [artStream], 30 * 60 * 1000);
+            return [artStream];
           }
         }
+      }
+
+      // 2. Extract iframe src
+      const iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
+      if (!iframeMatch) {
         return [];
       }
 
@@ -424,8 +429,38 @@ class SoccerFullProvider extends BaseProvider {
 
       const streams = [];
 
+      // Direct MP4 in iframe
+      if (/\.mp4(?:$|\?)/i.test(iframeSrc)) {
+        streams.push(new StreamEntity({
+          name: 'SoccerFull',
+          title: `SoccerFull | ${cleanLabel} (1080p MP4)`,
+          resolution: '1080p',
+          url: iframeSrc,
+          behaviorHints: {
+            notWebReady: false
+          }
+        }));
+      }
+      // Direct m3u8 in iframe
+      else if (/\.m3u8(?:$|\?)/i.test(iframeSrc)) {
+        streams.push(new StreamEntity({
+          name: 'SoccerFull',
+          title: `SoccerFull | ${cleanLabel} (Auto)`,
+          resolution: 'Auto',
+          url: iframeSrc,
+          behaviorHints: {
+            notWebReady: false,
+            proxyHeaders: {
+              request: {
+                'User-Agent': this.defaultHeaders['User-Agent'],
+                Referer: `${this.baseUrl}/`
+              }
+            }
+          }
+        }));
+      }
       // A. OK.ru embed (direct high-speed CDN, zero VPS bandwidth)
-      if (/ok\.ru/i.test(iframeSrc)) {
+      else if (/ok\.ru/i.test(iframeSrc)) {
         const okStreams = await this._resolveOkRu(iframeSrc, label);
         if (Array.isArray(okStreams) && okStreams.length > 0) {
           streams.push(...okStreams);
@@ -689,9 +724,11 @@ class SoccerFullProvider extends BaseProvider {
   _formatPartLabel(label) {
     if (!label) return 'Full Match';
     let clean = label.trim();
+    clean = clean.replace(/\bin\s+([a-z]{2})\b/gi, (_, l) => `(${l.toUpperCase()})`);
     clean = clean.replace(/\bin\s+en\b/gi, '(EN)');
     clean = clean.replace(/\bhighlight\b/gi, 'Highlights');
     clean = clean.replace(/\b2st\b/gi, '2nd');
+    clean = clean.replace(/\b1st\b/gi, '1st');
     return clean;
   }
 

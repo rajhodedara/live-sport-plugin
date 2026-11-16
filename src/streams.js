@@ -280,7 +280,7 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'soccerfull') {
     const provider = container.resolve('soccerFullProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
   } else if (sourceName === 'basketballvideo') {
     const provider = container.resolve('basketballVideoProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);

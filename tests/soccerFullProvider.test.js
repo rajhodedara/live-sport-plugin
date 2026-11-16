@@ -572,5 +572,82 @@ describe('SoccerFullProvider', () => {
       expect(sids).toContain('18300');
       expect(sids).not.toContain('4789');
     });
+
+    test('extracts Clappr direct external CDN master.m3u8 with escaped slashes', async () => {
+      const undici = require('../src/services/ProviderOutbound');
+      const clapprHtml = `<!doctype html><html><body><div id="player"></div>
+        <script>
+        (function () {
+          const source = "https:\\/\\/m1-s1001604.97bf1.com\\/hls\\/rwKBPEuXo0tfKR6JPlUQLleYWKLniSZI\\/master.m3u8?token=abc123";
+          const player = new Clappr.Player({ source: source });
+        })();
+        </script></body></html>`;
+
+      jest.spyOn(undici, 'request')
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: { text: async () => clapprHtml }
+        })
+        .mockResolvedValueOnce({
+          statusCode: 200,
+          body: { text: async () => '#EXTM3U' }
+        });
+
+      const streams = await provider._resolveServerStream({ sid: '18938', label: '1st half in En' }, 'https://soccerfull.net/spain-vs-england.html');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.name).toBe('SoccerFull');
+      expect(s.title).toBe('SoccerFull | 1st half (EN) (Auto)');
+      expect(s.url).toBe('https://m1-s1001604.97bf1.com/hls/rwKBPEuXo0tfKR6JPlUQLleYWKLniSZI/master.m3u8?token=abc123');
+      expect(s.behaviorHints.notWebReady).toBe(false);
+      expect(s.behaviorHints.proxyHeaders.request.Referer).toBe('https://soccerfull.net/');
+    });
+
+    test('extracts Clappr self-hosted vod text playlist shape wrapping with soccerfull manifest proxy', async () => {
+      const undici = require('../src/services/ProviderOutbound');
+      const clapprHtml = `<!doctype html><html><body><div id="player"></div>
+        <script>
+        (function () {
+          const source = "https:\\/\\/soccerfull.net\\/vod\\/24.txt";
+          const player = new Clappr.Player({ source: source });
+        })();
+        </script></body></html>`;
+
+      jest.spyOn(undici, 'request').mockResolvedValueOnce({
+        statusCode: 200,
+        body: { text: async () => clapprHtml }
+      });
+
+      const streams = await provider._resolveServerStream({ sid: '18925', label: 'Full Match' }, 'https://soccerfull.net/spain-vs-england.html');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.name).toBe('SoccerFull');
+      expect(s.title).toBe('SoccerFull | Full Match (Auto)');
+      expect(s.url).toContain('/api/soccerfull/manifest?url=');
+      expect(s.url).toContain(encodeURIComponent('https://soccerfull.net/vod/24.txt'));
+      expect(s.isTikTok).toBe(true);
+      expect(s.behaviorHints.notWebReady).toBe(false);
+    });
+
+    test('extracts direct mp4 video when embedded via iframe', async () => {
+      const undici = require('../src/services/ProviderOutbound');
+      const iframeHtml = `<!doctype html><html><body>
+        <iframe src="https://videos2.footballia.net/uploads/video/source_file/93348/match.mp4" width="100%"></iframe>
+        </body></html>`;
+
+      jest.spyOn(undici, 'request').mockResolvedValueOnce({
+        statusCode: 200,
+        body: { text: async () => iframeHtml }
+      });
+
+      const streams = await provider._resolveServerStream({ sid: '18956', label: '1st Half' }, 'https://soccerfull.net/match.html');
+      expect(streams).toHaveLength(1);
+      const s = streams[0];
+      expect(s.name).toBe('SoccerFull');
+      expect(s.title).toBe('SoccerFull | 1st Half (1080p MP4)');
+      expect(s.resolution).toBe('1080p');
+      expect(s.url).toBe('https://videos2.footballia.net/uploads/video/source_file/93348/match.mp4');
+      expect(s.behaviorHints.notWebReady).toBe(false);
+    });
   });
 });

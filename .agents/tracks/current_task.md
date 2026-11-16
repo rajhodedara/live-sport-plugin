@@ -58,7 +58,15 @@
     - Tagged emitted streams with `isCondensed` on `StreamEntity.js` and set explicit `partName` (e.g. `Full Game (Server #1 OK)`, `Condensed Game (OK)`).
     - Updated `src/streams.js` regex to recognize `Full Game` and `Condensed Game` badges (`🎬 Full Game`, `🎬 Condensed Game`) and isolated binge groups (`nuvio_sport_${matchId}_full` vs `nuvio_sport_${matchId}_condensed`).
     - Added priority sorting in `src/services/LanguagePriorityService.js` placing Full Game streams first, followed by Condensed Game streams.
+15. **SoccerFull Football Replay Stream Extraction**:
+    - Investigated `nuviosports.xyz` football replay stream outage where `nuvio_sport_sf_*` returned empty streams (`streams: []`).
+    - Upstream `soccerfull.net/play/<sid>` transitioned from legacy ArtPlayer `var m3u8Url = ...` to inline Clappr with `const source = "https:\/\/..."` (escaped slashes), self-hosted `.txt` playlists (`/vod/<id>.txt`), and direct `.mp4` video iframes (e.g. Footballia).
+    - Updated `src/providers/SoccerFullProvider.js`:
+      - Extracted direct stream sources from Clappr/script inline declarations (`source`, `m3u8Url`, `file`, `streamUrl`) with unescaping.
+      - Supported direct external HLS CDNs, self-hosted `.txt` playlists routed via `/api/soccerfull/manifest`, and direct `.mp4` / `.m3u8` iframes.
+      - Enhanced `_formatPartLabel` to cleanly normalize language tags (e.g. `(EN)`, `(ES)`, `(RU)`, `(AR)`).
+    - Passed `opts` to `soccerFullProvider.resolveStream` in `src/streams.js`.
 
 ## Verification
-- Tests: 25 passed in `tests/nflVideoProvider.test.js` (including new 'Condensed Game vs Full Game Replay Extraction' suite). 120 passed in `tests/languagePriority.test.js`. Clean `node --check` across all modified files.
-- Zero server bandwidth: direct CDN playback (`okcdn.ru`, `SprintCDN`) preserved per Invariant I1.
+- Tests: 51 passed in `tests/soccerFullProvider.test.js` (3 new tests for Clappr external CDN with escaped slashes, self-hosted vod text playlist, and direct mp4 iframe). 52 passed across all related soccerfull suites. Clean `node --check`. Verified real live resolution on match `sf_4973` (9 playable streams) and `sf_4961` (6 playable streams).
+- Zero server bandwidth: direct CDN playback (`proxyHeaders`, open CORS) preserved per Invariant I1.
