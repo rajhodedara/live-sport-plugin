@@ -32,7 +32,11 @@ const MAX_CHANNEL_CACHE_ENTRIES = 500;
 // the first play would have made and warms that token instead of duplicating it.
 const PROBE_TIMEOUT_MS = Number(process.env.SCOREZONE_PROBE_TIMEOUT_MS || 4000);
 const PROBE_MAX_BODY_BYTES = 64 * 1024;
-const PROBE_CONCURRENCY = 4;
+// Probes share the 4-slot native pool with manifest/segment traffic. Keep the
+// burst small and stop starting new samples once the budget is spent: a feed
+// that was not sampled is kept, never dropped.
+const PROBE_CONCURRENCY = 3;
+const PROBE_BUDGET_MS = Number(process.env.SCOREZONE_PROBE_BUDGET_MS || 7000);
 // The relay answers a single request with 502 while the same feed plays on the
 // next sample. One retry separates that flake from a feed that is really gone
 // without turning a dead feed into three slow attempts.
@@ -197,14 +201,16 @@ class ScoreZoneProvider extends BaseProvider {
    * Only `dead` may drop a stream. A probe that could not run is not evidence
    * that the feed is gone, exactly like the resolver's pre-flight policy.
    */
-  async _probeMediaUrl(url) {
+  async _probeMediaUrl(url, options = {}) {
     if (!url || typeof url !== 'string') return { verdict: 'dead', status: null };
+    const requested = Number(options.timeoutMs) || PROBE_TIMEOUT_MS;
+    const timeoutMs = Math.min(PROBE_TIMEOUT_MS, Math.max(500, requested));
     let res;
     for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
       try {
         res = await this.proxyFetch(url, {
           headers: SCOREZONE_HEADERS,
-          timeoutMs: PROBE_TIMEOUT_MS,
+          timeoutMs,
           attempts: 1,
           maxBodyBytes: PROBE_MAX_BODY_BYTES,
         });
@@ -238,7 +244,7 @@ class ScoreZoneProvider extends BaseProvider {
   }
 
   /** Mint the playback URL for one event feed, then sample that upstream URL. */
-  async _probeEventFeed(meta, channelId) {
+  async _probeEventFeed(meta, channelId, options = {}) {
     let playbackUrl = null;
     try {
       playbackUrl = await getOrRemintPlaybackUrl(meta, channelId, false);
@@ -248,7 +254,7 @@ class ScoreZoneProvider extends BaseProvider {
       return { verdict: 'inconclusive', status: null };
     }
     if (!playbackUrl) return { verdict: 'dead', status: 'no-playback' };
-    return this._probeMediaUrl(playbackUrl);
+    return this._probeMediaUrl(playbackUrl, options);
   }
 
   _getSecret() {
@@ -655,8 +661,11 @@ class ScoreZoneProvider extends BaseProvider {
     // clickable until the resolver cache turned over.
     let playable = unlocked;
     if (unlocked.length > 0 && this._probeEnabled()) {
+      const probeDeadline = Date.now() + PROBE_BUDGET_MS;
       const probed = await mapWithConcurrency(unlocked, PROBE_CONCURRENCY, async (ch) => {
-        const probe = await this._probeEventFeed(meta, ch.id);
+        const remaining = probeDeadline - Date.now();
+        if (remaining < 500) return ch;
+        const probe = await this._probeEventFeed(meta, ch.id, { timeoutMs: remaining });
         if (probe.verdict === 'dead') {
           console.warn(`[ScoreZone] Dropped dead feed (${probe.status || 'no-response'}): ${ch.name}`);
           return null;
