@@ -80,9 +80,14 @@ describe('ScoreZone production circuit-breaker deferral', () => {
 
   test.each(['iptv', 'fixture'])('%s capacity reaches a two-second cooldown and recovers without a negative', async route => {
     const source = sourceFor(route);
-    provider.proxyFetch = jest.fn().mockRejectedValueOnce(capacity()).mockResolvedValueOnce({
-      ok: true, status: 200, json: async () => ({ channels: [{ ...channel, id: route === 'iptv' ? 'one' : 'main' }] })
-    });
+    provider.proxyFetch = jest.fn()
+      .mockRejectedValueOnce(capacity())
+      .mockResolvedValueOnce({
+        ok: true, status: 200, json: async () => ({ channels: [{ ...channel, id: route === 'iptv' ? 'one' : 'main' }] })
+      })
+      // IPTV: the resolved channel is sampled once. Fixture: the playback mint
+      // itself throws on the tripwire below, so no manifest sample is taken.
+      .mockResolvedValue({ ok: true, status: 200, text: async () => '', bodyTruncated: true });
     const failed = jest.spyOn(cache, 'noteFailure');
     const query = mint(source);
     expect(await query.run()).toEqual([]);
@@ -100,7 +105,9 @@ describe('ScoreZone production circuit-breaker deferral', () => {
     expect(recovered).toHaveLength(1);
     expect(recovered[0].url).toBeTruthy();
     expect(cache.entries.get(query.key).status).toBe('ok');
-    expect(provider.proxyFetch).toHaveBeenCalledTimes(2);
+    // IPTV mints from the catalog then samples the channel once; the fixture
+    // route stops at the playback tripwire, so its sample never runs.
+    expect(provider.proxyFetch).toHaveBeenCalledTimes(route === 'iptv' ? 3 : 2);
   });
 
   test.each([['iptv', timeout], ['fixture', timeout], ['iptv', wrappedCapacity], ['fixture', wrappedCapacity]])(

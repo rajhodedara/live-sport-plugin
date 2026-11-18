@@ -56,7 +56,9 @@ describe('ScoreZone IPTV: inconclusive metadata refresh', () => {
     const unavailable = capacity('ERR_NATIVE_POOL_BUSY');
     provider.proxyFetch = jest.fn()
       .mockRejectedValueOnce(unavailable)
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ channels: [channel] }) });
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ channels: [channel] }) })
+      // The resolved channel is then sampled once; a byte-capped live body keeps it.
+      .mockResolvedValueOnce({ ok: true, status: 200, text: async () => '', bodyTruncated: true });
     const cache = new StreamResolveCache();
     cache._sharedAvailable = () => false;
     container.resolve.mockImplementation(name => ({
@@ -78,6 +80,6 @@ describe('ScoreZone IPTV: inconclusive metadata refresh', () => {
     expect(recovered).toHaveLength(1);
     expect(recovered[0].url).toBe(channel.url);
     expect(cache.entries.get(key).status).toBe('ok');
-    expect(provider.proxyFetch).toHaveBeenCalledTimes(2);
+    expect(provider.proxyFetch).toHaveBeenCalledTimes(3);
   });
 });

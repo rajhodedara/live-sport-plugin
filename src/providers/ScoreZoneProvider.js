@@ -6,7 +6,8 @@ const { isInconclusiveResolutionError } = require('../services/StreamResolutionO
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { BASE_URL } = require('../config');
-const { tokenCache, setTokenCache } = require('../routes/scoreZoneStream');
+const { tokenCache, setTokenCache, getOrRemintPlaybackUrl } = require('../routes/scoreZoneStream');
+const { mapWithConcurrency } = require('../services/BoundedMap');
 const ChannelIdentityService = require('../services/ChannelIdentityService');
 const ChannelCountryService = require('../services/ChannelCountryService');
 
@@ -25,6 +26,18 @@ const SCOREZONE_IPTV_HEADERS = {
 
 const IPTV_CACHE_TTL = 20 * 60 * 1000; // 20 minutes
 const MAX_CHANNEL_CACHE_ENTRIES = 500;
+
+// One liveness sample per resolved feed. Minting the playback URL first reuses
+// the manifest proxy's token cache, so the sample costs the same upstream calls
+// the first play would have made and warms that token instead of duplicating it.
+const PROBE_TIMEOUT_MS = Number(process.env.SCOREZONE_PROBE_TIMEOUT_MS || 4000);
+const PROBE_MAX_BODY_BYTES = 64 * 1024;
+const PROBE_CONCURRENCY = 4;
+// The relay answers a single request with 502 while the same feed plays on the
+// next sample. One retry separates that flake from a feed that is really gone
+// without turning a dead feed into three slow attempts.
+const PROBE_ATTEMPTS = 2;
+const PROBE_RETRY_DELAY_MS = 250;
 
 function getCountryFlag(country) {
   if (!country || typeof country !== 'string') return '';
@@ -168,6 +181,74 @@ class ScoreZoneProvider extends BaseProvider {
 
   isEnabled() {
     return process.env.SCOREZONE_ENABLED === 'true';
+  }
+
+  _probeEnabled() {
+    return process.env.SCOREZONE_PROBE_ENABLED !== 'false';
+  }
+
+  /**
+   * One upstream liveness sample for a media URL.
+   *
+   *   ok           - playlist evidence (#EXT) or a byte-capped live media body
+   *   dead         - upstream refused (4xx, or 5xx persisting after one retry)
+   *   inconclusive - no usable sample (local congestion, timeout, transport)
+   *
+   * Only `dead` may drop a stream. A probe that could not run is not evidence
+   * that the feed is gone, exactly like the resolver's pre-flight policy.
+   */
+  async _probeMediaUrl(url) {
+    if (!url || typeof url !== 'string') return { verdict: 'dead', status: null };
+    let res;
+    for (let attempt = 1; attempt <= PROBE_ATTEMPTS; attempt++) {
+      try {
+        res = await this.proxyFetch(url, {
+          headers: SCOREZONE_HEADERS,
+          timeoutMs: PROBE_TIMEOUT_MS,
+          attempts: 1,
+          maxBodyBytes: PROBE_MAX_BODY_BYTES,
+        });
+      } catch (err) {
+        return { verdict: 'inconclusive', status: null, reason: err && err.message };
+      }
+      if (!res || typeof res.status !== 'number') return { verdict: 'inconclusive', status: null };
+      if (res.status < 500 || attempt === PROBE_ATTEMPTS) break;
+      await new Promise(resolve => setTimeout(resolve, PROBE_RETRY_DELAY_MS));
+    }
+
+    if (res.status === 401 || res.status === 403 || res.status === 404 || res.status === 410 || res.status >= 500) {
+      return { verdict: 'dead', status: res.status };
+    }
+    if (res.status < 200 || res.status >= 300) return { verdict: 'inconclusive', status: res.status };
+
+    let body = '';
+    try {
+      body = typeof res.text === 'function' ? await res.text() : '';
+    } catch (_) {
+      return { verdict: 'inconclusive', status: res.status };
+    }
+
+    if (typeof body === 'string' && body.includes('#EXT')) return { verdict: 'ok', status: res.status };
+    // A live MPEG-TS feed never contains '#EXT'. Hitting the byte cap proves
+    // media flowed instead of a 200 error page, so keep it.
+    if (res.bodyTruncated === true) return { verdict: 'ok', status: res.status };
+    // A 200 that carries neither a playlist nor capped media is a soft failure
+    // page (empty body, "Relay request failed", HTML).
+    return { verdict: 'dead', status: res.status };
+  }
+
+  /** Mint the playback URL for one event feed, then sample that upstream URL. */
+  async _probeEventFeed(meta, channelId) {
+    let playbackUrl = null;
+    try {
+      playbackUrl = await getOrRemintPlaybackUrl(meta, channelId, false);
+    } catch (_) {
+      // Our own transport failed before upstream answered. No sample existed,
+      // so this is not evidence the feed is gone.
+      return { verdict: 'inconclusive', status: null };
+    }
+    if (!playbackUrl) return { verdict: 'dead', status: 'no-playback' };
+    return this._probeMediaUrl(playbackUrl);
   }
 
   _getSecret() {
@@ -436,6 +517,14 @@ class ScoreZoneProvider extends BaseProvider {
         return [];
       }
 
+      if (this._probeEnabled()) {
+        const probe = await this._probeMediaUrl(channel.url);
+        if (probe.verdict === 'dead') {
+          console.warn(`[ScoreZone] Dropped dead channel (${probe.status || 'no-response'}): ${channel.name}`);
+          return [];
+        }
+      }
+
       const flag = getCountryFlag(channel.country);
       const title = `📺 ScoreZone | ${channel.name}${flag ? ' ' + flag : ''}\n📺 Quality: HD`;
 
@@ -560,7 +649,24 @@ class ScoreZoneProvider extends BaseProvider {
     const unlocked = channelsData.channels.filter(c => !c.locked);
     const effectiveSourceId = src ? src.id : sourceId;
 
-    return unlocked.map(ch => new StreamEntity({
+    // Drop feeds whose upstream answers with a refusal (404/410/5xx, or a dead
+    // relay 200 that carries no playlist). Without this sample the list was
+    // built from the channels API alone, so an expired or pulled feed stayed
+    // clickable until the resolver cache turned over.
+    let playable = unlocked;
+    if (unlocked.length > 0 && this._probeEnabled()) {
+      const probed = await mapWithConcurrency(unlocked, PROBE_CONCURRENCY, async (ch) => {
+        const probe = await this._probeEventFeed(meta, ch.id);
+        if (probe.verdict === 'dead') {
+          console.warn(`[ScoreZone] Dropped dead feed (${probe.status || 'no-response'}): ${ch.name}`);
+          return null;
+        }
+        return ch;
+      });
+      playable = probed.filter(Boolean);
+    }
+
+    return playable.map(ch => new StreamEntity({
       name: 'ScoreZone',
       title: `ScoreZone | ${ch.name}${ch.quality ? ' — ' + ch.quality : ''}`,
       url: `${BASE_URL}/api/scorezone/manifest/${encodeURIComponent(effectiveSourceId)}/${encodeURIComponent(ch.id)}.m3u8`,

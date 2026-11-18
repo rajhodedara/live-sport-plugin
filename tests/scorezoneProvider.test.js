@@ -502,6 +502,12 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
           })
         };
       }
+      if (url.includes('/api/matches/playback')) {
+        return { ok: true, status: 200, json: async () => ({ url: 'https://relay.fixture.test/hls/feed1/index.m3u8' }) };
+      }
+      if (url.includes('relay.fixture.test/hls/feed1/index.m3u8')) {
+        return { ok: true, status: 200, text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg-1.ts\n' };
+      }
       return { ok: false, status: 404 };
     });
 
@@ -789,6 +795,10 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
     ];
     provider._cachedIptvChannelsTime = Date.now();
 
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({
+      ok: true, status: 200, text: async () => '', bodyTruncated: true
+    });
+
     const streams = await provider.resolveStream('sz_iptv_us-nbc', 'networks', 'NBC');
     expect(streams).toHaveLength(1);
     const s = streams[0];
@@ -834,7 +844,7 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
           })
         };
       }
-      return { ok: false, status: 404 };
+      return { ok: true, status: 200, text: async () => '', bodyTruncated: true };
     });
 
     const streams = await provider.resolveStream('sz_iptv_us-fox', 'networks', 'FOX');
@@ -870,5 +880,82 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
     expect(p1.isChannel).toBe(true);
     expect(p2.isChannel).toBe(true);
     expect(agg._sameEventPre(p1, p2)).toBe(true);
+  });
+
+  // 29. A feed whose upstream relay answers 502 is dropped, live siblings stay
+  test('29. resolveStream drops a feed whose upstream relay is dead', async () => {
+    const meta = { h: 'Chile', a: 'Colombia', s: 'football', e: '1913931' };
+    const sourceId = mintSourceId(meta);
+    const liveManifest = '#EXTM3U\n#EXT-X-TARGETDURATION:6\n#EXTINF:6.0,\nseg-1.ts\n';
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url, opts = {}) => {
+      if (url.includes('/api/matches/channels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            key: 'k-mixed',
+            channels: [
+              { id: 'dead', name: 'Dead Relay', quality: 'HD', locked: false },
+              { id: 'alive', name: 'Working Relay', quality: 'HD', locked: false }
+            ]
+          })
+        };
+      }
+      if (url.includes('/api/matches/playback')) {
+        const channelId = JSON.parse(opts.body).channelId;
+        return { ok: true, status: 200, json: async () => ({ url: `https://relay.fixture.test/hls/${channelId}/index.m3u8` }) };
+      }
+      if (url.includes('/hls/alive/index.m3u8')) {
+        return { ok: true, status: 200, text: async () => liveManifest };
+      }
+      return { ok: false, status: 502, text: async () => 'Relay request failed' };
+    });
+
+    const streams = await provider.resolveStream(sourceId, 'football', 'Chile vs Colombia');
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toContain('/alive.m3u8');
+    expect(streams[0].url).not.toContain('/dead.m3u8');
+  });
+
+  // 30. No usable sample (transport timeout) keeps the feed instead of dropping it
+  test('30. resolveStream keeps a feed when the liveness sample cannot run', async () => {
+    const meta = { h: 'Home', a: 'Away', s: 'football', e: '424242' };
+    const sourceId = mintSourceId(meta);
+    const timeout = Object.assign(new Error('Local transport deadline'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockImplementation(async (url) => {
+      if (url.includes('/api/matches/channels')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ key: 'k-timeout', channels: [{ id: 'feed1', name: 'Feed 1', locked: false }] })
+        };
+      }
+      if (url.includes('/api/matches/playback')) {
+        return { ok: true, status: 200, json: async () => ({ url: 'https://relay.fixture.test/hls/feed1/index.m3u8' }) };
+      }
+      throw timeout;
+    });
+
+    const streams = await provider.resolveStream(sourceId, 'football', 'Home vs Away');
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toContain('/api/scorezone/manifest/');
+  });
+
+  // 31. A 24/7 channel that answers 404 is dropped instead of advertised
+  test('31. resolveStream drops an IPTV channel that answers 404', async () => {
+    provider._cachedIptvChannels = [{
+      id: 'us-dead',
+      name: 'Dead Channel',
+      country: 'US',
+      url: 'https://scorezone-live.scorezone.workers.dev/live/us-dead/media.ts',
+      expiresAt: Date.now() + 3600000
+    }];
+    provider._cachedIptvChannelsTime = Date.now();
+
+    safeFetchSpy = jest.spyOn(impitClient, 'safeFetch').mockResolvedValue({ ok: false, status: 404, text: async () => 'Not found' });
+
+    await expect(provider.resolveStream('sz_iptv_us-dead', 'networks', 'Dead Channel')).resolves.toEqual([]);
   });
 });

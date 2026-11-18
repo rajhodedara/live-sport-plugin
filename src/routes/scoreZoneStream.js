@@ -362,3 +362,4 @@ module.exports.playlistCache = playlistCache;
 module.exports.setTokenCache = setTokenCache;
 module.exports.setPlaylistCache = setPlaylistCache;
 module.exports.extractMasterPlaylistVariants = extractMasterPlaylistVariants;
+module.exports.getOrRemintPlaybackUrl = getOrRemintPlaybackUrl;
