@@ -350,13 +350,28 @@ async function entryToDataUri(entry) {
 // it without limit.
 try {
   const sharp = require('sharp');
-  sharp.concurrency(1);
-  sharp.cache({ memory: 16, files: 0, items: 20 });
+  sharp.concurrency(2);
+  sharp.cache({ memory: 32, files: 0, items: 40 });
 } catch (_) {}
+
+// Generated cards are a pure function of their query string (category, teams,
+// badges, league, channel, status, time, score, shape), and the catalog appends
+// ?v= whenever the card design changes. The old policy (max-age=300 /
+// s-maxage=1800 on /img/match, max-age=120 / s-maxage=300 on /img) let the edge
+// copy of every homepage poster expire within minutes, so a 100-card row
+// re-rendered at origin on almost every visit: 36 of 40 sampled home cards were
+// Cloudflare MISSes at ~1.6 s each. The client TTL stays inside a day so a
+// deploy is visible quickly; the edge copy is kept for a week.
+const GENERATED_IMAGE_CACHE = 'public, max-age=21600, s-maxage=604800, stale-while-revalidate=86400';
+
+// A raw /img passthrough can be a multi-megabyte upstream asset (one homepage
+// card shipped 1.4 MB). Cards and heros render at <= 1280 CSS px, so anything
+// past this is re-encoded once before it reaches the client.
+const IMG_PASSTHROUGH_MAX_BYTES = 256 * 1024;
 
 const matchCardMemo = new Map();
 const matchCardInFlight = new Map();
-const MATCH_CARD_MEMO_MAX = 120;
+const MATCH_CARD_MEMO_MAX = 320;
 
 // Stremio's documented poster budget is 100 kb (50 kb recommended). Generated
 // SVG cards sit around 3-6 kb, so this is a guard rail, not a design target.
@@ -455,7 +470,7 @@ app.get(['/img/match', '/:config/img/match'], async (req, res) => {
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-  res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600');
+  res.setHeader('Cache-Control', GENERATED_IMAGE_CACHE);
 
   const memoKey = [
     qs(query.cat), qs(query.title), qs(query.t1), qs(query.t2), qs(query.b1), qs(query.b2),
@@ -795,7 +810,7 @@ app.get('/img', async (req, res) => {
   const entry = await imageService.getImage(req.query.url);
   const isValidEntry = entry && (entry.width == null || entry.width > 2) && (entry.height == null || entry.height > 2) && entry.buffer && entry.buffer.length > 100;
   if (isValidEntry) {
-    res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=300, stale-while-revalidate=600');
+    res.setHeader('Cache-Control', GENERATED_IMAGE_CACHE);
     if (embed && !entry.contentType.includes('svg')) {
       const bg = /^([0-9a-fA-F]{6})$/.test(String(color)) ? `#${color}` : '#333333';
       // Inline the bytes: an SVG poster never fetches external subresources, so
@@ -848,11 +863,24 @@ app.get('/img', async (req, res) => {
       }
       return await sendRasterizedIfPossible(res, svg);
     }
+    if (entry.buffer.length > IMG_PASSTHROUGH_MAX_BYTES && !/svg/i.test(entry.contentType || '')) {
+      try {
+        const sharp = require('sharp');
+        const shrunk = await sharp(entry.buffer)
+          .resize({ width: 1280, withoutEnlargement: true })
+          .jpeg({ quality: 82 })
+          .toBuffer();
+        res.setHeader('Content-Type', 'image/jpeg');
+        return res.send(shrunk);
+      } catch (_) {
+        // Fall through to the original bytes rather than serving nothing.
+      }
+    }
     res.setHeader('Content-Type', entry.contentType);
     return res.send(entry.buffer);
   }
   const svg = imageService.svgPlaceholder(text, color);
-  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.setHeader('Cache-Control', GENERATED_IMAGE_CACHE);
   await sendRasterizedIfPossible(res, svg);
 });
 

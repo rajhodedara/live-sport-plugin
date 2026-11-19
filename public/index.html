@@ -636,7 +636,7 @@
 
         card.innerHTML = `
           <div class="poster-container">
-            <img class="background" src="${meta.background}" alt="" onerror="this.style.display='none'" loading="lazy">
+            ${meta.background && meta.background !== meta.poster ? `<img class="background" src="${meta.background}" alt="" onerror="this.style.display='none'" loading="lazy">` : ''}
             <img class="poster" src="${meta.poster}" alt="" onerror="this.src='https://raw.githubusercontent.com/stremio/stremio-addon-sdk/master/docs/api/images/stremio-logo.png'" loading="lazy">
           </div>
           <div class="info">

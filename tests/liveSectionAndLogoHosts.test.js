@@ -411,14 +411,20 @@ describe('generated cards are self-contained (logos actually render)', () => {
 });
 
 describe('generated cards do not pin stale artwork for 24h', () => {
-  test('match and embed SVGs use a short client TTL', () => {
-    // These cards encode live state (status/score/kickoff) and embed badge URLs,
-    // so a 24h cache kept serving pre-fix broken renders long after a deploy.
+  test('generated card handlers use the shared edge-friendly cache policy', () => {
+    // These cards encode live state (status/score/kickoff) in their query, so a
+    // given URL is immutable and the catalog appends ?v= when the design
+    // changes. The client TTL stays short enough that a deploy shows up quickly,
+    // while the edge copy lasts long enough that a 100-card homepage row is not
+    // re-rendered at origin for every visitor (that was the 1.6 s-per-card
+    // homepage slowdown: 36 of 40 sampled cards were Cloudflare MISSes).
     const source = fs.readFileSync(require.resolve('../src/index'), 'utf8');
-    const matchCards = source.match(/res\.setHeader\('Cache-Control', 'public, max-age=300, s-maxage=1800, stale-while-revalidate=3600'\);/g) || [];
-    expect(matchCards.length).toBeGreaterThanOrEqual(1);
-    // The generated-card handlers must no longer pin a 24h TTL.
+    expect(source).toContain(
+      "const GENERATED_IMAGE_CACHE = 'public, max-age=21600, s-maxage=604800, stale-while-revalidate=86400';"
+    );
     const indexHandlers = source.slice(source.indexOf("app.get(['/img/match'"), source.indexOf("app.get(['/img/badge'"));
+    expect(indexHandlers).toContain('GENERATED_IMAGE_CACHE');
+    // The generated-card handlers must not pin a 24h client TTL.
     expect(indexHandlers).not.toContain('max-age=86400');
   });
 });
