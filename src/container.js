@@ -40,6 +40,7 @@ const LeafProvider = require('./providers/LeafProvider');
 const LeafRecapProvider = require('./providers/LeafRecapProvider');
 const ScoreZoneProvider = require('./providers/ScoreZoneProvider');
 const PitSportProvider = require('./providers/PitSportProvider');
+const SportsBiteProvider = require('./providers/SportsBiteProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
@@ -108,6 +109,7 @@ container.register({
   leafRecapProvider: asClass(LeafRecapProvider).singleton(),
   scorezoneProvider: asClass(ScoreZoneProvider).singleton(),
   pitSportProvider: asClass(PitSportProvider).singleton(),
+  sportsBiteProvider: asClass(SportsBiteProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 

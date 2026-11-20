@@ -60,6 +60,7 @@ const SOURCE_PRIORITY = {
   timstreams: 2,
   ppvst: 3,
   pitsport: 4,
+  sportsbite: 4,
   daddylive: 5,
   vavoo: 6,
   sktech: 7,
@@ -90,8 +91,8 @@ const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -125,7 +126,8 @@ const NICE_NAMES = {
   golf: 'Streamed.pk',
   delta: 'Streamed.pk',
   scorezone: 'ScoreZone',
-  pitsport: 'PitSport'
+  pitsport: 'PitSport',
+  sportsbite: 'SportsBite'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -153,7 +155,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   ak47live: 'AK47Live',
   leaf: 'Leaf',
   scorezone: 'ScoreZone',
-  pitsport: 'PitSport'
+  pitsport: 'PitSport',
+  sportsbite: 'SportsBite'
 };
 
 function isReplaySource(sourceName) {
@@ -316,6 +319,9 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'pitsport') {
     const provider = container.resolve('pitSportProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'sportsbite') {
+    const provider = container.resolve('sportsBiteProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -1705,6 +1711,7 @@ async function handleStream(type, id, config) {
     else if (s._source === 'livetv' || sTitleLower.includes('livetv')) providerName = 'LiveTV';
     else if (s._source === 'replayzone' || sTitleLower.includes('replayzone')) providerName = 'ReplayZone';
     else if (s._source === 'pitsport' || sTitleLower.includes('pitsport')) providerName = 'PitSport';
+    else if (s._source === 'sportsbite' || sTitleLower.includes('sportsbite')) providerName = 'SportsBite';
 
     let originalTitle = s.title || '';
     // The provider's explicit broadcaster is stronger evidence than the first
