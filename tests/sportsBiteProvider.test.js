@@ -4,6 +4,7 @@ process.env.NODE_ENV = 'test';
 
 const SportsBiteProvider = require('../src/providers/SportsBiteProvider');
 const MatchEntity = require('../src/domain/MatchEntity');
+const StreamEntity = require('../src/domain/StreamEntity');
 
 describe('SportsBiteProvider - Catalog Ingestion', () => {
   let provider;
@@ -74,5 +75,52 @@ describe('SportsBiteProvider - Catalog Ingestion', () => {
     jest.spyOn(provider, 'proxyFetch').mockRejectedValueOnce(new Error('Network timeout'));
     const matches = await provider.getMatches();
     expect(matches).toEqual([]);
+  });
+});
+
+describe('SportsBiteProvider - Stream Resolution', () => {
+  let provider;
+
+  beforeEach(() => {
+    provider = new SportsBiteProvider();
+  });
+
+  test('resolves selfhost embed into direct Cloudflare R2 manifest proxy stream', async () => {
+    const embedHtml = `
+      <html>
+        <script>
+          var source = window.atob("L3NlbGZob3N0L3BsYXkvcy03ZGE1NzQxOTUxMTVkZTBhNjVmOQ==");
+        </script>
+      </html>
+    `;
+
+    jest.spyOn(provider, 'proxyFetch').mockResolvedValueOnce({
+      ok: true,
+      text: async () => embedHtml
+    });
+
+    const streams = await provider.resolveStream('s-7da574195115de0a65f9', 'football', 'Athletic Club vs. Espanyol', {
+      source: 'sportsbite',
+      id: 's-7da574195115de0a65f9',
+      embedUrl: 'https://sportsbite.org/selfhost/embed/s-7da574195115de0a65f9',
+      channelName: 'Feed 1',
+      resolution: '1080p'
+    });
+
+    expect(streams).toHaveLength(1);
+    const s = streams[0];
+    expect(s).toBeInstanceOf(StreamEntity);
+    expect(s.name).toBe('SportsBite');
+    expect(s.resolution).toBe('1080p');
+    expect(s.url).toContain('/api/manifest?url=');
+    expect(s.url).toContain(encodeURIComponent('https://sportsbite.org/selfhost/cdn/s-7da574195115de0a65f9.m3u8?cdn=1'));
+    expect(s.url).toContain(encodeURIComponent('https://sportsbite.org/selfhost/embed/s-7da574195115de0a65f9'));
+  });
+
+  test('rejects steganography or invalid embed without throwing', async () => {
+    const streams = await provider.resolveStream('s-invalid', 'football', 'Match', {
+      embedUrl: 'https://sportsbite.org/247-embed/embed/invalid'
+    });
+    expect(streams).toEqual([]);
   });
 });

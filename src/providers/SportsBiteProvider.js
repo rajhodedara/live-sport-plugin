@@ -4,6 +4,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { extractTeamsFromTitle } = require('../services/TeamNameExtractor');
+const { BASE_URL } = require('../config');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
@@ -98,6 +99,73 @@ class SportsBiteProvider extends BaseProvider {
     }
 
     return matches;
+  }
+
+  async resolveStream(sourceId, matchCategory, matchTitle, src = {}) {
+    const streams = [];
+    src = src && typeof src === 'object' ? src : {};
+    const embedUrl = typeof src.embedUrl === 'string' ? src.embedUrl : '';
+
+    // Enforce selfhost embed contract (drop steganography or invalid formats)
+    const match = embedUrl.match(/\/selfhost\/embed\/([^?#]+)/);
+    if (!match) return streams;
+    const channelSlug = match[1];
+
+    try {
+      const res = await this.proxyFetch(embedUrl, {
+        headers: {
+          'User-Agent': UA,
+          'Referer': 'https://sportsbite.org/',
+          'Origin': 'https://sportsbite.org'
+        },
+        timeout: 8000
+      });
+
+      if (!res.ok) return streams;
+      const html = typeof res.text === 'function' ? await res.text() : String(res.text || '');
+
+      // Parse base64 playlist path from: var source = window.atob("...");
+      let variantUrl = null;
+      const atobMatch = html.match(/source\s*=\s*window\.atob\(["']([^"']+)["']\)/i) ||
+                        html.match(/atob\(["']([^"']+)["']\)/i);
+
+      if (atobMatch && atobMatch[1]) {
+        try {
+          const decoded = Buffer.from(atobMatch[1], 'base64').toString('utf8');
+          if (decoded) {
+            const relPath = decoded.replace(/^\/+/, '');
+            // Convert /selfhost/play/<slug> or similar to variant playlist URL
+            const slug = relPath.replace(/^selfhost\/play\//, '').replace(/^selfhost\/embed\//, '');
+            variantUrl = `https://sportsbite.org/selfhost/cdn/${slug}.m3u8?cdn=1`;
+          }
+        } catch (_) {}
+      }
+
+      // Fallback: direct CDN variant URL pattern
+      if (!variantUrl) {
+        variantUrl = `https://sportsbite.org/selfhost/cdn/${channelSlug}.m3u8?cdn=1`;
+      }
+
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(variantUrl)}&referer=${encodeURIComponent(embedUrl)}&origin=${encodeURIComponent('https://sportsbite.org')}`;
+
+      const titlePart = src.channelName ? ` - ${src.channelName}` : '';
+      const langPart = src.language ? ` [${src.language.toUpperCase()}]` : '';
+
+      streams.push(new StreamEntity({
+        name: 'SportsBite',
+        title: `SportsBite${langPart}${titlePart} (${matchTitle || channelSlug})`,
+        url: proxyUrl,
+        quality: src.resolution || 'HD',
+        resolution: src.resolution || 'HD',
+        behaviorHints: {
+          notWebReady: false
+        }
+      }));
+    } catch (err) {
+      // Guarded failure: return empty array
+    }
+
+    return streams;
   }
 }
 
