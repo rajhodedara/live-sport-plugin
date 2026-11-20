@@ -73,7 +73,14 @@
       - `sortCatalogMatches` in `src/catalog.js` fell back to input order when replay dates were identical. Added O(1) precomputed SoccerFull sequential numeric ID comparison (`sfIdB - sfIdA`) to guarantee the newest uploads (e.g. `sf_5008` Spain vs England, `sf_5007` Croatia vs Czechia) rank first.
       - Replay sync cadence in `MatchAggregator.js` was locked to 12 hours for all replay providers; added a 1-hour fast cadence for SoccerFull (`FAST_REPLAY_SYNC_INTERVAL_MS`) and a `forceReplays` override for manual syncs.
       - Added dedicated `nuvio_sports_replays_football_nations_league` sub-catalog in `collections.js` and `index.js`, and expanded the `ucl` filter in `catalog.js` to match `nations league` fixtures.
+17. **SportsBite Live Stream Provider Integration**:
+    - Dissected SportsBite architecture (`sportsbite.org`) using `rea` and Chrome DevTools MCP. Identified dual-layer pipeline: `TIKTIKPX` pixel steganography on ByteDance/TikTok image CDNs vs clean direct MPEG-TS on Cloudflare R2 (`seg.cr7goated.site`).
+    - Implemented `SportsBiteProvider` (`src/providers/SportsBiteProvider.js`) ingesting structured event catalog from `https://sportsbite.org/api/forestgump/matches` via guarded egress.
+    - Added strict steganography gate: drops `247-embed` and non-selfhost feeds at ingestion; retains only verified self-hosted match streams.
+    - Implemented `resolveStream()` extracting the direct variant `.m3u8` playlist URL and routing through `/api/manifest` text-only proxy. Chunks stream directly from Cloudflare R2 with 0 VPS video proxy bytes (100% compliant with I1/D1).
+    - Registered `sportsBiteProvider` across Awilix container (`src/container.js`), aggregator (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per invariant I4.
+    - Verified with 6 unit tests across `tests/sportsBiteProvider.test.js` and `tests/sportsBiteRegistration.test.js`.
 
 ## Verification
-- Tests: 10 passed in `tests/replayCollectionsFix.test.js` (including new tests for SoccerFull numeric ID sorting and Nations League catalog filtering). 51 passed in `tests/soccerFullProvider.test.js`. 71 passed across full replay and concurrency suite.
-- Invariants: I1 (zero video proxy bytes), I6 (O(1) precomputed integer comparison in Schwartzian Transform, zero regex inside comparator loop) strictly preserved. Clean `node --check`.
+- Tests: 10 passed in `tests/replayCollectionsFix.test.js` (including new tests for SoccerFull numeric ID sorting and Nations League catalog filtering). 51 passed in `tests/soccerFullProvider.test.js`. 71 passed across full replay and concurrency suite. 6 passed in `tests/sportsBiteProvider.test.js` and `tests/sportsBiteRegistration.test.js`.
+- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check`.
