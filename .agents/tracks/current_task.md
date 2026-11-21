@@ -80,7 +80,17 @@
     - Implemented `resolveStream()` extracting the direct variant `.m3u8` playlist URL and routing through `/api/manifest` text-only proxy. Chunks stream directly from Cloudflare R2 with 0 VPS video proxy bytes (100% compliant with I1/D1).
     - Registered `sportsBiteProvider` across Awilix container (`src/container.js`), aggregator (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per invariant I4.
     - Verified with 6 unit tests across `tests/sportsBiteProvider.test.js` and `tests/sportsBiteRegistration.test.js`.
+18. **SportzX Live Stream Provider Integration**:
+    - Investigated competitor PenguPlay and reversed SportzX TV v3.2 architecture.
+    - Implemented `SportzXCrypto.js` (`src/resolver/sportzx/SportzXCrypto.js`) implementing ChaCha20 sponge permutation and protocol v3 payload decoding.
+    - Implemented `SportzXProvider` (`src/providers/SportzXProvider.js`) extending `BaseProvider`: ingests events from `https://in.dotmatrixstream.us/events.json` with failovers (`android.onlystream.stream`, `cdn-stream.top`) via guarded egress.
+    - Implemented zero-bandwidth stream resolution in `resolveStream()`:
+      - Strictly filters out and drops unplayable Akamai CENC DASH (`.mpd`) and ClearKey encrypted streams to protect server bandwidth and memory (Invariant I8 / D2).
+      - Emits direct unencrypted `.m3u8` streams (such as AWS S3 1080p60 NBA master playlists and sports edge CDN feeds) with client-side `behaviorHints.proxyHeaders` (User-Agent: `Dalvik/2.1.0` and Referer: `https://gooz.aapmains.net`).
+      - Guarantees 0 video byte proxy overhead on VPS (Invariant I1).
+    - Registered `sportzxProvider` in Awilix container (`src/container.js`), `MatchAggregator` (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per Invariant I4.
+    - Verified with 14 unit and integration tests across `tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, and `tests/sportzXIntegration.test.js`.
 
 ## Verification
-- Tests: 10 passed in `tests/replayCollectionsFix.test.js` (including new tests for SoccerFull numeric ID sorting and Nations League catalog filtering). 51 passed in `tests/soccerFullProvider.test.js`. 71 passed across full replay and concurrency suite. 6 passed in `tests/sportsBiteProvider.test.js` and `tests/sportsBiteRegistration.test.js`.
-- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check`.
+- Tests: 14 passed across SportzX test suite (`tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, `tests/sportzXIntegration.test.js`). 76 passed across regression suites (`tests/channelStreamTitleScope.test.js`, `tests/streamPolicy.test.js`, `tests/matchAggregatorDates.test.js`).
+- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I8/D2 (relayed DASH stays off), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files.
