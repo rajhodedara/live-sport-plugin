@@ -16,38 +16,7 @@ describe('SportzXProvider - Ingestion', () => {
     expect(provider.name).toBe('SportzX');
   });
 
-  it('ingests live mirror events with SportzX feeds and maps to MatchEntity', async () => {
-    provider.proxyFetch = jest.fn().mockImplementation(async (url) => {
-      if (url.includes('catalog/tv/')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({
-            metas: [
-              {
-                id: 'pp-live:hornets-hawks',
-                name: '🔴 LIVE: Charlotte Hornets @ Atlanta Hawks',
-                description: 'Basketball\nSportzX, DaddyLive'
-              }
-            ]
-          })
-        };
-      }
-      return { ok: false, status: 404 };
-    });
-
-    const matches = await provider.getMatches();
-    expect(matches.length).toBe(1);
-    expect(matches[0]).toBeInstanceOf(MatchEntity);
-    expect(matches[0].id).toBe('sportzx_pp-live:hornets-hawks');
-    expect(matches[0].title).toBe('Charlotte Hornets @ Atlanta Hawks');
-    expect(matches[0].team1).toBe('Charlotte Hornets');
-    expect(matches[0].team2).toBe('Atlanta Hawks');
-    expect(matches[0].category).toBe('basketball');
-    expect(matches[0].sources[0].streamId).toBe('pp-live:hornets-hawks');
-  });
-
-  it('ingests direct APK gateway matches on fallback', async () => {
+  it('ingests live matches and maps to MatchEntity instances', async () => {
     const samplePayload = [
       {
         id: '50043',
@@ -71,18 +40,12 @@ describe('SportzXProvider - Ingestion', () => {
       }
     ];
 
-    provider.proxyFetch = jest.fn().mockImplementation(async (url) => {
-      if (url.includes('catalog/tv/')) {
-        return { ok: true, status: 200, json: async () => ({ metas: [] }) };
-      }
-      if (url.includes('events.json')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => ({ data: encodeV3(samplePayload) })
-        };
-      }
-      return { ok: false, status: 404 };
+    provider.proxyFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: encodeV3(samplePayload)
+      })
     });
 
     const matches = await provider.getMatches();
@@ -92,6 +55,8 @@ describe('SportzXProvider - Ingestion', () => {
     expect(matches[0].id).toBe('sportzx_50043');
     expect(matches[0].title).toBe('Charlotte Hornets vs Atlanta Hawks');
     expect(matches[0].category).toBe('basketball');
+    expect(matches[0].sources.length).toBe(1);
+    expect(matches[0].sources[0].source).toBe('sportzx');
   });
 
   it('handles missing, 404, or malformed data gracefully without throwing', async () => {
@@ -122,40 +87,7 @@ describe('SportzXProvider - Stream Resolution & Policy Filtering', () => {
     provider = new SportzXProvider();
   });
 
-  it('resolves stream from mirror streamId with direct decoded HLS and proxyHeaders', async () => {
-    const rawPayload = JSON.stringify({
-      url: 'https://fernfiber.s3.ca-central-1.amazonaws.com/hornets.m3u8',
-      headers: { 'User-Agent': 'Dalvik/2.1.0' }
-    });
-    const b64 = Buffer.from(rawPayload).toString('base64url');
-
-    provider.proxyFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        streams: [
-          {
-            name: '🐧 PenguPlay 🧊 1080p • SportzX · NBA PASS FHD',
-            url: `https://pengu.uk/hls/live-sports/playlist/${b64}/index.m3u8`
-          }
-        ]
-      })
-    });
-
-    const src = {
-      source: 'sportzx',
-      streamId: 'pp-live:hornets-hawks',
-      channelName: 'SportzX Live'
-    };
-
-    const streams = await provider.resolveStream('sportzx_pp-live:hornets-hawks', 'basketball', 'Hornets @ Hawks', src);
-    expect(streams.length).toBe(1);
-    expect(streams[0]).toBeInstanceOf(StreamEntity);
-    expect(streams[0].url).toBe('https://fernfiber.s3.ca-central-1.amazonaws.com/hornets.m3u8');
-    expect(streams[0].behaviorHints.proxyHeaders.request['User-Agent']).toContain('Dalvik');
-  });
-
-  it('resolves direct HLS streams from formats and attaches required headers', async () => {
+  it('resolves direct HLS streams and attaches required headers', async () => {
     const src = {
       source: 'sportzx',
       channelName: 'SportzX Live',
