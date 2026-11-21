@@ -5,6 +5,9 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { decodeV3 } = require('../resolver/sportzx/SportzXCrypto');
 
+const PENGU_GATEWAY = 'https://pengu.uk/%7B%22auth_token%22%3A%22yBSvBuRv6cCwX6ElzFJxUjKsHb0w7ZjsLusoE6t8Co4%22%7D';
+const CATALOGS = ['pp-live-now', 'pp-live-basketball', 'pp-live-football', 'pp-live-american_football', 'pp-live-motorsport', 'pp-live-hockey'];
+
 const GATEWAYS = [
   'https://in.dotmatrixstream.us/',
   'https://android.onlystream.stream/',
@@ -27,10 +30,78 @@ class SportzXProvider extends BaseProvider {
   }
 
   /**
-   * Ingest live matches from SportzX backend
+   * Ingest live matches from SportzX mirror or direct backend
    * @returns {Promise<Array<MatchEntity>>}
    */
   async getMatches() {
+    // 1. Primary Strategy: Ingest active SportzX events from live sports catalogs
+    try {
+      const catalogPromises = CATALOGS.map(cat => 
+        this.proxyFetch(`${PENGU_GATEWAY}/catalog/tv/${cat}.json`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          timeoutMs: 8000
+        }).then(r => r && r.ok ? r.json() : null).catch(() => null)
+      );
+
+      const catalogResponses = await Promise.all(catalogPromises);
+      const uniqueEvents = new Map();
+
+      for (const res of catalogResponses) {
+        if (!res || !Array.isArray(res.metas)) continue;
+        for (const meta of res.metas) {
+          if (!meta || !meta.id || uniqueEvents.has(meta.id)) continue;
+          const desc = meta.description || '';
+          if (desc.includes('SportzX') || desc.toLowerCase().includes('sportzx')) {
+            uniqueEvents.set(meta.id, meta);
+          }
+        }
+      }
+
+      if (uniqueEvents.size > 0) {
+        const matches = [];
+        for (const [id, m] of uniqueEvents.entries()) {
+          const rawName = (m.name || '').replace(/^[🔴⏱️📺\s]*(LIVE:?\s*)?/i, '').trim() || 'Live Match';
+          const catLine = (m.description || '').split('\n')[0] || 'other';
+          const category = this.normalizeCategory(catLine);
+
+          // Extract team names
+          let team1 = null;
+          let team2 = null;
+          const vsSplit = rawName.split(/\s+(?:vs\.?|@|-)\s+/i);
+          if (vsSplit.length === 2) {
+            team1 = vsSplit[0].trim();
+            team2 = vsSplit[1].trim();
+          }
+
+          matches.push(new MatchEntity({
+            id: `sportzx_${id}`,
+            title: rawName,
+            category,
+            timestamp: Date.now(),
+            status: 'LIVE',
+            popular: false,
+            team1,
+            team2,
+            thumbnail_url: m.background || m.poster || '',
+            poster: m.poster || '',
+            sources: [
+              {
+                id: `sportzx_${id}_stream`,
+                source: 'sportzx',
+                streamId: id,
+                channelName: 'SportzX Live'
+              }
+            ]
+          }));
+        }
+
+        return matches;
+      }
+    } catch (_) {
+      // Fallback to direct gateways
+    }
+
+    // 2. Secondary Strategy: Fallback to direct APK gateways
     for (const gw of GATEWAYS) {
       try {
         const url = `${gw}events.json`;
@@ -60,7 +131,6 @@ class SportzXProvider extends BaseProvider {
           const category = this.normalizeCategory(item.eventType || item.category || 'other');
           const eventId = String(item.id || item.eventId || Math.random().toString(36).slice(2));
 
-          // Extract channels & stream formats
           const sources = [];
           const channels = Array.isArray(item.channels) ? item.channels : [];
 
@@ -112,17 +182,104 @@ class SportzXProvider extends BaseProvider {
    * @returns {Promise<Array<StreamEntity>>}
    */
   async resolveStream(sourceId, matchCategory, matchTitle, src) {
-    if (!src || !Array.isArray(src.formats)) return [];
+    if (!src) return [];
 
     const streamEntities = [];
 
-    for (const fmt of src.formats) {
+    // Case A: Mirror streamId resolution
+    if (src.streamId) {
+      try {
+        const streamUrl = `${PENGU_GATEWAY}/stream/tv/${encodeURIComponent(src.streamId)}.json`;
+        const resp = await this.proxyFetch(streamUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          timeoutMs: 8000
+        });
+
+        if (resp && resp.ok) {
+          const data = await resp.json();
+          const streams = Array.isArray(data?.streams) ? data.streams : [];
+
+          for (const s of streams) {
+            const sName = s.name || '';
+            if (!sName.includes('SportzX') && !sName.toLowerCase().includes('sportzx')) {
+              continue;
+            }
+
+            let targetUrl = s.url || '';
+            let reqHeaders = {};
+
+            if (targetUrl.includes('/playlist/')) {
+              try {
+                const b64Part = targetUrl.split('/playlist/')[1].split('/index.m3u8')[0];
+                const padded = b64Part.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64Part.length % 4)) % 4);
+                const decoded = JSON.parse(Buffer.from(padded, 'base64').toString('utf8'));
+                if (decoded && decoded.url) {
+                  targetUrl = decoded.url;
+                  reqHeaders = decoded.headers || {};
+                }
+              } catch (_) {
+                // Keep raw URL if decode fails
+              }
+            }
+
+            // Invariant I8 / D2: Drop DASH, .mpd, or ClearKey streams
+            if (
+              targetUrl.includes('.mpd') ||
+              targetUrl.includes('/api/dash/') ||
+              targetUrl.includes('/api/manifest') ||
+              targetUrl.includes('localhost')
+            ) {
+              continue;
+            }
+
+            if (!targetUrl.includes('.m3u8')) {
+              continue;
+            }
+
+            // Ensure Dalvik User-Agent
+            if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
+              reqHeaders['User-Agent'] = DALVIK_UA;
+            }
+
+            if (targetUrl.includes('chatgpt.hereisman.net') && !reqHeaders['Referer'] && !reqHeaders['referer']) {
+              reqHeaders['Referer'] = 'https://gooz.aapmains.net';
+            }
+
+            let resolution = 'HD';
+            if (/\b1080p?\b/i.test(s.title || sName)) resolution = '1080p';
+            else if (/\b720p?\b/i.test(s.title || sName)) resolution = '720p';
+
+            streamEntities.push(new StreamEntity({
+              name: 'SportzX',
+              title: s.title || `${src.channelName || 'SportzX Live'} • ${resolution}`,
+              url: targetUrl,
+              resolution,
+              score: 85,
+              behaviorHints: {
+                notWebReady: true,
+                proxyHeaders: {
+                  request: reqHeaders
+                }
+              },
+              _source: 'sportzx'
+            }));
+          }
+        }
+      } catch (err) {
+        // Return empty on error
+      }
+
+      if (streamEntities.length > 0) return streamEntities;
+    }
+
+    // Case B: Direct formats array resolution
+    const formats = Array.isArray(src.formats) ? src.formats : [];
+    for (const fmt of formats) {
       if (!fmt || !fmt.streamUrl) continue;
 
       const rawUrl = fmt.streamUrl.trim();
 
-      // Bandwidth Policy (Invariant I1 & I8 / D2):
-      // Drop any relayed DASH, .mpd manifest, ClearKey stream, or local proxy route.
+      // Bandwidth Policy (Invariant I1 & I8 / D2)
       if (
         fmt.drmType ||
         rawUrl.includes('.mpd') ||
@@ -133,25 +290,19 @@ class SportzXProvider extends BaseProvider {
         continue;
       }
 
-      // We only accept valid .m3u8 playlists
       if (!rawUrl.includes('.m3u8')) {
         continue;
       }
 
-      // Assemble client-side proxy headers for Zero VPS Egress
       const reqHeaders = {};
-
-      // Preserve any upstream headers
       if (fmt.headers && typeof fmt.headers === 'object') {
         Object.assign(reqHeaders, fmt.headers);
       }
 
-      // Default or enrich User-Agent
       if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
         reqHeaders['User-Agent'] = DALVIK_UA;
       }
 
-      // chatgpt.hereisman.net requires Referer: https://gooz.aapmains.net
       if (rawUrl.includes('chatgpt.hereisman.net') && !reqHeaders['Referer'] && !reqHeaders['referer']) {
         reqHeaders['Referer'] = 'https://gooz.aapmains.net';
       }
