@@ -11,6 +11,8 @@ const GATEWAYS = [
   'https://cdn-stream.top/'
 ];
 
+const DALVIK_UA = 'Dalvik/2.1.0 (Linux; U; Android 13; Pixel 7 Pro Build/TQ3A.230901.001)';
+
 class SportzXProvider extends BaseProvider {
   constructor({ circuitBreaker } = {}) {
     super({ circuitBreaker });
@@ -99,6 +101,86 @@ class SportzXProvider extends BaseProvider {
     }
 
     return [];
+  }
+
+  /**
+   * Resolve a specific stream source with strict DASH dropping and zero server egress.
+   * @param {string} sourceId
+   * @param {string} matchCategory
+   * @param {string} matchTitle
+   * @param {object} src - The source object from MatchEntity
+   * @returns {Promise<Array<StreamEntity>>}
+   */
+  async resolveStream(sourceId, matchCategory, matchTitle, src) {
+    if (!src || !Array.isArray(src.formats)) return [];
+
+    const streamEntities = [];
+
+    for (const fmt of src.formats) {
+      if (!fmt || !fmt.streamUrl) continue;
+
+      const rawUrl = fmt.streamUrl.trim();
+
+      // Bandwidth Policy (Invariant I1 & I8 / D2):
+      // Drop any relayed DASH, .mpd manifest, ClearKey stream, or local proxy route.
+      if (
+        fmt.drmType ||
+        rawUrl.includes('.mpd') ||
+        rawUrl.includes('/api/dash/') ||
+        rawUrl.includes('/api/manifest') ||
+        rawUrl.includes('localhost')
+      ) {
+        continue;
+      }
+
+      // We only accept valid .m3u8 playlists
+      if (!rawUrl.includes('.m3u8')) {
+        continue;
+      }
+
+      // Assemble client-side proxy headers for Zero VPS Egress
+      const reqHeaders = {};
+
+      // Preserve any upstream headers
+      if (fmt.headers && typeof fmt.headers === 'object') {
+        Object.assign(reqHeaders, fmt.headers);
+      }
+
+      // Default or enrich User-Agent
+      if (!reqHeaders['User-Agent'] && !reqHeaders['user-agent']) {
+        reqHeaders['User-Agent'] = DALVIK_UA;
+      }
+
+      // chatgpt.hereisman.net requires Referer: https://gooz.aapmains.net
+      if (rawUrl.includes('chatgpt.hereisman.net') && !reqHeaders['Referer'] && !reqHeaders['referer']) {
+        reqHeaders['Referer'] = 'https://gooz.aapmains.net';
+      }
+
+      const qualityTag = fmt.title || 'HD';
+      let resolution = 'HD';
+      if (/\b1080p?\b/i.test(qualityTag)) resolution = '1080p';
+      else if (/\b720p?\b/i.test(qualityTag)) resolution = '720p';
+      else if (/\b480p?\b/i.test(qualityTag)) resolution = '480p';
+
+      const channelLabel = src.channelName || 'SportzX Live';
+
+      streamEntities.push(new StreamEntity({
+        name: 'SportzX',
+        title: `${channelLabel} • ${qualityTag}`,
+        url: rawUrl,
+        resolution,
+        score: 85,
+        behaviorHints: {
+          notWebReady: true,
+          proxyHeaders: {
+            request: reqHeaders
+          }
+        },
+        _source: 'sportzx'
+      }));
+    }
+
+    return streamEntities;
   }
 }
 
