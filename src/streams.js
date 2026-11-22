@@ -328,6 +328,9 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
   } else if (sourceName === 'sportzx') {
     const provider = container.resolve('sportzxProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'roxiestreams') {
+    const provider = container.resolve('roxiestreamsProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
     const pName = sourceName.replace('yaml_', '');
