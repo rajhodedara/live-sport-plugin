@@ -525,6 +525,14 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   if (providerThumb && (/ppvservices\.st/i.test(providerThumb) || /unique-tournament/i.test(providerThumb) || /ondemand\.st/i.test(providerThumb))) providerThumb = null;
   if (providerLogo && (/ppvservices\.st/i.test(providerLogo) || /unique-tournament/i.test(providerLogo) || /ondemand\.st/i.test(providerLogo))) providerLogo = null;
 
+  // Filter out SportzX raw team flags/posters so Nuvio composes rich cinematic match cards
+  if (providerPoster && (/sportzx/i.test(providerPoster) || /blogger\.googleusercontent/i.test(providerPoster))) providerPoster = null;
+  if (providerThumb && (/sportzx/i.test(providerThumb) || /blogger\.googleusercontent/i.test(providerThumb))) providerThumb = null;
+  if (match.id && String(match.id).startsWith('nuvio_sport_sportzx_')) {
+    providerPoster = null;
+    providerThumb = null;
+  }
+
   // Filter out PitSport posters/thumbnails for non-motorsport events
   const isMotorsportOrF1 = match.category === 'motorsport' || /formula|rally|supercar|motocross|karting|motor/i.test(match.category || '');
   if (!isMotorsportOrF1) {

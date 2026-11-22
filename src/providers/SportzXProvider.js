@@ -176,8 +176,8 @@ class SportzXProvider extends BaseProvider {
         popular: item.isPopular || item.popular || (info.isHot === '1' || info.isHot === 1),
         team1: (info.teamA && info.teamA !== 'null') ? info.teamA : (item.teamA || null),
         team2: (info.teamB && info.teamB !== 'null') ? info.teamB : (item.teamB || null),
-        thumbnail_url: (info.teamAFlag && info.teamAFlag !== 'null') ? info.teamAFlag : (item.thumbnail || item.banner || ''),
-        poster: (info.teamBFlag && info.teamBFlag !== 'null') ? info.teamBFlag : (item.poster || ''),
+        thumbnail_url: '',
+        poster: '',
         league,
         sources
       }));

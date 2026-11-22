@@ -93,7 +93,8 @@ describe('SportzXProvider - Ingestion', () => {
     expect(matches[0].popular).toBe('1');
     expect(matches[0].team1).toBe('Barcelona');
     expect(matches[0].team2).toBe('Villarreal');
-    expect(matches[0].thumbnail_url).toBe('https://img.sofascore.com/team1.png');
+    expect(matches[0].thumbnail_url).toBe('');
+    expect(matches[0].poster).toBe('');
     expect(matches[0].sources.length).toBe(1);
     expect(matches[0].sources[0].eventId).toBe('50125');
   });
