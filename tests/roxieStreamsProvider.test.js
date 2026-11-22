@@ -137,7 +137,11 @@ describe('RoxieStreamsProvider', () => {
     expect(streams[0].behaviorHints.proxyHeaders.request).toEqual({
       Origin: 'https://roxiestreams.su',
       Referer: 'https://roxiestreams.su/',
-      'User-Agent': expect.any(String)
+      'User-Agent': expect.any(String),
+      'Sec-Fetch-Site': 'cross-site',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Dest': 'empty',
+      'Accept': '*/*'
     });
     expect(streams[0]._source).toBe('roxiestreams');
 

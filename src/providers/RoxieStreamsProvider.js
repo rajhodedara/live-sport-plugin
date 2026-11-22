@@ -183,7 +183,7 @@ class RoxieStreamsProvider extends BaseProvider {
       if (seenUrls.has(streamUrl)) continue;
       seenUrls.add(streamUrl);
 
-      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}`;
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}&hlsua=${encodeURIComponent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36')}`;
 
       streams.push(new StreamEntity({
         name: this.name,
@@ -196,7 +196,11 @@ class RoxieStreamsProvider extends BaseProvider {
             request: {
               'Origin': this.baseUrl,
               'Referer': `${this.baseUrl}/`,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+              'Sec-Fetch-Site': 'cross-site',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Dest': 'empty',
+              'Accept': '*/*'
             }
           }
         },
@@ -214,7 +218,7 @@ class RoxieStreamsProvider extends BaseProvider {
         const streamUrl = `https://${subdomain}.${domain}/${streamFile}`;
         if (!seenUrls.has(streamUrl)) {
           seenUrls.add(streamUrl);
-          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}`;
+          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}&hlsua=${encodeURIComponent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36')}`;
           streams.push(new StreamEntity({
             name: this.name,
             title: `Stream ${streamIdx} (HD)`,
@@ -226,7 +230,11 @@ class RoxieStreamsProvider extends BaseProvider {
                 request: {
                   'Origin': this.baseUrl,
                   'Referer': `${this.baseUrl}/`,
-                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+                  'Sec-Fetch-Site': 'cross-site',
+                  'Sec-Fetch-Mode': 'cors',
+                  'Sec-Fetch-Dest': 'empty',
+                  'Accept': '*/*'
                 }
               }
             },
