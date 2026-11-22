@@ -162,18 +162,53 @@ class RoxieStreamsProvider extends BaseProvider {
     if (!html || typeof html !== 'string') return [];
     const domain = activeDomain || DEFAULT_FALLBACK_DOMAIN;
     const streams = [];
+    const seenUrls = new Set();
+    let streamIdx = 1;
 
     // Extract subdomain if configured on the page
     const subMatch = html.match(/var\s+subdomain\s*=\s*['"]([^'"]+)['"]/i);
     const subdomain = subMatch ? subMatch[1].trim() : 'admin2';
 
-    // Match stream buttons:
+    // 1. Match full direct m3u8 URLs in showPlayer or buttons:
+    // e.g. showPlayer('clappr', 'https://bein-esp-xumo.amagi.tv/playlist.m3u8')
+    const fullUrlRegex = /showPlayer\(\s*['"][^'"]+['"]\s*,\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)['"]\s*\)/gi;
+    let fMatch;
+    while ((fMatch = fullUrlRegex.exec(html)) !== null) {
+      const streamUrl = fMatch[1];
+      if (seenUrls.has(streamUrl)) continue;
+      seenUrls.add(streamUrl);
+
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}&hlsua=${encodeURIComponent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36')}`;
+
+      streams.push(new StreamEntity({
+        name: this.name,
+        title: `Stream ${streamIdx} (HD)`,
+        url: proxyUrl,
+        resolution: 'HD',
+        behaviorHints: {
+          notWebReady: false,
+          proxyHeaders: {
+            request: {
+              'Origin': this.baseUrl,
+              'Referer': `${this.baseUrl}/`,
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+              'Sec-Fetch-Site': 'cross-site',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Dest': 'empty',
+              'Accept': '*/*'
+            }
+          }
+        },
+        _source: this.sourceName
+      }));
+      streamIdx++;
+    }
+
+    // 2. Match stream buttons:
     // showPlayer('clappr', getRandomStream('tnt.m3u8', 'admin2'))
     // or getRandomStream('tnt.m3u8')
     const buttonRegex = /getRandomStream\(\s*['"]([^'"]+\.m3u8)['"](?:\s*,\s*['"]([^'"]+)['"])?\s*\)/gi;
     let match;
-    let streamIdx = 1;
-    const seenUrls = new Set();
 
     while ((match = buttonRegex.exec(html)) !== null) {
       const streamFile = match[1];

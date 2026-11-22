@@ -149,6 +149,27 @@ describe('RoxieStreamsProvider', () => {
     expect(streams[1].title).toBe('Stream 2 (HD)');
   });
 
+  test('parses direct full m3u8 URLs in showPlayer', () => {
+    const provider = new RoxieStreamsProvider({ circuitBreaker: mockCircuitBreaker });
+    const streamPageFixture = `
+      <div id="playerContainer"></div>
+      <button class="streambutton" onclick="showPlayer('clappr', 'https://bein-esp-xumo.amagi.tv/playlist.m3u8')">Direct Stream</button>
+    `;
+
+    const streams = provider._parseStreamPageHtml(streamPageFixture, 'formaturamaxi.com.br');
+    expect(streams).toHaveLength(1);
+    expect(streams[0].url).toContain(encodeURIComponent('https://bein-esp-xumo.amagi.tv/playlist.m3u8'));
+    expect(streams[0].behaviorHints.proxyHeaders.request).toEqual({
+      Origin: 'https://roxiestreams.su',
+      Referer: 'https://roxiestreams.su/',
+      'User-Agent': expect.any(String),
+      'Sec-Fetch-Site': 'cross-site',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Dest': 'empty',
+      'Accept': '*/*'
+    });
+  });
+
   test('falls back to default fallback domain if no domain provided', () => {
     const provider = new RoxieStreamsProvider({ circuitBreaker: mockCircuitBreaker });
     const streamPageFixture = `

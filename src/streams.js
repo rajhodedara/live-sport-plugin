@@ -1885,19 +1885,23 @@ async function handleStream(type, id, config) {
         // bounded playback context for those player requests; arbitrary cookies,
         // authorization and custom token headers must not reach the addon URL.
         const request = {};
-        if (s._source === 'ak47live' || s._source === 'daddylive' || providerName === 'DaddyLive') {
+        if (s._source === 'ak47live' || s._source === 'daddylive' || providerName === 'DaddyLive' || s._source === 'roxiestreams' || providerName === 'RoxieStreams') {
           const headers = verificationHeaders(s);
           const userAgent = manifestUserAgent(headers['User-Agent']);
           if (userAgent) request['User-Agent'] = userAgent;
-          for (const name of ['Referer', 'Origin']) {
+          for (const name of ['Referer', 'Origin', 'Sec-Fetch-Site', 'Sec-Fetch-Mode', 'Sec-Fetch-Dest', 'Accept']) {
             const value = headers[name];
             if (typeof value !== 'string' || value.length > 2048 || /[\u0000-\u0020\u007f]/.test(value)) continue;
-            try {
-              const parsed = new URL(value);
-              if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue;
-              if (name === 'Origin' && parsed.origin !== value) continue;
+            if (name === 'Referer' || name === 'Origin') {
+              try {
+                const parsed = new URL(value);
+                if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password) continue;
+                if (name === 'Origin' && parsed.origin !== value) continue;
+                request[name] = value;
+              } catch (_) {}
+            } else {
               request[name] = value;
-            } catch (_) {}
+            }
           }
         }
         if (Object.keys(request).length) s.behaviorHints.proxyHeaders = { request };
