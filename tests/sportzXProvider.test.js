@@ -104,6 +104,7 @@ describe('SportzXProvider - Ingestion', () => {
       status: 404,
       json: async () => ({})
     });
+    provider._loadFallbackEvents = jest.fn().mockReturnValue([]);
 
     const matches = await provider.getMatches();
     expect(Array.isArray(matches)).toBe(true);
@@ -112,10 +113,37 @@ describe('SportzXProvider - Ingestion', () => {
 
   it('handles network error in proxyFetch gracefully', async () => {
     provider.proxyFetch = jest.fn().mockRejectedValue(new Error('Network timeout'));
+    provider._loadFallbackEvents = jest.fn().mockReturnValue([]);
 
     const matches = await provider.getMatches();
     expect(Array.isArray(matches)).toBe(true);
     expect(matches.length).toBe(0);
+  });
+
+  it('falls back to bundled event seed when gateways fail', async () => {
+    provider.proxyFetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status: 500
+    });
+    provider._loadFallbackEvents = jest.fn().mockReturnValue([
+      {
+        id: 50004,
+        title: 'UFC',
+        cat: 'UFC',
+        eventInfo: {
+          eventName: 'UFC Fight Night: Adesanya vs Magomedov',
+          teamA: 'I. Adesanya',
+          teamB: 'S. Magomedov',
+          startTime: '2026/12/05 16:00:00 +0000'
+        }
+      }
+    ]);
+
+    const matches = await provider.getMatches();
+    expect(Array.isArray(matches)).toBe(true);
+    expect(matches.length).toBe(1);
+    expect(matches[0].id).toBe('sportzx_50004');
+    expect(matches[0].category).toBe('mma');
   });
 });
 

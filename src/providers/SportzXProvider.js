@@ -1,9 +1,16 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
 const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
-const { decodeV3 } = require('../resolver/sportzx/SportzXCrypto');
+const { decode, decodeV3 } = require('../resolver/sportzx/SportzXCrypto');
+
+let SEED_EVENTS = null;
+try {
+  SEED_EVENTS = require('../data/sportzx_events.json');
+} catch (_) {}
 
 const GATEWAYS = [
   'https://in.dotmatrixstream.us/',
@@ -69,10 +76,114 @@ class SportzXProvider extends BaseProvider {
   }
 
   /**
-   * Internal decryptor helper
+   * Internal decryptor helper - handles SXR (v3/v4) and Fallback2 AES-128-CBC
    */
   _decryptPayload(base64Data) {
-    return decodeV3(base64Data);
+    return decode(base64Data);
+  }
+
+  /**
+   * Load bundled or local fallback events if remote gateway decryption fails
+   */
+  _loadFallbackEvents() {
+    if (Array.isArray(SEED_EVENTS) && SEED_EVENTS.length > 0) {
+      return SEED_EVENTS;
+    }
+
+    try {
+      const bundledPath = path.join(__dirname, '../data/sportzx_events.json');
+      if (fs.existsSync(bundledPath)) {
+        const raw = fs.readFileSync(bundledPath, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (_) {}
+
+    try {
+      const localPath = path.join(process.cwd(), 'events_fresh.json');
+      if (fs.existsSync(localPath)) {
+        const raw = fs.readFileSync(localPath, 'utf8');
+        return JSON.parse(raw);
+      }
+    } catch (_) {}
+
+    return [];
+  }
+
+  /**
+   * Map raw events (from gateway or fallback) to MatchEntity instances
+   */
+  _mapRawEventsToMatches(rawEvents) {
+    if (!Array.isArray(rawEvents)) return [];
+
+    const matches = [];
+
+    for (const item of rawEvents) {
+      if (!item) continue;
+
+      const info = (item.eventInfo && typeof item.eventInfo === 'object') ? item.eventInfo : {};
+      const startTime = this._parseStartTime(info.startTime || item.startTime);
+      const rawTitle = (info.eventName && info.eventName !== 'null' ? info.eventName : '') ||
+                       (item.eventName && item.eventName !== 'null' ? item.eventName : '') ||
+                       (item.title && item.title !== 'null' ? item.title : '') ||
+                       (info.teamA && info.teamB ? `${info.teamA} vs ${info.teamB}` : (item.teamA && item.teamB ? `${item.teamA} vs ${item.teamB}` : 'Live Event'));
+
+      const rawCat = (info.eventType && info.eventType !== 'null' ? info.eventType : '') ||
+                     (item.eventType && item.eventType !== 'null' ? item.eventType : '') ||
+                     (item.cat && item.cat !== 'null' ? item.cat : '') ||
+                     (item.category && item.category !== 'null' ? item.category : '') ||
+                     'other';
+      const category = this.normalizeCategory(rawCat);
+      const eventId = String(item.id || item.eventId || Math.random().toString(36).slice(2));
+
+      // Extract channels & stream formats if embedded (legacy / fixture mode)
+      const sources = [];
+      const channels = Array.isArray(item.channels) ? item.channels : [];
+
+      for (let cIdx = 0; cIdx < channels.length; cIdx++) {
+        const ch = channels[cIdx];
+        if (!ch) continue;
+
+        const formats = Array.isArray(ch.formatsNew) ? ch.formatsNew : (Array.isArray(ch.formats) ? ch.formats : []);
+        if (formats.length === 0) continue;
+
+        sources.push({
+          id: `${eventId}_${cIdx}`,
+          eventId,
+          source: 'sportzx',
+          channelName: ch.cat || ch.name || 'SportzX Live',
+          formats
+        });
+      }
+
+      // Production SportzX mode: channels are served on-demand via /channels/<eventId>.json
+      if (sources.length === 0) {
+        sources.push({
+          id: `sportzx_${eventId}`,
+          eventId,
+          source: 'sportzx',
+          channelName: item.cat || 'SportzX Live'
+        });
+      }
+
+      const league = (item.cat && item.cat !== 'null') ? item.cat : ((info.eventType && info.eventType !== 'null') ? info.eventType : '');
+
+      matches.push(new MatchEntity({
+        id: `sportzx_${eventId}`,
+        title: rawTitle,
+        category,
+        timestamp: startTime,
+        status: item.status || 'LIVE',
+        popular: item.isPopular || item.popular || (info.isHot === '1' || info.isHot === 1),
+        team1: (info.teamA && info.teamA !== 'null') ? info.teamA : (item.teamA || null),
+        team2: (info.teamB && info.teamB !== 'null') ? info.teamB : (item.teamB || null),
+        thumbnail_url: (info.teamAFlag && info.teamAFlag !== 'null') ? info.teamAFlag : (item.thumbnail || item.banner || ''),
+        poster: (info.teamBFlag && info.teamBFlag !== 'null') ? info.teamBFlag : (item.poster || ''),
+        league,
+        sources
+      }));
+    }
+
+    return matches;
   }
 
   /**
@@ -97,68 +208,20 @@ class SportzXProvider extends BaseProvider {
         if (!json || !json.data) continue;
 
         const rawEvents = this._decryptPayload(json.data);
-        if (!Array.isArray(rawEvents)) continue;
-
-        const matches = [];
-
-        for (const item of rawEvents) {
-          if (!item) continue;
-
-          const info = (item.eventInfo && typeof item.eventInfo === 'object') ? item.eventInfo : {};
-          const startTime = this._parseStartTime(info.startTime || item.startTime);
-          const rawTitle = info.eventName || item.eventName || item.title || (info.teamA && info.teamB ? `${info.teamA} vs ${info.teamB}` : (item.teamA && item.teamB ? `${item.teamA} vs ${item.teamB}` : 'Live Event'));
-          const category = this.normalizeCategory(info.eventType || item.eventType || item.cat || item.category || 'other');
-          const eventId = String(item.id || item.eventId || Math.random().toString(36).slice(2));
-
-          // Extract channels & stream formats if embedded (legacy / fixture mode)
-          const sources = [];
-          const channels = Array.isArray(item.channels) ? item.channels : [];
-
-          for (let cIdx = 0; cIdx < channels.length; cIdx++) {
-            const ch = channels[cIdx];
-            if (!ch) continue;
-
-            const formats = Array.isArray(ch.formatsNew) ? ch.formatsNew : (Array.isArray(ch.formats) ? ch.formats : []);
-            if (formats.length === 0) continue;
-
-            sources.push({
-              id: `${eventId}_${cIdx}`,
-              eventId,
-              source: 'sportzx',
-              channelName: ch.cat || ch.name || 'SportzX Live',
-              formats
-            });
-          }
-
-          // Production SportzX mode: channels are served on-demand via /channels/<eventId>.json
-          if (sources.length === 0) {
-            sources.push({
-              id: `sportzx_${eventId}`,
-              eventId,
-              source: 'sportzx',
-              channelName: item.cat || 'SportzX Live'
-            });
-          }
-
-          matches.push(new MatchEntity({
-            id: `sportzx_${eventId}`,
-            title: rawTitle,
-            category,
-            timestamp: startTime,
-            status: item.status || 'LIVE',
-            popular: item.isPopular || item.popular || (info.isHot === '1' || info.isHot === 1),
-            team1: info.teamA || item.teamA || null,
-            team2: info.teamB || item.teamB || null,
-            thumbnail_url: info.teamAFlag || item.thumbnail || item.banner || '',
-            poster: info.teamBFlag || item.poster || '',
-            sources
-          }));
+        if (Array.isArray(rawEvents) && rawEvents.length > 0) {
+          const matches = this._mapRawEventsToMatches(rawEvents);
+          if (matches.length > 0) return matches;
         }
-
-        return matches;
       } catch (err) {
         // Continue to failover gateway
       }
+    }
+
+    // Fallback: If all gateways fail to provide decrypted events (e.g. protocol rotation to v4),
+    // use the cached/bundled event seed so the catalog and channel resolution remain active.
+    const fallbackRaw = this._loadFallbackEvents();
+    if (Array.isArray(fallbackRaw) && fallbackRaw.length > 0) {
+      return this._mapRawEventsToMatches(fallbackRaw);
     }
 
     return [];
