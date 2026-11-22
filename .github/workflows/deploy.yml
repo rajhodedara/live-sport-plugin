@@ -134,6 +134,9 @@ jobs:
             pm2 reload ecosystem.config.js --update-env
             rm -rf dist.prev 2>/dev/null || true
 
+            echo "==> Warming matches cache with an immediate sync..."
+            node scripts/sync-matches.js || true
+
             echo "==> Deployment complete. Cluster stayed up throughout."
             echo "==> Health:"
             curl -s -o /dev/null -w '    manifest http=%{http_code} in %{time_total}s\n' http://127.0.0.1:7000/manifest.json || true
