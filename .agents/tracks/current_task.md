@@ -100,7 +100,13 @@
     - Registered `roxiestreamsProvider` in Awilix container (`src/container.js`), `MatchAggregator` (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per Invariant I4.
     - Verified with 10 unit and integration tests across `tests/roxieStreamsProvider.test.js`, `tests/roxieStreamsRegistration.test.js`, `tests/roxieStreamsAggregator.test.js`, and `tests/roxieStreamsDispatch.test.js`.
     - Clean `node --check` across all touched files and clean ncc build into `dist/`.
+20. **SportzX Authentic v3 Standalone Decryptor & CLI Tool**:
+    - Reversed authentic Dalvik bytecode for `ApiDecoder.decodeV3` from unpacked process heap memory dump (`SportzX_unpacked.dex`).
+    - Produced formal specification in `docs/spec-sportzx-v3-cipher.md` detailing APK signing certificate SHA-256 derivation (`1676ec7db4771b0d826d70369b579684b182d2c0133be041bdd55f5d6d79a98b`), ChaCha20 quarter-round rotations (16, 12, 8, 7), 48-byte rate sponge accumulator (`spAbsorb`), state words 0–3 (`expand 32-byte k`), and word 12 block counter stepping.
+    - Standardized pure Node.js decryptor in `src/resolver/sportzx/SportzXCrypto.js` with zero emulator, zero native binary, and zero third-party mirror dependencies.
+    - Implemented standalone CLI tool `scripts/sportzx-decrypt.js` with failover endpoints (`dotmatrixstream.us` -> `android.onlystream.stream`), schema validation, CLI options (`--out`, `--payload`, `--file`, `--strict`), and verified live output to `events.json`.
+    - 100% test pass rate across `tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, and `tests/sportzXIntegration.test.js` (15/15 tests passing).
 
 ## Verification
-- Tests: 10 passed across RoxieStreams test suites (`tests/roxieStreamsProvider.test.js`, `tests/roxieStreamsRegistration.test.js`, `tests/roxieStreamsAggregator.test.js`, `tests/roxieStreamsDispatch.test.js`).
+- Tests: 15 passed across SportzX test suites (`tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, `tests/sportzXIntegration.test.js`).
 - Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files and clean local build.
