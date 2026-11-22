@@ -62,6 +62,7 @@ const SOURCE_PRIORITY = {
   pitsport: 4,
   sportsbite: 4,
   daddylive: 5,
+  roxiestreams: 5,
   vavoo: 6,
   sktech: 7,
   damitv: 8,
@@ -91,8 +92,8 @@ const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -128,7 +129,8 @@ const NICE_NAMES = {
   scorezone: 'ScoreZone',
   pitsport: 'PitSport',
   sportsbite: 'SportsBite',
-  sportzx: 'SportzX'
+  sportzx: 'SportzX',
+  roxiestreams: 'RoxieStreams'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -158,7 +160,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   scorezone: 'ScoreZone',
   pitsport: 'PitSport',
   sportsbite: 'SportsBite',
-  sportzx: 'SportzX'
+  sportzx: 'SportzX',
+  roxiestreams: 'RoxieStreams'
 };
 
 function isReplaySource(sourceName) {
