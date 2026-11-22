@@ -1,26 +1,50 @@
-# Session Checkpoint: SportzX Provider Integration & Poster Normalization
+# Session Checkpoint: Vavoo 4-5 Minute Playback Crash Remediation
 **Date**: 2026-11-23
-**Status**: Completed (Pushed to `origin/stable` at `95b76c0`)
+**Status**: Completed & Verified
 
-### What Was Completed
-- **Poster Override Fixed**:
-  - SportzX was previously passing raw individual team flag URLs (`teamAFlag`/`teamBFlag` from SofaScore/Blogger) as `thumbnail_url` and `poster`.
-  - In `src/catalog.js`, Tier 1 provider artwork took precedence over the composed cinematic card generator (`imageService.matchCardUrl`), causing cards to display single raw team logos as full posters.
-  - Cleared `poster: ''` and `thumbnail_url: ''` in `src/providers/SportzXProvider.js`.
-  - Added an artwork filter in `src/catalog.js` ignoring raw SportzX flags/posters, ensuring Nuvio always renders its high-quality cinematic cards with proper matchup typography, sport gradients, and team badges.
-- **Root Cause & Fallback**:
-  - Live upstream SportzX backend (`events.json`) rotated to v4.
-  - Bundled active sports catalog in `src/data/sportzx_events.json` with fallback mechanism.
-  - Fixed category normalization (`info.eventType: "null"`).
-- **Verification**:
-  - `npm test -- tests/sportzXProvider.test.js tests/sportzXCrypto.test.js` (16 passed).
-  - `node --check src/index.js`, `node --check src/catalog.js`, `node --check src/providers/SportzXProvider.js` passed.
-  - Pushed commit `95b76c0` to `origin/stable`.
+### Root Cause Analysis of 4-5 Minute Crash
+1. **Upstream Token Re-minting Corruption (`src/remint.js`)**:
+   - Vavoo streams resolve to Sunshine CDN URLs with tokens in the URL path (`http://<host>:8008/sunshine/<TOKEN>/hls/index.m3u8`).
+   - In `mergeRemintedUrl()`, the check `held.pathname.includes('/hls/')` caused Vavoo URLs to enter the DaddyLive query-parameter replacement branch.
+   - Because Vavoo tokens are embedded in the pathname rather than query parameters, `mergeRemintedUrl` returned the **stale expired URL unchanged**.
+   - Whenever an upstream hiccup or token rotation triggered remint, the retry immediately failed with 403/404, `/api/manifest` cached a negative 404, and the player permanently crashed.
+   - Similarly, `getRemintCacheKey()` erroneously treated Vavoo's `/hls/index.m3u8` as DaddyLive channel key `index`.
 
-### VPS Deployment Instructions
-On the VPS running `nuviosports.xyz`:
-```bash
-git pull origin stable
-npm run build:local   # or pm2 restart
-pm2 reload all        # or pm2 restart nuvio
-```
+2. **ExoPlayer Live Window Drift (`BehindLiveWindowException`) (`src/services/HlsRewriteService.js`)**:
+   - Vavoo live sliding playlists only hold 6 segments (~60s window).
+   - Without `#EXT-X-START:TIME-OFFSET`, native players (such as ExoPlayer in Stremio Android TV / Fire TV) start at the bleeding live edge (0s buffer).
+   - If a segment download stalls briefly or packet loss occurs, the sliding window advances past the playing segment, throwing `BehindLiveWindowException` and exiting playback after 3–5 minutes.
+   - Discrepancies between declared `#EXT-X-TARGETDURATION` and actual segment durations caused playback cadence drift.
+
+3. **Mirror Resilience (`src/providers/VavooProvider.js`)**:
+   - `VAVOO_BASE_SITES` lacked `https://voltop.net` for failover rotation.
+
+---
+
+### What Was Implemented
+- **`src/remint.js`**:
+  - In `mergeRemintedUrl()`: Added dedicated handler for Vavoo / Sunshine CDN (`provider === 'vavoo' || fresh.pathname.includes('/sunshine/') || held.pathname.includes('/sunshine/')`) returning `freshUrl` directly.
+  - Guarded DaddyLive query-replacement branch with `!held.pathname.includes('/sunshine/')`.
+  - In `getRemintCacheKey()`: Returns clean `rck` for Vavoo streams without DaddyLive key corruption.
+  - In `attemptRemintInner()`: Returns candidate `freshUrls[0]` directly for Vavoo / Sunshine.
+- **`src/services/HlsRewriteService.js`**:
+  - Dynamically recalculates and clamps `#EXT-X-TARGETDURATION` to `Math.max(declaredTargetDuration, Math.ceil(maxObservedDuration))`.
+  - For live media playlists without `#EXT-X-ENDLIST` or `#EXT-X-PLAYLIST-TYPE:VOD`, injects `#EXT-X-START:TIME-OFFSET=-18.0` (scaled safely to window duration) immediately after `#EXTM3U` to provide a multi-segment buffer cushion.
+- **`src/routes/manifest.js`**:
+  - Removed unused variable `injectedStart`.
+- **`src/providers/VavooProvider.js`**:
+  - Added `'https://voltop.net'` to `VAVOO_BASE_SITES` mirror list.
+- **`tests/vavooRemintAndBuffer.test.js`**:
+  - Added comprehensive test suite verifying remint replacement, cache key stability, target duration clamping, and `#EXT-X-START` live cushion injection.
+
+---
+
+### Verification
+- `npm test -- tests/vavooRemintAndBuffer.test.js` (8 passed).
+- `npm test -- tests/hlsRewritePlaylist.test.js` (16 passed).
+- `npm test -- tests/hlsRewriteService.test.js` (62 passed).
+- `npm test -- tests/vavooLocalCapacity.test.js` (54 passed).
+- `npm test -- tests/vavooMultiMirrorRemediation.test.js` (26 passed).
+- `npm test -- tests/vavooAuthFailover.test.js` (8 passed).
+- `npm test -- tests/manifestRecoveryIdentity.test.js` (32 passed).
+- `node --check src/index.js`, `node --check src/remint.js`, `node --check src/services/HlsRewriteService.js`, `node --check src/routes/manifest.js`, `node --check src/providers/VavooProvider.js` all pass.

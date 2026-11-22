@@ -308,7 +308,8 @@ const VAVOO_BASE_SITES = [
   'https://vavoo.to',
   'https://kool.to',
   'https://vavoo.net',
-  'https://kool.ws'
+  'https://kool.ws',
+  'https://voltop.net'
 ];
 
 const VAVOO_MIRROR_DOMAINS = [

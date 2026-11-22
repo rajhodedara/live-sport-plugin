@@ -46,8 +46,14 @@ function mergeRemintedUrl(heldUrl, freshUrl, rck = '') {
     const fresh = new URL(freshUrl);
     const provider = rck ? String(rck).split(':')[0]?.toLowerCase() : '';
 
+    // 0. Vavoo / Sunshine CDN: Token is embedded in the pathname (/sunshine/<token>/hls/index.m3u8).
+    // Entire fresh URL is the resolved playable endpoint.
+    if (provider === 'vavoo' || fresh.pathname.includes('/sunshine/') || held.pathname.includes('/sunshine/')) {
+      return freshUrl;
+    }
+
     // 1. DaddyLive: Query-token replacement mechanism (?s=...&e=..., ?token=..., etc.)
-    if (provider === 'daddylive' || fresh.searchParams.has('s') || fresh.searchParams.has('token') || held.pathname.includes('/hls/')) {
+    if ((provider === 'daddylive' || fresh.searchParams.has('s') || fresh.searchParams.has('token') || held.pathname.includes('/hls/')) && !held.pathname.includes('/sunshine/')) {
       const merged = new URL(heldUrl);
       for (const p of ['s', 'e', 'token', 't', 'auth', 'expires', 'exp', 'sig', 'signature', 'wmsAuthSign']) {
         if (fresh.searchParams.has(p)) merged.searchParams.set(p, fresh.searchParams.get(p));
@@ -116,6 +122,11 @@ function getRemintCacheKey(rck, url) {
     const u = new URL(url);
     const provider = String(rck).split(':')[0]?.toLowerCase();
 
+    // 0. Vavoo / Sunshine: Stable key based on rck alone
+    if (provider === 'vavoo' || u.pathname.includes('/sunshine/')) {
+      return rck;
+    }
+
     // 1. WatchFooty/EmbedIndia: Stable key based on flavor (any NATO/custom flavor) and stream number
     if (provider === 'watchfooty' || provider === 'embedindia' || u.pathname.includes('/secure/')) {
       const wf = u.pathname.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/([^/]+)\//i);
@@ -123,7 +134,7 @@ function getRemintCacheKey(rck, url) {
     }
 
     // 2. DaddyLive: Stable key based on channel key in path
-    if (provider === 'daddylive' || u.pathname.includes('/hls/')) {
+    if ((provider === 'daddylive' || u.pathname.includes('/hls/')) && !u.pathname.includes('/sunshine/')) {
       const dl = u.pathname.match(/\/hls\/([^/.]+)/i);
       if (dl) return `${rck}:${dl[1]}`;
       const bt = u.pathname.match(/^\/([^/]+)\//);
@@ -264,6 +275,11 @@ async function attemptRemintInner(rck, heldUrl, startedAt) {
         const heldParsed = new URL(heldUrl);
         const heldPath = heldParsed.pathname;
 
+        // 0. Vavoo / Sunshine: Fresh URLs are direct Sunshine endpoints
+        if (provider === 'vavoo' || heldPath.includes('/sunshine/')) {
+          return freshUrls[0];
+        }
+
         // 1. WatchFooty/EmbedIndia: Match by flavor (any NATO/custom flavor) and stream number
         if (provider === 'watchfooty' || provider === 'embedindia' || heldPath.includes('/secure/')) {
           const wfMatch = heldPath.match(/\/secure\/[^/]+\/([^/]+)\/[^/]+\/([^/]+)\//i);
@@ -281,7 +297,7 @@ async function attemptRemintInner(rck, heldUrl, startedAt) {
         }
 
         // 2. DaddyLive: Match by channel key
-        if (provider === 'daddylive' || heldPath.includes('/hls/')) {
+        if ((provider === 'daddylive' || heldPath.includes('/hls/')) && !heldPath.includes('/sunshine/')) {
           const dlMatch = heldPath.match(/\/hls\/([^/.]+)/i);
           if (dlMatch) {
             const channelKey = dlMatch[1];

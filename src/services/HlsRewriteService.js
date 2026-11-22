@@ -286,6 +286,35 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
     return isTikTokCloakedSegment(resolveSegmentUrl(t, manifestUrl));
   });
 
+  // Collect EXTINF durations to check for live buffer cushion and target duration clamping
+  const segmentDurations = [];
+  let declaredTargetDuration = 0;
+  for (let j = 0; j < lines.length; j++) {
+    const l = lines[j].trim();
+    if (l.startsWith('#EXTINF:')) {
+      const m = l.match(/^#EXTINF:([0-9.]+)/i);
+      if (m) segmentDurations.push(parseFloat(m[1]));
+    } else if (l.startsWith('#EXT-X-TARGETDURATION:')) {
+      const m = l.match(/^#EXT-X-TARGETDURATION:(\d+)/i);
+      if (m) declaredTargetDuration = parseInt(m[1], 10);
+    }
+  }
+
+  const maxObservedDuration = segmentDurations.length > 0 ? Math.max(...segmentDurations) : 0;
+  const effectiveTargetDuration = maxObservedDuration > 0
+    ? Math.max(declaredTargetDuration, Math.ceil(maxObservedDuration))
+    : declaredTargetDuration;
+
+  const isLive = segmentDurations.length > 0
+    && !manifestBody.includes('#EXT-X-ENDLIST')
+    && !manifestBody.includes('#EXT-X-PLAYLIST-TYPE:VOD')
+    && !manifestBody.includes('#EXT-X-START:');
+
+  const totalDuration = segmentDurations.reduce((acc, d) => acc + d, 0);
+  const liveOffset = totalDuration > 0
+    ? Math.min(18.0, Math.max(6.0, totalDuration * 0.4))
+    : 18.0;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
@@ -314,7 +343,15 @@ function rewriteHlsPlaylist(manifestBody, manifestUrl, opts = {}) {
         if (requiresByteRange && !manifestBody.includes('#EXT-X-VERSION:')) {
           rewritten.push('#EXT-X-VERSION:4');
         }
+        if (isLive) {
+          rewritten.push(`#EXT-X-START:TIME-OFFSET=-${liveOffset.toFixed(1)}`);
+        }
         continue;
+      } else if (trimmed.startsWith('#EXT-X-TARGETDURATION:')) {
+        if (effectiveTargetDuration > 0) {
+          rewritten.push(`#EXT-X-TARGETDURATION:${effectiveTargetDuration}`);
+          continue;
+        }
       } else if (trimmed.startsWith('#EXTINF:')) {
         const durMatch = trimmed.match(/^#EXTINF:([0-9.]+)/i);
         if (durMatch) {

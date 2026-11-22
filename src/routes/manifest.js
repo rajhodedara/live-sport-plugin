@@ -175,7 +175,6 @@ router.get(['/api/manifest', '/api/manifest.m3u8'], async (req, res) => {
         } else if (isLive) {
           dynamicTtl = Math.min(dynamicTtl, 3000);
         }
-        let injectedStart = out.includes('#EXT-X-START');
 
         if (!isMaster) {
           await preprobeManifestSegments(out, effectiveUrl, { referer, origin });
