@@ -2,6 +2,7 @@ const BaseProvider = require('./BaseProvider');
 const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { parseTimezone } = require('../timezone');
+const { BASE_URL } = require('../config');
 
 const DEFAULT_FALLBACK_DOMAIN = 'shadow-ran.online';
 const DOMAIN_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -182,10 +183,12 @@ class RoxieStreamsProvider extends BaseProvider {
       if (seenUrls.has(streamUrl)) continue;
       seenUrls.add(streamUrl);
 
+      const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}`;
+
       streams.push(new StreamEntity({
         name: this.name,
         title: `Stream ${streamIdx} (HD)`,
-        url: streamUrl,
+        url: proxyUrl,
         resolution: 'HD',
         behaviorHints: {
           notWebReady: false,
@@ -211,10 +214,11 @@ class RoxieStreamsProvider extends BaseProvider {
         const streamUrl = `https://${subdomain}.${domain}/${streamFile}`;
         if (!seenUrls.has(streamUrl)) {
           seenUrls.add(streamUrl);
+          const proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}&referer=${encodeURIComponent(this.baseUrl + '/')}&origin=${encodeURIComponent(this.baseUrl)}`;
           streams.push(new StreamEntity({
             name: this.name,
             title: `Stream ${streamIdx} (HD)`,
-            url: streamUrl,
+            url: proxyUrl,
             resolution: 'HD',
             behaviorHints: {
               notWebReady: false,

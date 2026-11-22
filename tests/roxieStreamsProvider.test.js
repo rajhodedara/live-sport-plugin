@@ -104,7 +104,7 @@ describe('RoxieStreamsProvider', () => {
     expect(matches[1].sources[0].id).toBe('/soccer-streams-1');
   });
 
-  test('parses stream page buttons into StreamEntity records with direct CDN URLs', () => {
+  test('parses stream page buttons into StreamEntity records with manifest proxy URLs', () => {
     const provider = new RoxieStreamsProvider({ circuitBreaker: mockCircuitBreaker });
     const streamPageFixture = `
       <!DOCTYPE html>
@@ -128,7 +128,10 @@ describe('RoxieStreamsProvider', () => {
 
     expect(streams[0].name).toBe('RoxieStreams');
     expect(streams[0].title).toBe('Stream 1 (HD)');
-    expect(streams[0].url).toBe('https://admin2.formaturamaxi.com.br/tnt.m3u8');
+    expect(streams[0].url).toContain('/api/manifest?url=');
+    expect(streams[0].url).toContain(encodeURIComponent('https://admin2.formaturamaxi.com.br/tnt.m3u8'));
+    expect(streams[0].url).toContain(`referer=${encodeURIComponent('https://roxiestreams.su/')}`);
+    expect(streams[0].url).toContain(`origin=${encodeURIComponent('https://roxiestreams.su')}`);
     expect(streams[0].resolution).toBe('HD');
     expect(streams[0].behaviorHints.notWebReady).toBe(false);
     expect(streams[0].behaviorHints.proxyHeaders.request).toEqual({
@@ -138,7 +141,7 @@ describe('RoxieStreamsProvider', () => {
     });
     expect(streams[0]._source).toBe('roxiestreams');
 
-    expect(streams[1].url).toBe('https://admin2.formaturamaxi.com.br/ncaa16.m3u8');
+    expect(streams[1].url).toContain(encodeURIComponent('https://admin2.formaturamaxi.com.br/ncaa16.m3u8'));
     expect(streams[1].title).toBe('Stream 2 (HD)');
   });
 
@@ -151,7 +154,7 @@ describe('RoxieStreamsProvider', () => {
 
     const streams = provider._parseStreamPageHtml(streamPageFixture, null);
     expect(streams).toHaveLength(1);
-    expect(streams[0].url).toBe('https://admin2.shadow-ran.online/tnt.m3u8');
+    expect(streams[0].url).toContain(encodeURIComponent('https://admin2.shadow-ran.online/tnt.m3u8'));
   });
 
   test('returns empty array when HTML contains no events or streams', () => {
