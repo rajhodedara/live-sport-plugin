@@ -1,27 +1,21 @@
-# Session Checkpoint: SportzX Provider Integration & Resilient Fallback
+# Session Checkpoint: SportzX Provider Integration & Poster Normalization
 **Date**: 2026-11-23
-**Status**: Completed (Pushed to `origin/stable` at `3a9038c`)
+**Status**: Completed (Pushed to `origin/stable` at `95b76c0`)
 
 ### What Was Completed
-- **Root Cause Identified**:
-  - Live upstream SportzX backend (`in.dotmatrixstream.us/events.json`) rotated payload format to protocol version `0x04`.
-  - While live channels (`/channels/<id>.json`) remained on version `0x03` and decrypted cleanly with working HLS streams, `events.json` threw `HMAC tag mismatch` in `decodeSxr()`.
-  - `SportzXProvider.getMatches()` was returning `[]` on failure, leaving the catalog starved of SportzX events.
-  - Additionally, `eventInfo.eventType: "null"` caused valid categories (UFC, MotoGP) to fall through to `other`.
-- **Code Changes**:
-  - `src/data/sportzx_events.json`: Bundled 74 active sporting events (UFC, MotoGP, LaLiga, Serie A, NFL, Cricket, WWE).
-  - `src/providers/SportzXProvider.js`:
-    - Added `_loadFallbackEvents()` to fall back to `src/data/sportzx_events.json` whenever remote gateway events fail to decrypt or timeout.
-    - Upgraded payload decryption to `decode()` supporting both SXR and Fallback2 (AES-128-CBC) on-demand channels.
-    - Fixed category normalization to ignore string `"null"` and correctly map `UFC` -> `mma`, `MotoGP` -> `motorsport`.
-    - Added `league` metadata mapping from `item.cat`.
-  - `tests/sportzXProvider.test.js`: Added tests verifying fallback behavior and error handling.
+- **Poster Override Fixed**:
+  - SportzX was previously passing raw individual team flag URLs (`teamAFlag`/`teamBFlag` from SofaScore/Blogger) as `thumbnail_url` and `poster`.
+  - In `src/catalog.js`, Tier 1 provider artwork took precedence over the composed cinematic card generator (`imageService.matchCardUrl`), causing cards to display single raw team logos as full posters.
+  - Cleared `poster: ''` and `thumbnail_url: ''` in `src/providers/SportzXProvider.js`.
+  - Added an artwork filter in `src/catalog.js` ignoring raw SportzX flags/posters, ensuring Nuvio always renders its high-quality cinematic cards with proper matchup typography, sport gradients, and team badges.
+- **Root Cause & Fallback**:
+  - Live upstream SportzX backend (`events.json`) rotated to v4.
+  - Bundled active sports catalog in `src/data/sportzx_events.json` with fallback mechanism.
+  - Fixed category normalization (`info.eventType: "null"`).
 - **Verification**:
   - `npm test -- tests/sportzXProvider.test.js tests/sportzXCrypto.test.js` (16 passed).
-  - `node --check src/index.js` and `node --check src/providers/SportzXProvider.js` passed.
-  - Verified live channel decryption on event `50004` (UFC) and `50092` (Atalanta vs Inter) yielding 4 working direct HLS streams each.
-- **Git Commit & Push**:
-  - Committed `3a9038c` (`fix(sportzx): add resilient seed fallback and category normalization`) and pushed to `origin/stable`.
+  - `node --check src/index.js`, `node --check src/catalog.js`, `node --check src/providers/SportzXProvider.js` passed.
+  - Pushed commit `95b76c0` to `origin/stable`.
 
 ### VPS Deployment Instructions
 On the VPS running `nuviosports.xyz`:
