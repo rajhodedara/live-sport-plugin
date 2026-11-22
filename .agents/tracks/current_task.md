@@ -90,7 +90,17 @@
       - Guarantees 0 video byte proxy overhead on VPS (Invariant I1).
     - Registered `sportzxProvider` in Awilix container (`src/container.js`), `MatchAggregator` (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per Invariant I4.
     - Verified with 14 unit and integration tests across `tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, and `tests/sportzXIntegration.test.js`.
+19. **RoxieStreams Live Stream Provider Integration**:
+    - Reverse-engineered and verified RoxieStreams architecture (`roxiestreams.su`) live against CDN edge.
+    - Implemented `RoxieStreamsProvider` (`src/providers/RoxieStreamsProvider.js`) extending `BaseProvider`:
+      - Ingests schedules across soccer, nba, nfl, nhl, mlb, fighting, and motorsports via guarded egress.
+      - Resolves dynamic edge domain from `https://roxiestreams.su/domainsz77.txt` with in-memory TTL caching (5 minutes) and fallback to `shadow-ran.online`.
+      - Extracts stream buttons from event pages into `StreamEntity` objects pointing to direct CDN URLs (`https://{subdomain}.{activeDomain}/{stream}.m3u8`).
+      - Confirmed `.js` masqueraded MPEG-TS segments start with `0x47` sync byte and CDN serves `Access-Control-Allow-Origin: *`. Web and native players ingest video directly from CDN with zero VPS bandwidth (Invariant I1).
+    - Registered `roxiestreamsProvider` in Awilix container (`src/container.js`), `MatchAggregator` (`src/services/MatchAggregator.js`), and stream resolver dispatch (`src/streams.js`) per Invariant I4.
+    - Verified with 10 unit and integration tests across `tests/roxieStreamsProvider.test.js`, `tests/roxieStreamsRegistration.test.js`, `tests/roxieStreamsAggregator.test.js`, and `tests/roxieStreamsDispatch.test.js`.
+    - Clean `node --check` across all touched files and clean ncc build into `dist/`.
 
 ## Verification
-- Tests: 14 passed across SportzX test suite (`tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, `tests/sportzXIntegration.test.js`). 76 passed across regression suites (`tests/channelStreamTitleScope.test.js`, `tests/streamPolicy.test.js`, `tests/matchAggregatorDates.test.js`).
-- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I8/D2 (relayed DASH stays off), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files.
+- Tests: 10 passed across RoxieStreams test suites (`tests/roxieStreamsProvider.test.js`, `tests/roxieStreamsRegistration.test.js`, `tests/roxieStreamsAggregator.test.js`, `tests/roxieStreamsDispatch.test.js`).
+- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files and clean local build.
