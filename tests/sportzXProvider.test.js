@@ -59,6 +59,45 @@ describe('SportzXProvider - Ingestion', () => {
     expect(matches[0].sources[0].source).toBe('sportzx');
   });
 
+  it('ingests production schema with eventInfo and registers lightweight source', async () => {
+    const prodPayload = [
+      {
+        id: 50125,
+        title: 'Barcelona',
+        cat: 'Football',
+        eventInfo: {
+          eventName: 'FC Barcelona vs Villarreal',
+          teamA: 'Barcelona',
+          teamB: 'Villarreal',
+          teamAFlag: 'https://img.sofascore.com/team1.png',
+          teamBFlag: 'https://img.sofascore.com/team2.png',
+          startTime: '2026/11/22 13:00:00 +0000',
+          isHot: '1'
+        }
+      }
+    ];
+
+    provider.proxyFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: encodeV3(prodPayload)
+      })
+    });
+
+    const matches = await provider.getMatches();
+    expect(matches.length).toBe(1);
+    expect(matches[0].id).toBe('sportzx_50125');
+    expect(matches[0].title).toBe('FC Barcelona vs Villarreal');
+    expect(matches[0].category).toBe('football');
+    expect(matches[0].popular).toBe('1');
+    expect(matches[0].team1).toBe('Barcelona');
+    expect(matches[0].team2).toBe('Villarreal');
+    expect(matches[0].thumbnail_url).toBe('https://img.sofascore.com/team1.png');
+    expect(matches[0].sources.length).toBe(1);
+    expect(matches[0].sources[0].eventId).toBe('50125');
+  });
+
   it('handles missing, 404, or malformed data gracefully without throwing', async () => {
     provider.proxyFetch = jest.fn().mockResolvedValue({
       ok: false,
@@ -144,5 +183,44 @@ describe('SportzXProvider - Stream Resolution & Policy Filtering', () => {
     expect(streams[0].url).toBe('https://fernfiber.s3.ca-central-1.amazonaws.com/hornets.m3u8');
     expect(streams[0].behaviorHints.proxyHeaders.request['User-Agent']).toContain('Dalvik/2.1.0');
     expect(streams[0].resolution).toBe('1080p');
+  });
+
+  it('fetches and resolves on-demand channels with pipe-delimited headers and drops DASH', async () => {
+    const channelData = [
+      {
+        title: 'TAPMAD FHD',
+        link: 'https://tencent-cdn.tapmad.com/live/main.m3u8|Referer=https://tapmad.com/&User-Agent=CustomUA',
+        type: '1'
+      },
+      {
+        title: 'DASH CHANNEL',
+        link: 'https://cdn.example.com/live/manifest.mpd|User-Agent=CustomUA',
+        type: '1'
+      }
+    ];
+
+    provider.proxyFetch = jest.fn().mockImplementation(async (url) => {
+      if (url.includes('channels/50125.json')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            data: encodeV3(channelData)
+          })
+        };
+      }
+      return { ok: false, status: 404 };
+    });
+
+    const src = { source: 'sportzx', eventId: '50125' };
+    const streams = await provider.resolveStream('sportzx_50125', 'football', 'Barcelona vs Villarreal', src);
+
+    // Only the HLS stream should be returned; the DASH stream must be dropped
+    expect(streams.length).toBe(1);
+    expect(streams[0].title).toBe('TAPMAD FHD');
+    expect(streams[0].url).toBe('https://tencent-cdn.tapmad.com/live/main.m3u8');
+    expect(streams[0].resolution).toBe('1080p');
+    expect(streams[0].behaviorHints.proxyHeaders.request['Referer']).toBe('https://tapmad.com/');
+    expect(streams[0].behaviorHints.proxyHeaders.request['User-Agent']).toBe('CustomUA');
   });
 });
