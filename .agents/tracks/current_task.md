@@ -106,7 +106,26 @@
     - Standardized pure Node.js decryptor in `src/resolver/sportzx/SportzXCrypto.js` with zero emulator, zero native binary, and zero third-party mirror dependencies.
     - Implemented standalone CLI tool `scripts/sportzx-decrypt.js` with failover endpoints (`dotmatrixstream.us` -> `android.onlystream.stream`), schema validation, CLI options (`--out`, `--payload`, `--file`, `--strict`), and verified live output to `events.json`.
     - 100% test pass rate across `tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, and `tests/sportzXIntegration.test.js` (15/15 tests passing).
+21. **RoxieStreams Cloudflare 403 & ProxyHeaders Fix**:
+    - Investigated HTTP 403 Forbidden reports on live server (`nuviosports.xyz`) when playing RoxieStreams in Stremio/ExoPlayer (e.g. Real Sociedad vs Racing Santander).
+    - Root cause:
+      1. Edge CDN (`formaturamaxi.com.br`) uses Cloudflare WAF requiring Fetch Metadata (`Sec-Fetch-Site: cross-site`, `Sec-Fetch-Mode: cors`, `Sec-Fetch-Dest: empty`) and modern Chrome User-Agent.
+      2. `src/streams.js` stripped `behaviorHints.proxyHeaders` for all providers except `ak47live` and `daddylive`, causing ExoPlayer to make segment requests without headers and hit 403 Forbidden.
+      3. Certain stream pages embed direct m3u8 URLs (`showPlayer('clappr', 'https://...')`) instead of `getRandomStream`, resulting in empty streams.
+    - Fix:
+      - Updated `src/streams.js` to whitelist `roxiestreams` in `proxyHeaders` retention and allow `Sec-Fetch-*` and `Accept` headers.
+      - Updated `src/providers/RoxieStreamsProvider.js` with `fullUrlRegex` to parse direct m3u8 URLs in addition to `getRandomStream`.
+      - Staged, tested (15 unit tests passing across 5 suites), committed (`4b7983e`), and pushed to `origin/stable`.
 
 ## Verification
-- Tests: 15 passed across SportzX test suites (`tests/sportzXCrypto.test.js`, `tests/sportzXProvider.test.js`, `tests/sportzXIntegration.test.js`).
-- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files and clean local build.
+- Tests: 15 passed across RoxieStreams test suites (`tests/roxieStreamsProvider.test.js`, `tests/roxieStreamsRegistration.test.js`, `tests/roxieStreamsAggregator.test.js`, `tests/roxieStreamsDispatch.test.js`, `tests/roxieStreamsStreamsIntegration.test.js`).
+- Invariants: I1 (zero video proxy bytes), I3 (leaf node provider), I4 (three-point registration), I10 (guarded outbound egress) strictly preserved. Clean `node --check` across all touched files.
+
+## Next Step for Deploy
+- Pull and restart on VPS:
+  ```bash
+  git pull origin stable
+  npm run build:local
+  pm2 reload all
+  node scripts/sync-matches.js
+  ```
