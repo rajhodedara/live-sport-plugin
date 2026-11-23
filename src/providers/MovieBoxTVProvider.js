@@ -5,6 +5,8 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { getVisitorToken, makeMovieBoxRequest } = require('./movieboxCrypto');
 
+const PRIORITY_CODES = ['US', 'IN', 'CA', 'ES', 'MX', 'DE', 'FR', 'IT', 'NL', 'BR', 'AR', 'PT', 'TR', 'RU'];
+
 class MovieBoxTVProvider extends BaseProvider {
   constructor(opts = {}) {
     super(opts);
@@ -12,25 +14,27 @@ class MovieBoxTVProvider extends BaseProvider {
     this.sourceName = 'moviebox_tv';
   }
 
-  _parseChannel(item, countryCode) {
+  _parseChannel(item, countryCode, countryName) {
     if (!item) return null;
     const channelId = item.channelId || item.id;
     if (!channelId) return null;
 
     const idStr = String(channelId);
     const title = item.title || item.name || item.channelName || idStr;
-    const now = String(Date.now());
-    const logo = item.logo || (item.countryFlagImage && item.countryFlagImage.url) || '';
+    const isPopular = /abc|cbs|nbc|fox|espn|hbo|cnn|tnt|tbs|discovery|disney|nfl|nba|sport/i.test(title) || countryCode === 'US';
+    const league = countryName || countryCode || '';
 
     return new MatchEntity({
       id: `moviebox_tv_${idStr}`,
       title,
       category: 'networks',
-      date: now,
-      timestamp: now,
-      league: countryCode || item.countryCode || '',
-      poster: logo,
-      thumbnail_url: logo,
+      date: '0', // Evergreen — 24/7 continuous channel
+      timestamp: '0',
+      popular: isPopular ? '1' : '0',
+      league,
+      poster: '',
+      thumbnail_url: '',
+      logo: '',
       sources: [
         {
           source: this.sourceName,
@@ -42,28 +46,48 @@ class MovieBoxTVProvider extends BaseProvider {
 
   _extractTvStream(detail) {
     if (!detail) return [];
+    const ch = detail.channel || detail;
 
-    let streamUrl = detail.liveUrl || detail.url || detail.playUrl;
-    if (!streamUrl && Array.isArray(detail.streams) && detail.streams.length > 0) {
-      streamUrl = detail.streams[0]?.url;
-    }
+    const streams = [];
+    const seenUrls = new Set();
 
-    if (!streamUrl || typeof streamUrl !== 'string') {
-      return [];
-    }
-
-    return [
-      new StreamEntity({
-        name: 'Live TV',
-        title: 'Live TV',
-        url: streamUrl,
-        behaviorHints: {
-          proxyHeaders: {
-            request: {}
-          }
+    if (Array.isArray(ch.streams) && ch.streams.length > 0) {
+      for (const s of ch.streams) {
+        const url = s && (s.url || s.playUrl || s.liveUrl);
+        if (url && typeof url === 'string' && !seenUrls.has(url)) {
+          seenUrls.add(url);
+          const name = s.name || (s.urlType ? s.urlType.toUpperCase() : 'Live TV');
+          streams.push(new StreamEntity({
+            name,
+            title: name,
+            url,
+            behaviorHints: {
+              proxyHeaders: {
+                request: {}
+              }
+            }
+          }));
         }
-      })
-    ];
+      }
+    }
+
+    if (streams.length === 0) {
+      const fallbackUrl = ch.liveUrl || ch.url || ch.playUrl;
+      if (fallbackUrl && typeof fallbackUrl === 'string' && !seenUrls.has(fallbackUrl)) {
+        streams.push(new StreamEntity({
+          name: 'Live TV',
+          title: 'Live TV',
+          url: fallbackUrl,
+          behaviorHints: {
+            proxyHeaders: {
+              request: {}
+            }
+          }
+        }));
+      }
+    }
+
+    return streams;
   }
 
   async getMatches() {
@@ -76,34 +100,52 @@ class MovieBoxTVProvider extends BaseProvider {
       const countryList = countryData.items || countryData.list || [];
       if (!Array.isArray(countryList)) return [];
 
+      countryList.sort((a, b) => {
+        const codeA = a.countryCode || a.code || '';
+        const codeB = b.countryCode || b.code || '';
+        const idxA = PRIORITY_CODES.indexOf(codeA);
+        const idxB = PRIORITY_CODES.indexOf(codeB);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return (b.channelCount || 0) - (a.channelCount || 0);
+      });
+
+      const selectedCountries = countryList.slice(0, 20);
       const allChannels = [];
 
-      for (const country of countryList) {
-        const countryCode = country && (country.countryCode || country.code);
-        if (!countryCode) continue;
+      const CONCURRENCY = 4;
+      for (let i = 0; i < selectedCountries.length; i += CONCURRENCY) {
+        const chunk = selectedCountries.slice(i, i + CONCURRENCY);
+        await Promise.all(chunk.map(async (country) => {
+          const countryCode = country && (country.countryCode || country.code);
+          if (!countryCode) return;
+          const countryName = country.countryName || countryCode;
 
-        try {
-          const channelData = await makeMovieBoxRequest(
-            `/wefeed-tv-bff/live/tv-channel-list-by-country?countryCode=${encodeURIComponent(countryCode)}&page=1&perPage=100`,
-            boundFetch,
-            { token }
-          );
+          const pagesToFetch = countryCode === 'US' ? [1, 2] : [1];
 
-          const channelList = channelData && (channelData.items || channelData.list);
-          if (Array.isArray(channelList)) {
-            for (const ch of channelList) {
-              const entity = this._parseChannel(ch, countryCode);
-              if (entity) {
-                allChannels.push(entity);
+          for (const page of pagesToFetch) {
+            try {
+              const channelData = await makeMovieBoxRequest(
+                `/wefeed-tv-bff/live/tv-channel-list-by-country?countryCode=${encodeURIComponent(countryCode)}&page=${page}&perPage=100`,
+                boundFetch,
+                { token }
+              );
+
+              const channelList = channelData && (channelData.items || channelData.list);
+              if (Array.isArray(channelList)) {
+                for (const ch of channelList) {
+                  const entity = this._parseChannel(ch, countryCode, countryName);
+                  if (entity) {
+                    allChannels.push(entity);
+                  }
+                }
               }
+            } catch (err) {
+              console.warn(`[MovieBoxTVProvider] Failed to fetch channels for country ${countryCode} page ${page}: ${err.message}`);
             }
           }
-        } catch (err) {
-          console.warn(`[MovieBoxTVProvider] Failed to fetch channels for country ${countryCode}: ${err.message}`);
-        }
-
-        // 50ms stagger between countries to avoid edge rate-limiting
-        await new Promise(r => setTimeout(r, 50));
+        }));
       }
 
       return allChannels;

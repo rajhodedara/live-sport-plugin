@@ -29,7 +29,6 @@ class MovieBoxSportsProvider extends BaseProvider {
       const rawTime = item.startTime || item.matchTime || item.arrangedTime;
       const matchTime = rawTime ? String(Number(rawTime)) : String(Date.now());
       const status = item.status || item.matchStatus || '';
-      const poster = item.leagueAvatar || item.thumbnail || '';
 
       const entity = new MatchEntity({
         id: String(matchId),
@@ -43,7 +42,8 @@ class MovieBoxSportsProvider extends BaseProvider {
         date: matchTime,
         timestamp: matchTime,
         status,
-        poster,
+        poster: '',
+        thumbnail_url: '',
         sources: [
           {
             source: this.sourceName,
@@ -60,18 +60,22 @@ class MovieBoxSportsProvider extends BaseProvider {
 
   _extractStreams(detail) {
     if (!detail) return [];
+    const match = detail.match || detail;
 
-    const status = detail.status || detail.matchStatus;
-    if (status !== 'MatchIng') {
+    const status = match.matchStatus || match.status;
+    if (status === 'MatchNotStart') {
+      return [];
+    }
+    if (status && status !== 'MatchIng' && status !== 'Living') {
       return [];
     }
 
     const streams = [];
     const seenUrls = new Set();
 
-    const sources = Array.isArray(detail.playSource) && detail.playSource.length > 0
-      ? detail.playSource
-      : (Array.isArray(detail.playSourceH5) ? detail.playSourceH5 : []);
+    const sources = Array.isArray(match.playSource) && match.playSource.length > 0
+      ? match.playSource
+      : (Array.isArray(match.playSourceH5) ? match.playSourceH5 : []);
 
     for (const src of sources) {
       const url = src && (src.url || src.playUrl);
@@ -92,11 +96,11 @@ class MovieBoxSportsProvider extends BaseProvider {
       }
     }
 
-    if (streams.length === 0 && detail.playPath && typeof detail.playPath === 'string' && !seenUrls.has(detail.playPath)) {
+    if (streams.length === 0 && match.playPath && typeof match.playPath === 'string' && !seenUrls.has(match.playPath)) {
       streams.push(new StreamEntity({
         name: 'Live',
         title: 'Live',
-        url: detail.playPath,
+        url: match.playPath,
         behaviorHints: {
           proxyHeaders: {
             request: {

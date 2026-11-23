@@ -125,6 +125,12 @@ describe('MovieBoxSportsProvider', () => {
       expect(matches[0].sources[0].source).toBe('moviebox_sports');
       expect(matches[0].sources[0].id).toBe('MB_S_1001');
     });
+
+    test('poster and thumbnail_url are empty so Nuvio artwork pipeline manages cards', () => {
+      const matches = provider._parseAggregate(AGGREGATE_FIXTURE.data.list);
+      expect(matches[0].poster).toBe('');
+      expect(matches[0].thumbnail_url).toBe('');
+    });
   });
 
   describe('_extractStreams', () => {

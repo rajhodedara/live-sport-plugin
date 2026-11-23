@@ -72,6 +72,13 @@ describe('MovieBoxTVProvider', () => {
       expect(entity.sources[0].id).toBe('CH001');
     });
 
+    test('date is "0" and poster is empty for 24/7 evergreen channels', () => {
+      const entity = provider._parseChannel(CHANNEL_LIST_FIXTURE[0], 'US');
+      expect(entity.date).toBe('');
+      expect(entity.poster).toBe('');
+      expect(entity.thumbnail_url).toBe('');
+    });
+
     test('league is countryCode', () => {
       const entity = provider._parseChannel(CHANNEL_LIST_FIXTURE[0], 'GB');
       expect(entity.league).toBe('GB');

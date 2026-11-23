@@ -148,12 +148,23 @@ async function makeMovieBoxRequest(path, fetchFn, { method = 'GET', body = null,
   });
 
   if (!res) throw new Error(`Empty response for ${path}`);
+  if (res.status && (res.status < 200 || res.status >= 300)) {
+    throw new Error(`MovieBox HTTP ${res.status} for ${path}`);
+  }
   let data;
   if (typeof res.json === 'function') {
-    data = await res.json();
+    try {
+      data = await res.json();
+    } catch (_) {
+      throw new Error(`MovieBox invalid JSON response for ${path}`);
+    }
   } else if (typeof res.text === 'function') {
     const text = await res.text();
-    data = JSON.parse(text);
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      throw new Error(`MovieBox invalid JSON response for ${path}`);
+    }
   } else {
     data = res;
   }
