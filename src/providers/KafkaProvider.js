@@ -5,6 +5,7 @@ const ChannelIdentityService = require('../services/ChannelIdentityService');
 const ChannelCountryService = require('../services/ChannelCountryService');
 const StreamEntity = require('../domain/StreamEntity');
 const { isBlockedStream } = require('../services/StreamPolicy');
+const { getRequestBaseUrl } = require('../config');
 
 const GENERIC_CATALOG_ID = 'flix-live-tv-v2-trex';
 const DEFAULT_CATALOG_TIMEOUT_MS = 15000;
@@ -405,10 +406,22 @@ class KafkaProvider extends BaseProvider {
         }
         if (!title) title = 'Live Stream';
 
+        const BASE_URL = getRequestBaseUrl();
+        let streamUrl = s.url;
+        if (!streamUrl.includes('/api/manifest?url=')) {
+          const reqHeaders = (s.behaviorHints && (s.behaviorHints.proxyHeaders?.request || s.behaviorHints.proxyHeaders)) || {};
+          const referer = reqHeaders.Referer || reqHeaders.referer || '';
+          const origin = reqHeaders.Origin || reqHeaders.origin || '';
+          let proxyUrl = `${BASE_URL}/api/manifest?url=${encodeURIComponent(streamUrl)}`;
+          if (referer) proxyUrl += `&referer=${encodeURIComponent(referer)}`;
+          if (origin) proxyUrl += `&origin=${encodeURIComponent(origin)}`;
+          streamUrl = proxyUrl;
+        }
+
         const entity = new StreamEntity({
           name: 'Kafka',
           title,
-          url: s.url,
+          url: streamUrl,
           behaviorHints: s.behaviorHints,
           resolution: s.resolution,
           quality: s.quality || s.name,

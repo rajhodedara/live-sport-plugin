@@ -541,7 +541,7 @@ describe('KafkaProvider - Task 1: Upstream Contract and Provider Seam', () => {
       expect(s.name).toBe('Kafka');
       expect(s.title).toContain('Sky Sports Cricket');
       expect(s.title).toContain('1080p');
-      expect(s.url).toBe('https://cdn.example.invalid/hls/live.m3u8');
+      expect(s.url).toContain('/api/manifest?url=' + encodeURIComponent('https://cdn.example.invalid/hls/live.m3u8'));
       expect(s.behaviorHints.proxyHeaders.request['User-Agent']).toBe('CustomUA');
       expect(s.channelName).toBe('Sky Sports Cricket');
     });
@@ -583,7 +583,7 @@ describe('KafkaProvider - Task 1: Upstream Contract and Provider Seam', () => {
       const src = { channelName: 'Sky Sports Cricket' };
       const streams = await provider.resolveStream('flix:test', 'cricket', 'Match', src);
       expect(streams).toHaveLength(1);
-      expect(streams[0].url).toBe('https://cdn.example.invalid/stream.m3u8');
+      expect(streams[0].url).toContain('/api/manifest?url=' + encodeURIComponent('https://cdn.example.invalid/stream.m3u8'));
     });
 
     test('returns empty array on 401/403 or network failure without throwing', async () => {
