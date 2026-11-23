@@ -629,7 +629,7 @@ const sourceIdentityKey = (s) => [
 ].join('\u0000');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, leafRecapProvider, scorezoneProvider, pitSportProvider, sportsBiteProvider, sportzxProvider, roxiestreamsProvider, providerHealthService, broadcasterMatchService, movieboxSportsProvider, movieboxTvProvider } = {}) {
+  constructor({ timStreamsProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, leafRecapProvider, scorezoneProvider, pitSportProvider, sportsBiteProvider, sportzxProvider, roxiestreamsProvider, providerHealthService, broadcasterMatchService, movieboxSportsProvider, movieboxTvProvider, kafkaProvider } = {}) {
     this.providers = [timStreamsProvider, streamedPkProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : []), ...(leafRecapProvider ? [leafRecapProvider] : []), ...((scorezoneProvider && typeof scorezoneProvider.isEnabled === 'function' && !scorezoneProvider.isEnabled()) ? [] : (scorezoneProvider ? [scorezoneProvider] : [])), ...(pitSportProvider ? [pitSportProvider] : []), ...(sportsBiteProvider ? [sportsBiteProvider] : []), ...(sportzxProvider ? [sportzxProvider] : []), ...(roxiestreamsProvider ? [roxiestreamsProvider] : []), ...(movieboxSportsProvider ? [movieboxSportsProvider] : []), ...(movieboxTvProvider ? [movieboxTvProvider] : [])];
     this.streamSports99Provider = streamSports99Provider;
     this.cacheService = cacheService;
@@ -637,7 +637,13 @@ class MatchAggregator {
     this.providerHealthService = providerHealthService;
     this.vavooProvider = vavooProvider;
     this.broadcasterMatchService = broadcasterMatchService;
-    if (this.providerHealthService) this.providerHealthService.registerProviders(this.providers);
+    this.kafkaProvider = kafkaProvider;
+    if (this.providerHealthService) {
+      this.providerHealthService.registerProviders([
+        ...this.providers,
+        ...(kafkaProvider ? [kafkaProvider] : [])
+      ]);
+    }
   }
 
   _extractMotorsportSeries(title, league) {
@@ -735,6 +741,88 @@ class MatchAggregator {
 
     if (enrichedCount > 0) {
       console.log(`[MatchAggregator] Injected Vavoo 1080p broadcast feeds into ${enrichedCount} live fixture(s).`);
+    }
+  }
+
+  /**
+   * Enriches live/upcoming sports fixtures with Kafka broadcast sources by matching
+   * broadcaster channel names against the allowlisted Kafka sports catalog index.
+   *
+   * @param {Array<Object>} matches
+   */
+  _enrichMatchesWithKafka(matches) {
+    if (!this.kafkaProvider || typeof this.kafkaProvider.createSource !== 'function' || !Array.isArray(matches)) {
+      return;
+    }
+    if (this.kafkaProvider.configured === false) {
+      return;
+    }
+
+    const injectionCap = Number(process.env.KAFKA_INJECTION_CAP) || 4;
+    const now = Date.now();
+    const liveWindowMs = 14 * 3600 * 1000;
+    let enrichedFixtures = 0;
+    let totalSourcesAttached = 0;
+
+    for (const match of matches) {
+      if (!match || !Array.isArray(match.sources) || match.sources.length === 0) continue;
+      // Do not inject into 24/7 channels or VOD replays
+      if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
+      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_') || match.id.startsWith('leaf_recap_')))) continue;
+      if (['finished', 'ended'].includes(String(match.status || '').toLowerCase())) continue;
+      const kickoff = _parseEventDate(match.date);
+      if (kickoff > 0 && now > kickoff + liveWindowMs) continue;
+
+      const candidates = [];
+      for (const src of match.sources) {
+        if (!src) continue;
+        const candidateName = src.channelName || src.channel_name || src.channel;
+        if (candidateName && typeof candidateName === 'string' && candidateName.trim()) {
+          candidates.push({
+            name: candidateName.trim(),
+            context: {
+              group: src.group,
+              country: src.country,
+              countryCode: src.countryCode
+            }
+          });
+        }
+      }
+
+      if (candidates.length === 0) continue;
+
+      const existingKafkaIds = new Set(
+        match.sources
+          .filter(s => s && s.source === 'kafka')
+          .map(s => s.id)
+      );
+
+      let injectedForMatch = 0;
+      for (const cand of candidates) {
+        if (injectedForMatch >= injectionCap) break;
+        const kafkaSource = this.kafkaProvider.createSource(cand.name, cand.context);
+        if (kafkaSource && kafkaSource.id && !existingKafkaIds.has(kafkaSource.id)) {
+          existingKafkaIds.add(kafkaSource.id);
+          match.sources.push(kafkaSource);
+          injectedForMatch++;
+          totalSourcesAttached++;
+        }
+      }
+
+      if (injectedForMatch > 0) {
+        enrichedFixtures++;
+      }
+    }
+
+    if (enrichedFixtures > 0) {
+      console.log(`[MatchAggregator] Injected ${totalSourcesAttached} Kafka broadcast source(s) into ${enrichedFixtures} live fixture(s).`);
+    }
+
+    if (this.providerHealthService && typeof this.providerHealthService.recordEnrichment === 'function') {
+      this.providerHealthService.recordEnrichment(this.kafkaProvider, {
+        enrichedFixtures,
+        totalSourcesAttached
+      });
     }
   }
 
@@ -1756,6 +1844,17 @@ class MatchAggregator {
       return true;
     });
 
+    // Start Kafka sports catalog index refresh in parallel with provider fan-out
+    const kafkaRefreshStartedAt = Date.now();
+    let kafkaRefreshErrorKind = null;
+    const kafkaRefreshPromise = (this.kafkaProvider && this.kafkaProvider.configured !== false && typeof this.kafkaProvider.refreshIndex === 'function')
+      ? this.kafkaProvider.refreshIndex().catch(err => {
+          kafkaRefreshErrorKind = String(err && (err.code || err.name) || 'Error').replace(/[^a-z0-9_.-]/gi, '').slice(0, 80);
+          console.warn('[MatchAggregator] kafkaProvider.refreshIndex failed:', kafkaRefreshErrorKind);
+          return null;
+        })
+      : Promise.resolve(null);
+
     if (process.env.LOW_MEMORY_MODE === 'true') {
       // Memory-safe sequential fetching (Alwaysdata)
       for (const p of providersToQuery) {
@@ -2107,6 +2206,21 @@ class MatchAggregator {
 
       // Enrich active fixtures with high-definition 1080p Vavoo broadcast feeds
       this._enrichMatchesWithBroadcasters(activeMatches);
+
+      // Await parallel Kafka index refresh and enrich fixtures with allowlisted Kafka sports channels
+      await kafkaRefreshPromise;
+      if (this.kafkaProvider && this.kafkaProvider.configured !== false && this.providerHealthService && typeof this.providerHealthService.recordAuxiliaryResult === 'function') {
+        const providerReportedError = this.kafkaProvider.lastRefreshSucceeded === false
+          ? this.kafkaProvider.lastRefreshErrorKind
+          : kafkaRefreshErrorKind;
+        this.providerHealthService.recordAuxiliaryResult(this.kafkaProvider, {
+          itemCount: this.kafkaProvider.lastIndexedChannelCount,
+          durationMs: Date.now() - kafkaRefreshStartedAt,
+          error: providerReportedError ? new Error(providerReportedError) : null,
+          note: providerReportedError ? 'Kafka channel index refresh failed; last-good index retained' : 'Kafka sports channel index ready'
+        });
+      }
+      this._enrichMatchesWithKafka(activeMatches);
 
       this.cacheService.setMatches(activeMatches);
       if (this.providerHealthService) {

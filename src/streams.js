@@ -64,6 +64,7 @@ const SOURCE_PRIORITY = {
   daddylive: 5,
   roxiestreams: 5,
   vavoo: 6,
+  kafka: 6,
   sktech: 7,
   damitv: 8,
   ak47live: 8,
@@ -92,8 +93,8 @@ const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -132,7 +133,8 @@ const NICE_NAMES = {
   sportzx: 'SportzX',
   roxiestreams: 'RoxieStreams',
   moviebox_sports: 'MovieBox Sports',
-  moviebox_tv: 'MovieBox TV'
+  moviebox_tv: 'MovieBox TV',
+  kafka: 'Kafka'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -165,7 +167,8 @@ const CHANNEL_TITLE_NICE_NAMES = {
   sportzx: 'SportzX',
   roxiestreams: 'RoxieStreams',
   moviebox_sports: 'MovieBox Sports',
-  moviebox_tv: 'MovieBox TV'
+  moviebox_tv: 'MovieBox TV',
+  kafka: 'Kafka'
 };
 
 function isReplaySource(sourceName) {
@@ -344,6 +347,9 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
   } else if (sourceName === 'moviebox_tv') {
     const provider = container.resolve('movieboxTvProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'kafka') {
+    const provider = container.resolve('kafkaProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
     const pName = sourceName.replace('yaml_', '');

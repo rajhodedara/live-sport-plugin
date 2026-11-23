@@ -45,6 +45,7 @@ const SportzXProvider = require('./providers/SportzXProvider');
 const RoxieStreamsProvider = require('./providers/RoxieStreamsProvider');
 const MovieBoxSportsProvider = require('./providers/MovieBoxSportsProvider');
 const MovieBoxTVProvider = require('./providers/MovieBoxTVProvider');
+const KafkaProvider = require('./providers/KafkaProvider');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
@@ -118,6 +119,7 @@ container.register({
   roxiestreamsProvider: asClass(RoxieStreamsProvider).singleton(),
   movieboxSportsProvider: asClass(MovieBoxSportsProvider).singleton(),
   movieboxTvProvider: asClass(MovieBoxTVProvider).singleton(),
+  kafkaProvider: asClass(KafkaProvider).singleton(),
   yamlProviders: asValue(yamlProviders)
 });
 

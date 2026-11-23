@@ -63,6 +63,28 @@ describe('ProviderHealthService', () => {
     });
   });
 
+  test('records auxiliary index health and enrichment counts', () => {
+    const service = new ProviderHealthService();
+    const kafka = provider('Kafka', { sourceName: 'kafka' });
+
+    service.recordAuxiliaryResult(kafka, {
+      itemCount: 12,
+      durationMs: 18.7,
+      note: 'Kafka sports channel index ready'
+    });
+    service.recordEnrichment(kafka, { enrichedFixtures: 3, totalSourcesAttached: 5 });
+
+    expect(service.snapshot().providers[0]).toMatchObject({
+      id: 'kafka',
+      state: 'healthy',
+      matchCount: 12,
+      durationMs: 19,
+      enrichedFixtures: 3,
+      attachedSources: 5,
+      note: 'Kafka sports channel index ready'
+    });
+  });
+
   test('reports sync lifecycle and returns isolated snapshots', () => {
     const service = new ProviderHealthService();
     service.startSync();

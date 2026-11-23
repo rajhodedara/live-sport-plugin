@@ -119,6 +119,36 @@ class ProviderHealthService {
     }
   }
 
+  recordAuxiliaryResult(provider, { itemCount, durationMs, error, note } = {}) {
+    this.registerProviders([provider]);
+    const identity = providerIdentity(provider);
+    const record = this.providers.get(identity.id);
+    const hasError = !!error;
+    const count = Number.isFinite(itemCount) ? Math.max(0, Math.round(itemCount)) : 0;
+    const now = new Date().toISOString();
+    Object.assign(record, {
+      state: hasError ? 'error' : (count > 0 ? 'healthy' : 'empty'),
+      matchCount: count,
+      durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+      lastAttemptAt: now,
+      lastSuccessAt: hasError ? record.lastSuccessAt : now,
+      error: hasError ? safeErrorMessage(error) : null,
+      consecutiveFailures: hasError ? record.consecutiveFailures + 1 : 0,
+      note: note || null,
+    });
+  }
+
+  recordEnrichment(provider, { enrichedFixtures, totalSourcesAttached } = {}) {
+    this.registerProviders([provider]);
+    const identity = providerIdentity(provider);
+    const record = this.providers.get(identity.id);
+    Object.assign(record, {
+      enrichedFixtures: Number.isFinite(enrichedFixtures) ? Math.max(0, Math.round(enrichedFixtures)) : 0,
+      attachedSources: Number.isFinite(totalSourcesAttached) ? Math.max(0, Math.round(totalSourcesAttached)) : 0,
+      lastEnrichmentAt: new Date().toISOString(),
+    });
+  }
+
   finishSync({ matchCount, succeeded } = {}) {
     const now = Date.now();
     this.sync = {
