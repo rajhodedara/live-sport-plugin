@@ -7,11 +7,6 @@ const MatchEntity = require('../domain/MatchEntity');
 const StreamEntity = require('../domain/StreamEntity');
 const { decode, decodeV3 } = require('../resolver/sportzx/SportzXCrypto');
 
-let SEED_EVENTS = null;
-try {
-  SEED_EVENTS = require('../data/sportzx_events.json');
-} catch (_) {}
-
 const GATEWAYS = [
   'https://in.dotmatrixstream.us/',
   'https://android.onlystream.stream/',
@@ -76,6 +71,51 @@ class SportzXProvider extends BaseProvider {
   }
 
   /**
+   * Specialized category normalizer for SportzX league / event strings
+   */
+  normalizeSportzXCategory(rawCat) {
+    if (!rawCat || typeof rawCat !== 'string') return 'other';
+    // Strip emojis, regional flag indicators, and special symbols
+    const cleaned = rawCat.replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F1E6}-\u{1F1FF}]/gu, '').trim().toLowerCase();
+
+    if (/epl|premier league|laliga|serie a|bundesliga|ligue 1|mls|brasileir|eredivisie|champions|u17|u19|u20|u21|isl|afc|football|soccer/i.test(cleaned)) {
+      return 'football';
+    }
+    if (/cricket|t20|t10|ipl|bbl|wbbl|npl|asia cup|odi|test/i.test(cleaned)) {
+      return 'cricket';
+    }
+    if (/nba|basketball|cba|euroleague/i.test(cleaned)) {
+      return 'basketball';
+    }
+    if (/nfl|american football|cfl/i.test(cleaned)) {
+      return 'american_football';
+    }
+    if (/nhl|hockey|khl/i.test(cleaned)) {
+      return 'hockey';
+    }
+    if (/ufc|mma|boxing|bellator|one championship/i.test(cleaned)) {
+      return 'mma';
+    }
+    if (/f1|formula 1|motogp|motorsport|nascar|indycar/i.test(cleaned)) {
+      return 'motorsport';
+    }
+    if (/tennis|atp|wta/i.test(cleaned)) {
+      return 'tennis';
+    }
+    if (/baseball|mlb/i.test(cleaned)) {
+      return 'baseball';
+    }
+    if (/rugby|afl/i.test(cleaned)) {
+      return 'rugby';
+    }
+    if (/golf|pga/i.test(cleaned)) {
+      return 'golf';
+    }
+
+    return this.normalizeCategory(cleaned);
+  }
+
+  /**
    * Internal decryptor helper - handles SXR (v3/v4) and Fallback2 AES-128-CBC
    */
   _decryptPayload(base64Data) {
@@ -86,25 +126,25 @@ class SportzXProvider extends BaseProvider {
    * Load bundled or local fallback events if remote gateway decryption fails
    */
   _loadFallbackEvents() {
-    if (Array.isArray(SEED_EVENTS) && SEED_EVENTS.length > 0) {
-      return SEED_EVENTS;
+    const candidatePaths = [
+      path.join(__dirname, '../data/sportzx_events.json'),
+      path.join(__dirname, './data/sportzx_events.json'),
+      path.join(process.cwd(), 'src/data/sportzx_events.json'),
+      path.join(process.cwd(), 'data/sportzx_events.json'),
+      path.join(process.cwd(), 'events_fresh.json')
+    ];
+
+    for (const p of candidatePaths) {
+      try {
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch (_) {}
     }
-
-    try {
-      const bundledPath = path.join(__dirname, '../data/sportzx_events.json');
-      if (fs.existsSync(bundledPath)) {
-        const raw = fs.readFileSync(bundledPath, 'utf8');
-        return JSON.parse(raw);
-      }
-    } catch (_) {}
-
-    try {
-      const localPath = path.join(process.cwd(), 'events_fresh.json');
-      if (fs.existsSync(localPath)) {
-        const raw = fs.readFileSync(localPath, 'utf8');
-        return JSON.parse(raw);
-      }
-    } catch (_) {}
 
     return [];
   }
@@ -132,7 +172,7 @@ class SportzXProvider extends BaseProvider {
                      (item.cat && item.cat !== 'null' ? item.cat : '') ||
                      (item.category && item.category !== 'null' ? item.category : '') ||
                      'other';
-      const category = this.normalizeCategory(rawCat);
+      const category = this.normalizeSportzXCategory(rawCat);
       const eventId = String(item.id || item.eventId || Math.random().toString(36).slice(2));
 
       // Extract channels & stream formats if embedded (legacy / fixture mode)

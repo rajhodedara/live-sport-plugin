@@ -1,50 +1,34 @@
-# Session Checkpoint: Vavoo 4-5 Minute Playback Crash Remediation
+# Session Checkpoint: SportzX Live Resolution & VPS Build Remediation
 **Date**: 2026-11-23
 **Status**: Completed & Verified
 
-### Root Cause Analysis of 4-5 Minute Crash
-1. **Upstream Token Re-minting Corruption (`src/remint.js`)**:
-   - Vavoo streams resolve to Sunshine CDN URLs with tokens in the URL path (`http://<host>:8008/sunshine/<TOKEN>/hls/index.m3u8`).
-   - In `mergeRemintedUrl()`, the check `held.pathname.includes('/hls/')` caused Vavoo URLs to enter the DaddyLive query-parameter replacement branch.
-   - Because Vavoo tokens are embedded in the pathname rather than query parameters, `mergeRemintedUrl` returned the **stale expired URL unchanged**.
-   - Whenever an upstream hiccup or token rotation triggered remint, the retry immediately failed with 403/404, `/api/manifest` cached a negative 404, and the player permanently crashed.
-   - Similarly, `getRemintCacheKey()` erroneously treated Vavoo's `/hls/index.m3u8` as DaddyLive channel key `index`.
+### Root Cause Analysis: Missing SportzX Matches & 0 Streams on `nuviosports.xyz`
+1. **VPS Build Failure Stalled Deployment (`@vercel/ncc` Conflict)**:
+   - When updating the VPS, `npm run build:local` crashed due to an NCC asset collision:
+     `Error: Conflict: Multiple assets emit different content to the same filename data/iframe_domains.json / matches_cache.json / team_logos_cache.json`.
+   - Because `ncc` crashed, the VPS never compiled a new `dist/index.js` and PM2 remained running the previous code and in-memory cache with old matches (`50087`, `50088`, `50089`).
+   - *Fix*: Created `scripts/prepare-build.js` that automatically unlinks transient runtime cache files in `data/` before `ncc` executes, ensuring zero asset conflicts.
 
-2. **ExoPlayer Live Window Drift (`BehindLiveWindowException`) (`src/services/HlsRewriteService.js`)**:
-   - Vavoo live sliding playlists only hold 6 segments (~60s window).
-   - Without `#EXT-X-START:TIME-OFFSET`, native players (such as ExoPlayer in Stremio Android TV / Fire TV) start at the bleeding live edge (0s buffer).
-   - If a segment download stalls briefly or packet loss occurs, the sliding window advances past the playing segment, throwing `BehindLiveWindowException` and exiting playback after 3–5 minutes.
-   - Discrepancies between declared `#EXT-X-TARGETDURATION` and actual segment durations caused playback cadence drift.
+2. **Category Normalization Failure Masked SportzX Fixtures (`normalizeSportzXCategory`)**:
+   - SportzX emits emoji league strings for major competitions: `'MLS 🇺🇸'`, `'EPL 🏴󠁧󠁢󠁥󠁮󠁧󠁿'`, `'Brasileirão'`, `'ISL'`, `'WBBL'`.
+   - `BaseProvider.normalizeCategory` did not strip Unicode flags/emojis, resulting in all soccer and cricket leagues falling back to category `'other'`.
+   - In `MatchAggregator`, candidate deduplication rejected merging category `'other'` with primary providers (`'football'` / `'cricket'`). As a result, live games like Vancouver Whitecaps had 0 SportzX streams attached, and were omitted from sport-specific catalogs.
+   - *Fix*: Implemented `normalizeSportzXCategory()` in `SportzXProvider.js` stripping emojis and explicitly mapping soccer, cricket, basketball, motorsport, and combat sports leagues to their standard canonical categories.
 
-3. **Mirror Resilience (`src/providers/VavooProvider.js`)**:
-   - `VAVOO_BASE_SITES` lacked `https://voltop.net` for failover rotation.
+3. **Stream Protocol Variance across Live Games**:
+   - Matches with direct HLS links (e.g. `50090` Vancouver Whitecaps, `50118` South Africa vs Bangladesh) yield 4 working direct HLS streams (`MONO MAX HD`, `SportzX Live`, `HD SERVER`, `LOW SERVER`).
+   - NBA games (`50058`, `50056`) encrypted under protocol `0x04` fail HMAC verification and NFL games (`50013`) provide only Amazon Prime DASH (.mpd) which are dropped per Invariant I8 / D2.
 
 ---
 
-### What Was Implemented
-- **`src/remint.js`**:
-  - In `mergeRemintedUrl()`: Added dedicated handler for Vavoo / Sunshine CDN (`provider === 'vavoo' || fresh.pathname.includes('/sunshine/') || held.pathname.includes('/sunshine/')`) returning `freshUrl` directly.
-  - Guarded DaddyLive query-replacement branch with `!held.pathname.includes('/sunshine/')`.
-  - In `getRemintCacheKey()`: Returns clean `rck` for Vavoo streams without DaddyLive key corruption.
-  - In `attemptRemintInner()`: Returns candidate `freshUrls[0]` directly for Vavoo / Sunshine.
-- **`src/services/HlsRewriteService.js`**:
-  - Dynamically recalculates and clamps `#EXT-X-TARGETDURATION` to `Math.max(declaredTargetDuration, Math.ceil(maxObservedDuration))`.
-  - For live media playlists without `#EXT-X-ENDLIST` or `#EXT-X-PLAYLIST-TYPE:VOD`, injects `#EXT-X-START:TIME-OFFSET=-18.0` (scaled safely to window duration) immediately after `#EXTM3U` to provide a multi-segment buffer cushion.
-- **`src/routes/manifest.js`**:
-  - Removed unused variable `injectedStart`.
-- **`src/providers/VavooProvider.js`**:
-  - Added `'https://voltop.net'` to `VAVOO_BASE_SITES` mirror list.
-- **`tests/vavooRemintAndBuffer.test.js`**:
-  - Added comprehensive test suite verifying remint replacement, cache key stability, target duration clamping, and `#EXT-X-START` live cushion injection.
+### Files Changed
+- `src/providers/SportzXProvider.js`: Added `normalizeSportzXCategory()` with emoji stripping and explicit league regex; switched fallback events loading to dynamic paths without static require.
+- `scripts/prepare-build.js`: Cleaned colliding runtime cache files before ncc packaging.
+- `package.json`: Wired `prepare-build.js` into `build` and `build:local`.
 
 ---
 
 ### Verification
-- `npm test -- tests/vavooRemintAndBuffer.test.js` (8 passed).
-- `npm test -- tests/hlsRewritePlaylist.test.js` (16 passed).
-- `npm test -- tests/hlsRewriteService.test.js` (62 passed).
-- `npm test -- tests/vavooLocalCapacity.test.js` (54 passed).
-- `npm test -- tests/vavooMultiMirrorRemediation.test.js` (26 passed).
-- `npm test -- tests/vavooAuthFailover.test.js` (8 passed).
-- `npm test -- tests/manifestRecoveryIdentity.test.js` (32 passed).
-- `node --check src/index.js`, `node --check src/remint.js`, `node --check src/services/HlsRewriteService.js`, `node --check src/routes/manifest.js`, `node --check src/providers/VavooProvider.js` all pass.
+- `npm test -- tests/sportzXProvider.test.js tests/sportzXCrypto.test.js` (16 passed).
+- `node scripts/prepare-build.js; npx @vercel/ncc build src/index.js -o dist --minify -e sharp` (completed in 14s with zero conflicts).
+- `node --check src/index.js`, `node --check src/providers/SportzXProvider.js`.
