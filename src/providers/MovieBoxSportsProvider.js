@@ -17,31 +17,37 @@ class MovieBoxSportsProvider extends BaseProvider {
 
     const matches = [];
     for (const item of list) {
-      if (!item || !item.matchId) continue;
+      if (!item) continue;
+      const matchId = item.id || item.matchId;
+      if (!matchId) continue;
 
-      const home = item.homeTeam || '';
-      const away = item.awayTeam || '';
+      const home = item.team1?.name || item.homeTeam || '';
+      const away = item.team2?.name || item.awayTeam || '';
       const title = home && away ? `${home} vs ${away}` : (home || away || 'Sports Event');
-      const category = this.normalizeCategory(item.sportType);
-      const matchTime = item.matchTime ? String(Number(item.matchTime)) : String(Date.now());
+      const sportType = item.type || item.sportType;
+      const category = this.normalizeCategory(sportType);
+      const rawTime = item.startTime || item.matchTime || item.arrangedTime;
+      const matchTime = rawTime ? String(Number(rawTime)) : String(Date.now());
+      const status = item.status || item.matchStatus || '';
+      const poster = item.leagueAvatar || item.thumbnail || '';
 
       const entity = new MatchEntity({
-        id: String(item.matchId),
+        id: String(matchId),
         title,
         homeTeam: home,
         awayTeam: away,
         team1: home,
         team2: away,
-        league: item.leagueName || '',
+        league: item.league || item.leagueName || '',
         category,
         date: matchTime,
         timestamp: matchTime,
-        status: item.matchStatus || '',
-        poster: item.thumbnail || '',
+        status,
+        poster,
         sources: [
           {
             source: this.sourceName,
-            id: String(item.matchId)
+            id: String(matchId)
           }
         ]
       });
@@ -53,31 +59,36 @@ class MovieBoxSportsProvider extends BaseProvider {
   }
 
   _extractStreams(detail) {
-    if (!detail || detail.matchStatus !== 'MatchIng') {
+    if (!detail) return [];
+
+    const status = detail.status || detail.matchStatus;
+    if (status !== 'MatchIng') {
       return [];
     }
 
     const streams = [];
     const seenUrls = new Set();
 
-    if (Array.isArray(detail.playSource)) {
-      for (const src of detail.playSource) {
-        const url = src && (src.url || src.playUrl);
-        if (url && typeof url === 'string' && !seenUrls.has(url)) {
-          seenUrls.add(url);
-          streams.push(new StreamEntity({
-            name: src.quality || 'Live',
-            title: src.quality || 'Live',
-            url,
-            behaviorHints: {
-              proxyHeaders: {
-                request: {
-                  Referer: 'https://sportslive.wine'
-                }
+    const sources = Array.isArray(detail.playSource) && detail.playSource.length > 0
+      ? detail.playSource
+      : (Array.isArray(detail.playSourceH5) ? detail.playSourceH5 : []);
+
+    for (const src of sources) {
+      const url = src && (src.url || src.playUrl);
+      if (url && typeof url === 'string' && !seenUrls.has(url)) {
+        seenUrls.add(url);
+        streams.push(new StreamEntity({
+          name: src.quality || 'Live',
+          title: src.quality || 'Live',
+          url,
+          behaviorHints: {
+            proxyHeaders: {
+              request: {
+                Referer: 'https://sportslive.wine'
               }
             }
-          }));
-        }
+          }
+        }));
       }
     }
 
@@ -105,10 +116,11 @@ class MovieBoxSportsProvider extends BaseProvider {
       const token = await getVisitorToken(boundFetch);
       const data = await makeMovieBoxRequest('/wefeed-tv-bff/sport/aggregate-v1', boundFetch, { token });
 
-      if (!data || !Array.isArray(data.list)) {
-        return [];
-      }
-      return this._parseAggregate(data.list);
+      if (!data) return [];
+      const list = data.matchList || data.list || [];
+      if (!Array.isArray(list)) return [];
+
+      return this._parseAggregate(list);
     } catch (err) {
       console.warn(`[MovieBoxSportsProvider] getMatches failed: ${err.message}`);
       return [];

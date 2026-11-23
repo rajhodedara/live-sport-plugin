@@ -13,25 +13,28 @@ class MovieBoxTVProvider extends BaseProvider {
   }
 
   _parseChannel(item, countryCode) {
-    if (!item || !item.channelId) return null;
+    if (!item) return null;
+    const channelId = item.channelId || item.id;
+    if (!channelId) return null;
 
-    const channelId = String(item.channelId);
-    const title = item.name || item.channelName || channelId;
+    const idStr = String(channelId);
+    const title = item.title || item.name || item.channelName || idStr;
     const now = String(Date.now());
+    const logo = item.logo || (item.countryFlagImage && item.countryFlagImage.url) || '';
 
     return new MatchEntity({
-      id: `moviebox_tv_${channelId}`,
+      id: `moviebox_tv_${idStr}`,
       title,
       category: 'networks',
       date: now,
       timestamp: now,
-      league: countryCode || '',
-      poster: item.logo || '',
-      thumbnail_url: item.logo || '',
+      league: countryCode || item.countryCode || '',
+      poster: logo,
+      thumbnail_url: logo,
       sources: [
         {
           source: this.sourceName,
-          id: channelId
+          id: idStr
         }
       ]
     });
@@ -40,7 +43,11 @@ class MovieBoxTVProvider extends BaseProvider {
   _extractTvStream(detail) {
     if (!detail) return [];
 
-    const streamUrl = detail.liveUrl || detail.url || detail.playUrl;
+    let streamUrl = detail.liveUrl || detail.url || detail.playUrl;
+    if (!streamUrl && Array.isArray(detail.streams) && detail.streams.length > 0) {
+      streamUrl = detail.streams[0]?.url;
+    }
+
     if (!streamUrl || typeof streamUrl !== 'string') {
       return [];
     }
@@ -65,13 +72,13 @@ class MovieBoxTVProvider extends BaseProvider {
       const token = await getVisitorToken(boundFetch);
       const countryData = await makeMovieBoxRequest('/wefeed-tv-bff/live/tv-country-list', boundFetch, { token });
 
-      if (!countryData || !Array.isArray(countryData.list)) {
-        return [];
-      }
+      if (!countryData) return [];
+      const countryList = countryData.items || countryData.list || [];
+      if (!Array.isArray(countryList)) return [];
 
       const allChannels = [];
 
-      for (const country of countryData.list) {
+      for (const country of countryList) {
         const countryCode = country && (country.countryCode || country.code);
         if (!countryCode) continue;
 
@@ -82,8 +89,9 @@ class MovieBoxTVProvider extends BaseProvider {
             { token }
           );
 
-          if (channelData && Array.isArray(channelData.list)) {
-            for (const ch of channelData.list) {
+          const channelList = channelData && (channelData.items || channelData.list);
+          if (Array.isArray(channelList)) {
+            for (const ch of channelList) {
               const entity = this._parseChannel(ch, countryCode);
               if (entity) {
                 allChannels.push(entity);
