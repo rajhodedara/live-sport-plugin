@@ -92,8 +92,8 @@ const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
 const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -130,7 +130,9 @@ const NICE_NAMES = {
   pitsport: 'PitSport',
   sportsbite: 'SportsBite',
   sportzx: 'SportzX',
-  roxiestreams: 'RoxieStreams'
+  roxiestreams: 'RoxieStreams',
+  moviebox_sports: 'MovieBox Sports',
+  moviebox_tv: 'MovieBox TV'
 };
 
 const CHANNEL_TITLE_NICE_NAMES = {
@@ -161,7 +163,9 @@ const CHANNEL_TITLE_NICE_NAMES = {
   pitsport: 'PitSport',
   sportsbite: 'SportsBite',
   sportzx: 'SportzX',
-  roxiestreams: 'RoxieStreams'
+  roxiestreams: 'RoxieStreams',
+  moviebox_sports: 'MovieBox Sports',
+  moviebox_tv: 'MovieBox TV'
 };
 
 function isReplaySource(sourceName) {
@@ -333,6 +337,12 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'roxiestreams') {
     const provider = container.resolve('roxiestreamsProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'moviebox_sports') {
+    const provider = container.resolve('movieboxSportsProvider');
+    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
+  } else if (sourceName === 'moviebox_tv') {
+    const provider = container.resolve('movieboxTvProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
