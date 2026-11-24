@@ -773,8 +773,7 @@ class MatchAggregator {
       if (!match || !Array.isArray(match.sources)) continue;
       // Without catalog coverage a fixture needs a broadcaster label to match.
       if (match.sources.length === 0 && !coverageReady) continue;
-      // Do not inject into 24/7 channels or VOD replays
-      if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
+      // Do not inject into VOD replays or finished fixtures
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_') || match.id.startsWith('leaf_recap_')))) continue;
       if (['finished', 'ended'].includes(String(match.status || '').toLowerCase())) continue;
       const kickoff = _parseEventDate(match.date);

@@ -99,7 +99,7 @@ describe('KafkaAggregator - Task 3: Scheduled Fixture Enrichment', () => {
     });
   });
 
-  test('never creates new fixture cards from Kafka and never enriches networks or replays', async () => {
+  test('enriches 24/7 networks with Kafka feeds but never enriches replays and never creates standalone cards', async () => {
     const mockProvider = {
       name: 'DummyLive',
       sourceName: 'daddylive',
@@ -131,9 +131,10 @@ describe('KafkaAggregator - Task 3: Scheduled Fixture Enrichment', () => {
     const results = await aggregator.syncMatches();
     expect(results).toHaveLength(2);
 
-    // Network row must not carry Kafka source
+    // Network row MUST carry Kafka source
     const networkRow = results.find((r) => r.category === 'networks');
-    expect(networkRow.sources.some((s) => s.source === 'kafka')).toBe(false);
+    expect(networkRow.sources.some((s) => s.source === 'kafka')).toBe(true);
+    expect(networkRow.sources.find((s) => s.source === 'kafka').id).toBe('flix:sky-cricket');
 
     // Replay row must not carry Kafka source
     const replayRow = results.find((r) => r.isReplay);
