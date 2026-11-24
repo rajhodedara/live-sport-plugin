@@ -1467,8 +1467,8 @@ async function handleStream(type, id, config) {
   // anything still running keeps going and lands in the resolve cache for the
   // next request. Previously every source had to settle before anything was
   // returned, so a single slow provider could stall the whole response.
-  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 7000);
-  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 2000), HARD_DEADLINE_MS);
+  const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
+  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000), HARD_DEADLINE_MS);
   const resolutionStartedAt = Date.now();
   let timingStream = null;
   if (timingRelations) {
