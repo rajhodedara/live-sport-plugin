@@ -1,3 +1,26 @@
+# Session Checkpoint: Kafka 24/7 Networks Enrichment and Priority Promotion
+**Date**: 2026-11-24
+**Status**: COMPLETED, MERGED to `stable`, and LIVE in production (`f243062`)
+**Plan**: `docs/superpowers/plans/2026-11-24-kafka-247-channels-enrichment.md`
+
+### Production Rollout & Verification
+1. **Priority Promotion (`1c80e46`)**:
+   - `src/streams.js`: `SOURCE_PRIORITY.kafka: 1`
+   - `src/services/StreamScoringService.js`: +35 direct Kafka bonus, +15 reliability bonus
+   - `src/services/LanguagePriorityService.js`: Kafka comparison boost
+2. **24/7 Channel Enrichment (`e895ecd`, `f243062`)**:
+   - `src/providers/KafkaProvider.js`: Detected `isChannel` (category networks / 24/7 TV Channels / `_ch_`), matched by `match.title` in `trex_catalog.sqlite`, attached all matching linear feeds (uncapped, whereas match fixtures remain capped at 1).
+   - `src/services/MatchAggregator.js`: Removed exclusion filter for `match.category === 'networks'`, allowing 24/7 channel cards to receive Kafka sources during sync.
+3. **Live Verification on VPS (`nuvio-sports` PM2 Cluster)**:
+   - Deployed with `scripts/deploy.sh --no-pull`; health OK.
+   - Run `node scripts/sync-matches.js`: Injected 1,357 Kafka sources into 667 live fixtures/channels. 452 24/7 channel cards now carry Kafka feeds (up from 0).
+   - Live stream resolution verified:
+     - `TNT Sports 1` (`cdn_ch_xx_tnt-sports-1`): Kafka 1080p stream at Index 1 (Score 150), 1.3 Mbps.
+     - `Sky Sports F1` (`cdn_ch_xx_sky-sports-f1`): Kafka UHD/4K streams at Index 1 & 2 (Score 130), 2160p · 7.3 Mbps.
+     - `Fox Sports 1` (`cdn_ch_xx_fox-sports-1`): Kafka HD stream at Index 1 (Score 130), 1080p · 5.2 Mbps.
+
+---
+
 # Session Checkpoint: Trex Catalog Coverage for Kafka
 **Date**: 2026-11-24
 **Status**: MERGED to `stable` and LIVE in production since 2026-11-24 05:51Z (`f434b1d`)
