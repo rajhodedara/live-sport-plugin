@@ -159,10 +159,26 @@ export ICU_TIMEZONE_FILES_DIR="${ICU_TIMEZONE_FILES_DIR:-$REPO_DIR/.timezone-dat
 "$NODE_BIN" scripts/prepare-timezone-data.cjs --directory "$ICU_TIMEZONE_FILES_DIR"
 "$NODE_BIN" scripts/check-timezone-runtime.cjs
 
+# ---- hold the live match cache across the build -----------------------------
+# scripts/prepare-build.js clears runtime caches in data/ to avoid ncc asset
+# collisions. That file is the live catalog: without this hold, every deploy
+# leaves the workers with an empty match list until the next sync lands.
+CACHE_PATH="$REPO_DIR/data/matches_cache.json"
+ENV_CACHE_PATH="$(grep -E '^MATCHES_CACHE_PATH=' "$REPO_DIR/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
+if [ -n "${ENV_CACHE_PATH:-}" ]; then
+  CACHE_PATH="$ENV_CACHE_PATH"
+fi
+CACHE_HOLD=""
+if [ -f "$CACHE_PATH" ]; then
+  CACHE_HOLD="$(mktemp "${TMPDIR:-/tmp}/nuvio-cache.XXXXXX")"
+  cp -a -- "$CACHE_PATH" "$CACHE_HOLD"
+  log "Holding match cache ($(wc -c < "$CACHE_PATH") bytes)"
+fi
+
 # ---- build -----------------------------------------------------------------
 log "npm run build"
 BUILD_LOG="$(mktemp "${TMPDIR:-/tmp}/nuvio-build.XXXXXX.log")"
-trap 'rm -f -- "$BUILD_LOG"' EXIT
+trap 'rm -f -- "$BUILD_LOG" "${CACHE_HOLD:-}"' EXIT
 rm -rf dist.next
 if ! npm run build > "$BUILD_LOG" 2>&1; then
   warn "BUILD FAILED - the running app was NOT touched."
@@ -171,6 +187,13 @@ if ! npm run build > "$BUILD_LOG" 2>&1; then
   die "refusing to reload on a failed build"
 fi
 echo "build   : OK"
+
+if [ -n "$CACHE_HOLD" ] && [ -f "$CACHE_HOLD" ]; then
+  mkdir -p -- "$(dirname -- "$CACHE_PATH")"
+  cp -a -- "$CACHE_HOLD" "$CACHE_PATH"
+  rm -f -- "$CACHE_HOLD"
+  echo "cache   : restored $CACHE_PATH"
+fi
 
 [ -s dist.next/index.js ] || die "dist.next/index.js is missing or empty after build - not reloading"
 "$NODE_BIN" --check dist.next/index.js || die "candidate JavaScript is invalid - not reloading"
