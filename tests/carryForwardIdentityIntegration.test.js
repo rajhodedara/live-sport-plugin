@@ -25,7 +25,7 @@ function memoryCache(previous) {
   return cache;
 }
 
-async function sync(previous, fresh, provider = 'leaf', extraProvider = {}) {
+async function sync(previous, fresh, provider = 'daddylive', extraProvider = { lastScheduleOk: false }) {
   const cache = memoryCache(previous);
   const aggregator = new MatchAggregator({ cacheService: cache });
   aggregator.providers = [
@@ -52,17 +52,17 @@ describe('carry-forward through aggregation and cache identity mapping', () => {
     jest.restoreAllMocks();
   });
 
-  test.each(['leaf', 'daddylive'])('backfills a compatible exact canonical %s source without mutating the previous snapshot', async (provider) => {
-    const previous = rescued('canonical-fixture', provider);
+  test('backfills a compatible exact canonical daddylive source without mutating the previous snapshot', async () => {
+    const previous = rescued('canonical-fixture', 'daddylive');
     Object.freeze(previous.sources[0]);
     Object.freeze(previous.sources);
     Object.freeze(previous);
-    const cache = await sync(Object.freeze([previous]), [fixture(previous.id)], provider);
+    const cache = await sync(Object.freeze([previous]), [fixture(previous.id)], 'daddylive');
     expect(cache.cachedMatches).toHaveLength(1);
     const mapped = cache.findMatch(previous.id);
-    expect(hasSource(mapped, provider)).toBe(true);
+    expect(hasSource(mapped, 'daddylive')).toBe(true);
     expect(hasSource(mapped, 'streamedpk')).toBe(true);
-    expect(previous.sources).toEqual([{ source: provider, id: `previous-${previous.id}` }]);
+    expect(previous.sources).toEqual([{ source: 'daddylive', id: `previous-${previous.id}` }]);
   });
 
   test('backfills a unique renamed alias during partial DaddyLive schedule failure without adding a second card', async () => {
@@ -82,42 +82,42 @@ describe('carry-forward through aggregation and cache identity mapping', () => {
   });
 
   test('does not choose between strong fixtures sharing one legacy ID or resurrect that legacy canonical card', async () => {
-    const previous = rescued('legacy-fixture', 'leaf');
+    const previous = rescued('legacy-fixture', 'daddylive');
     const first = fixture('strong-first', { aliasIds: [previous.id] });
     const second = fixture('strong-second', { title: 'Celtic vs Rangers', aliasIds: [previous.id] });
     const cache = await sync([previous], [first, second]);
     expect(cache.cachedMatches).toHaveLength(2);
-    for (const row of [first, second]) expect(hasSource(cache.findMatch(row.id), 'leaf')).toBe(false);
+    for (const row of [first, second]) expect(hasSource(cache.findMatch(row.id), 'daddylive')).toBe(false);
     expect(cache.cachedMatches.some((row) => row.id === previous.id)).toBe(false);
   });
 
   test('a later row alias cannot overwrite a compatible canonical target', async () => {
-    const previous = rescued('canonical-fixture', 'leaf');
+    const previous = rescued('canonical-fixture', 'daddylive');
     const canonical = fixture(previous.id);
     const aliasOnly = fixture('other-canonical', { title: 'Celtic vs Rangers', aliasIds: [previous.id] });
     const cache = await sync([previous], [canonical, aliasOnly]);
-    expect(hasSource(cache.findMatch(canonical.id), 'leaf')).toBe(true);
-    expect(hasSource(cache.findMatch(aliasOnly.id), 'leaf')).toBe(false);
+    expect(hasSource(cache.findMatch(canonical.id), 'daddylive')).toBe(true);
+    expect(hasSource(cache.findMatch(aliasOnly.id), 'daddylive')).toBe(false);
   });
 
   test('rejects disagreeing alias targets instead of taking the first match', async () => {
-    const previous = rescued('old-canonical', 'leaf', { aliasIds: ['first-alias', 'second-alias'] });
+    const previous = rescued('old-canonical', 'daddylive', { aliasIds: ['first-alias', 'second-alias'] });
     const first = fixture('strong-first', { aliasIds: ['first-alias'] });
     const second = fixture('strong-second', { title: 'Celtic vs Rangers', aliasIds: ['second-alias'] });
     const cache = await sync([previous], [first, second]);
     expect(cache.cachedMatches).toHaveLength(2);
-    for (const row of cache.cachedMatches) expect(hasSource(row, 'leaf')).toBe(false);
+    for (const row of cache.cachedMatches) expect(hasSource(row, 'daddylive')).toBe(false);
   });
 
   test('an alias shared by previous meetings cannot transfer whichever source was listed first', async () => {
     const previous = [
-      rescued('previous-first', 'leaf', { aliasIds: ['shared-alias'] }),
-      rescued('previous-second', 'leaf', { title: 'Celtic vs Rangers', aliasIds: ['shared-alias'] }),
+      rescued('previous-first', 'daddylive', { aliasIds: ['shared-alias'] }),
+      rescued('previous-second', 'daddylive', { title: 'Celtic vs Rangers', aliasIds: ['shared-alias'] }),
     ];
     const fresh = fixture('fresh-canonical', { aliasIds: ['shared-alias'] });
     const cache = await sync(previous, [fresh]);
     expect(cache.cachedMatches).toHaveLength(1);
-    expect(hasSource(cache.findMatch(fresh.id), 'leaf')).toBe(false);
+    expect(hasSource(cache.findMatch(fresh.id), 'daddylive')).toBe(false);
   });
 
   test.each([
@@ -125,11 +125,11 @@ describe('carry-forward through aggregation and cache identity mapping', () => {
     ['different dated meeting', { date: String(NOW + 30 * HOUR) }],
     ['channel instead of fixture', { title: 'Arsenal vs Chelsea', category: 'networks', date: '0' }],
   ])('a reused canonical ID cannot bypass %s evidence', async (_description, overrides) => {
-    const previous = rescued('reused-canonical', 'leaf');
+    const previous = rescued('reused-canonical', 'daddylive');
     const fresh = fixture(previous.id, overrides);
     const cache = await sync([previous], [fresh]);
     expect(cache.cachedMatches).toHaveLength(1);
-    expect(hasSource(cache.findMatch(fresh.id), 'leaf')).toBe(false);
+    expect(hasSource(cache.findMatch(fresh.id), 'daddylive')).toBe(false);
   });
 
   test.each([
@@ -137,34 +137,34 @@ describe('carry-forward through aggregation and cache identity mapping', () => {
     ['undated non-channel', '0'],
     ['invalid date', 'not-a-date'],
   ])('source backfill cannot revive an %s previous fixture', async (_description, date) => {
-    const previous = rescued('same-canonical', 'leaf', { date });
+    const previous = rescued('same-canonical', 'daddylive', { date });
     const fresh = fixture(previous.id);
     const cache = await sync([previous], [fresh]);
     expect(cache.cachedMatches).toHaveLength(1);
-    expect(hasSource(cache.findMatch(fresh.id), 'leaf')).toBe(false);
+    expect(hasSource(cache.findMatch(fresh.id), 'daddylive')).toBe(false);
   });
 
   test('keeps eligible standalone fixtures and evergreen channels inside the existing rescue cap', async () => {
     process.env.CARRY_FORWARD_MAX = '2';
     const previous = [
-      rescued('past-eligible', 'leaf', { date: String(NOW - 20 * HOUR) }),
-      rescued('live-eligible', 'leaf', { date: String(NOW - HOUR) }),
-      rescued('cdn_ch_leaf_control', 'leaf', { title: 'Leaf TV', category: 'networks', date: '0' }),
-      rescued('expired-fixture', 'leaf', { date: String(NOW - 25 * HOUR) }),
+      rescued('past-eligible', 'daddylive', { date: String(NOW - 20 * HOUR) }),
+      rescued('live-eligible', 'daddylive', { date: String(NOW - HOUR) }),
+      rescued('cdn_ch_control', 'daddylive', { title: 'Daddylive TV', category: 'networks', date: '0' }),
+      rescued('expired-fixture', 'daddylive', { date: String(NOW - 25 * HOUR) }),
     ];
     const cache = await sync(previous, [fixture('healthy-control', { title: 'Celtic vs Rangers' })]);
-    const carriedIds = cache.cachedMatches.filter((row) => hasSource(row, 'leaf')).map((row) => row.id);
-    expect(carriedIds).toEqual(['live-eligible', 'cdn_ch_leaf_control']);
+    const carriedIds = cache.cachedMatches.filter((row) => hasSource(row, 'daddylive')).map((row) => row.id);
+    expect(carriedIds).toEqual(['live-eligible', 'cdn_ch_control']);
   });
 
   test('source backfills consume the same rescue budget as standalone rows', async () => {
     process.env.CARRY_FORWARD_MAX = '1';
     const previous = [
-      rescued('exact-fixture', 'leaf'),
-      rescued('standalone-later', 'leaf', { title: 'Celtic vs Rangers', date: String(NOW + 2 * HOUR) }),
+      rescued('exact-fixture', 'daddylive'),
+      rescued('standalone-later', 'daddylive', { title: 'Celtic vs Rangers', date: String(NOW + 2 * HOUR) }),
     ];
     const cache = await sync(previous, [fixture('exact-fixture')]);
     expect(cache.cachedMatches).toHaveLength(1);
-    expect(hasSource(cache.findMatch('exact-fixture'), 'leaf')).toBe(true);
+    expect(hasSource(cache.findMatch('exact-fixture'), 'daddylive')).toBe(true);
   });
 });

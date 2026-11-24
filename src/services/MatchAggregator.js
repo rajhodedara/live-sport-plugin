@@ -623,8 +623,8 @@ const sourceIdentityKey = (s) => [
 ].join('\u0000');
 
 class MatchAggregator {
-  constructor({ timStreamsProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, leafProvider, leafRecapProvider, scorezoneProvider, pitSportProvider, sportsBiteProvider, sportzxProvider, roxiestreamsProvider, providerHealthService, broadcasterMatchService, movieboxSportsProvider, movieboxTvProvider, kafkaProvider } = {}) {
-    this.providers = [...((timStreamsProvider && (typeof timStreamsProvider.isEnabled !== 'function' || timStreamsProvider.isEnabled())) ? [timStreamsProvider] : []), streamedPkProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...(leafProvider ? [leafProvider] : []), ...(leafRecapProvider ? [leafRecapProvider] : []), ...((scorezoneProvider && typeof scorezoneProvider.isEnabled === 'function' && !scorezoneProvider.isEnabled()) ? [] : (scorezoneProvider ? [scorezoneProvider] : [])), ...((pitSportProvider && (typeof pitSportProvider.isEnabled !== 'function' || pitSportProvider.isEnabled())) ? [pitSportProvider] : []), ...(sportsBiteProvider ? [sportsBiteProvider] : []), ...(sportzxProvider ? [sportzxProvider] : []), ...(roxiestreamsProvider ? [roxiestreamsProvider] : []), ...(movieboxSportsProvider ? [movieboxSportsProvider] : []), ...(movieboxTvProvider ? [movieboxTvProvider] : [])];
+  constructor({ timStreamsProvider, cdnLiveProvider, streamSports99Provider, streamedPkProvider, cacheService, yamlProviders, replayzoneProvider, daddyLiveProvider, teamLogoService, liveTvProvider, damiTvProvider, ppvStProvider, soccerFullProvider, basketballVideoProvider, nflVideoProvider, skTechProvider, fullRacesProvider, hockeyReplaysProvider, mlbLiveProvider, vavooProvider, ak47LiveProvider, scorezoneProvider, pitSportProvider, sportsBiteProvider, sportzxProvider, roxiestreamsProvider, providerHealthService, broadcasterMatchService, movieboxSportsProvider, movieboxTvProvider, kafkaProvider } = {}) {
+    this.providers = [...((timStreamsProvider && (typeof timStreamsProvider.isEnabled !== 'function' || timStreamsProvider.isEnabled())) ? [timStreamsProvider] : []), streamedPkProvider, cdnLiveProvider, ...(yamlProviders || []), replayzoneProvider, ...(liveTvProvider ? [liveTvProvider] : []), ...(daddyLiveProvider ? [daddyLiveProvider] : []), ...((damiTvProvider && typeof damiTvProvider.isEnabled === 'function' && !damiTvProvider.isEnabled()) ? [] : (damiTvProvider ? [damiTvProvider] : [])), ...(ppvStProvider ? [ppvStProvider] : []), ...(soccerFullProvider ? [soccerFullProvider] : []), ...(basketballVideoProvider ? [basketballVideoProvider] : []), ...(nflVideoProvider ? [nflVideoProvider] : []), ...(skTechProvider ? [skTechProvider] : []), ...(fullRacesProvider ? [fullRacesProvider] : []), ...(hockeyReplaysProvider ? [hockeyReplaysProvider] : []), ...(mlbLiveProvider ? [mlbLiveProvider] : []), ...(vavooProvider ? [vavooProvider] : []), ...(ak47LiveProvider ? [ak47LiveProvider] : []), ...((scorezoneProvider && typeof scorezoneProvider.isEnabled === 'function' && !scorezoneProvider.isEnabled()) ? [] : (scorezoneProvider ? [scorezoneProvider] : [])), ...((pitSportProvider && (typeof pitSportProvider.isEnabled !== 'function' || pitSportProvider.isEnabled())) ? [pitSportProvider] : []), ...(sportsBiteProvider ? [sportsBiteProvider] : []), ...(sportzxProvider ? [sportzxProvider] : []), ...(roxiestreamsProvider ? [roxiestreamsProvider] : []), ...(movieboxSportsProvider ? [movieboxSportsProvider] : []), ...(movieboxTvProvider ? [movieboxTvProvider] : [])];
     this.timStreamsProvider = timStreamsProvider;
     this.pitSportProvider = pitSportProvider;
     this.streamSports99Provider = streamSports99Provider;
@@ -668,7 +668,7 @@ class MatchAggregator {
       if (!match || !Array.isArray(match.sources) || match.sources.length === 0) continue;
       // Do not inject into 24/7 channels or VOD replays
       if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
-      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_') || match.id.startsWith('leaf_recap_')))) continue;
+      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
 
       // Retain the source's country context alongside its broadcaster name.
       const candidates = [];
@@ -768,7 +768,7 @@ class MatchAggregator {
       // Without catalog coverage a fixture needs a broadcaster label to match.
       if (match.sources.length === 0 && !coverageReady) continue;
       // Do not inject into VOD replays or finished fixtures
-      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_') || match.id.startsWith('leaf_recap_')))) continue;
+      if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
       if (['finished', 'ended'].includes(String(match.status || '').toLowerCase())) continue;
       const kickoff = _parseEventDate(match.date);
       if (kickoff > 0 && now > kickoff + liveWindowMs) continue;
@@ -920,7 +920,7 @@ class MatchAggregator {
     }
 
     const date = _parseEventDate(e && e.date);
-    const isReplay = !isChannel && ((e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_') || id.startsWith('leaf_recap_'));
+    const isReplay = !isChannel && ((e && e.status === 'finished') || id.startsWith('rz_') || id.startsWith('bv_') || id.startsWith('nfl_') || id.startsWith('sf_') || id.startsWith('livetv_') || id.startsWith('fr_') || id.startsWith('hr_'));
     const teams = extractedTeams || fallbackTeams;
     const tokens = new Set(_tokenizeF(normalized).filter(w => { const n = Number(w); return !(n >= 2000 && n <= 2100); }));
 
@@ -1646,7 +1646,7 @@ class MatchAggregator {
     // Re-scraping mirrors and archive pages on every server restart
     // or sync burns significant CPU, network, and RAM. Reuse cached replays if they
     // were synced within the last 12 hours.
-    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap']);
+    const REPLAY_PROVIDERS = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
     const REPLAY_SYNC_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours for heavy mirrors
     const FAST_REPLAY_SYNC_INTERVAL_MS = 60 * 60 * 1000; // 1 hour for lightweight scrapers (SoccerFull)
 
@@ -1852,7 +1852,7 @@ class MatchAggregator {
       // retention window instead of an open-ended exemption.
       const expiryWindowMs = 24 * 3600 * 1000;
       const replayExpiryWindowMs = REPLAY_RETENTION_DAYS * 24 * 3600 * 1000;
-      const isReplayZone = match.sources && match.sources.some(s => s && (REPLAY_PROVIDERS.has(s.source) || s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo' || s.source === 'fullraces' || s.source === 'hockeyreplays' || s.source === 'mlblive' || s.source === 'leaf_recap'));
+      const isReplayZone = match.sources && match.sources.some(s => s && (REPLAY_PROVIDERS.has(s.source) || s.source === 'replayzone' || s.source === 'livetv' || s.source === 'soccerfull' || s.source === 'basketballvideo' || s.source === 'nflvideo' || s.source === 'fullraces' || s.source === 'hockeyreplays' || s.source === 'mlblive'));
       const windowMs = isReplayZone ? replayExpiryWindowMs : expiryWindowMs;
       return now <= kickoff + windowMs;
     });
@@ -1901,7 +1901,7 @@ class MatchAggregator {
     try {
       const isPitSportActive = this.providers.some((p) =>
         p && (p.sourceName === 'pitsport' || p.name === 'PitSport') && (typeof p.isEnabled !== 'function' || p.isEnabled()));
-      const CARRY_FORWARD_PROVIDERS = ['daddylive', 'leaf', ...(isPitSportActive ? ['pitsport'] : [])];
+      const CARRY_FORWARD_PROVIDERS = ['daddylive', ...(isPitSportActive ? ['pitsport'] : [])];
       const configuredCarryMax = Number(process.env.CARRY_FORWARD_MAX || 600);
       const CARRY_FORWARD_MAX = Number.isFinite(configuredCarryMax) ? Math.max(0, Math.trunc(configuredCarryMax)) : 0;
       const nowForCarry = Date.now();
@@ -1947,24 +1947,13 @@ class MatchAggregator {
         const scheduleBrokeFor = (srcName) => this.providers.some((p) =>
           p && p.sourceName === srcName && p.lastScheduleOk === false);
 
-        // PitSport can legitimately have no active home events. Unlike the
-        // older DaddyLive/Leaf policy, only a confirmed failed PitSport fetch
-        // may resurrect a prior fixture from the bounded 24h snapshot.
+        // PitSport can legitimately have no active home events.
         if (provider === 'pitsport' && !scheduleBrokeFor(provider)) continue;
 
-        // Leaf's live catalog is authoritative even when it is empty. Only a
-        // failed/unverified fetch may retain its previous sources.
-        const leafCatalogOk = provider === 'leaf'
-          ? this.providers.find((p) => p && p.sourceName === 'leaf')?.lastCatalogOk
-          : undefined;
-        if (leafCatalogOk === true) continue;
-
-        if (usedProvider(provider) && !scheduleBrokeFor(provider) && leafCatalogOk !== false) continue; // provider answered fully; nothing to carry
+        if (usedProvider(provider) && !scheduleBrokeFor(provider)) continue; // provider answered fully; nothing to carry
 
         if (scheduleBrokeFor(provider)) {
           console.warn(`[MatchAggregator] ${provider} schedule fetch failed this sync; carrying forward its previous entries.`);
-        } else if (leafCatalogOk === false) {
-          console.warn('[MatchAggregator] leaf catalog fetch failed this sync; carrying forward its previous entries.');
         }
 
         // Priority is pure per-entry data: decorate once (Schwartzian transform)

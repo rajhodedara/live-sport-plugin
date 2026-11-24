@@ -1,5 +1,4 @@
 const { mapMatchToMetaPreview } = require('../src/catalog');
-const LeafProvider = require('../src/providers/LeafProvider');
 
 describe('Fixture vs 24/7 Channel Classification', () => {
   test('live match with date="0" and matchup teams is NOT branded as 24/7', () => {
@@ -23,16 +22,16 @@ describe('Fixture vs 24/7 Channel Classification', () => {
     expect(metaPreview.description).not.toContain('24/7 Live Network');
   });
 
-  test('Leaf match without explicit date is NOT branded as 24/7', () => {
+  test('Football match without explicit date is NOT branded as 24/7', () => {
     const match = {
-      id: 'leaf_football-philadelphia-union-new-england-revolution-20750',
+      id: 'football_philadelphia_union_new_england_revolution_20750',
       title: 'Philadelphia Union vs New England Revolution',
       category: 'football',
       date: '0',
       status: 'live',
       team1: { name: 'Philadelphia Union' },
       team2: { name: 'New England Revolution' },
-      sources: [{ source: 'leaf', id: 'streamed:20750' }]
+      sources: [{ source: 'ak47live', id: 'streamed:20750' }]
     };
 
     const metaPreview = mapMatchToMetaPreview(match, {});
@@ -73,33 +72,5 @@ describe('Fixture vs 24/7 Channel Classification', () => {
     expect(metaPreview.releaseInfo).toBe('24/7');
     expect(metaPreview.name).toMatch(/^📺/);
     expect(metaPreview.description).toContain('24/7 Live Network');
-  });
-
-  test('LeafProvider parses releaseInfo timestamp when present', async () => {
-    const provider = new LeafProvider();
-    // Simulate upstream item
-    const metas = [{
-      id: 'streamed:football-philadelphia-union-new-england-revolution-20750',
-      type: 'sport',
-      name: 'Philadelphia Union vs New England Revolution',
-      releaseInfo: '24 Oct 2026 · 23:30 UTC',
-      category: 'football'
-    }];
-
-    // Mock safeFetch
-    jest.spyOn(require('../src/impitClient'), 'safeFetch').mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: async () => ({ metas })
-    });
-
-    const matches = await provider._fetchLiveMatchesInternal();
-    expect(matches.length).toBe(1);
-    expect(matches[0].date).not.toBe('0');
-    expect(Number(matches[0].date)).toBeGreaterThan(0);
-    const d = new Date(Number(matches[0].date));
-    expect(d.getUTCFullYear()).toBe(2026);
-    expect(d.getUTCMonth()).toBe(9); // Oct (0-indexed)
-    expect(d.getUTCDate()).toBe(24);
   });
 });
