@@ -758,14 +758,20 @@ class MatchAggregator {
       return;
     }
 
+    const coverageReady = Boolean(
+      typeof this.kafkaProvider.isCoverageReady === 'function' && this.kafkaProvider.isCoverageReady()
+    );
     const injectionCap = Number(process.env.KAFKA_INJECTION_CAP) || 4;
     const now = Date.now();
     const liveWindowMs = 14 * 3600 * 1000;
+    const byMode = { event: 0, team: 0, label: 0 };
     let enrichedFixtures = 0;
     let totalSourcesAttached = 0;
 
     for (const match of matches) {
-      if (!match || !Array.isArray(match.sources) || match.sources.length === 0) continue;
+      if (!match || !Array.isArray(match.sources)) continue;
+      // Without catalog coverage a fixture needs a broadcaster label to match.
+      if (match.sources.length === 0 && !coverageReady) continue;
       // Do not inject into 24/7 channels or VOD replays
       if (match.category === 'networks' || match.rawCategory === '24/7 TV Channels' || String(match.id || '').includes('_ch_')) continue;
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_') || match.id.startsWith('leaf_recap_')))) continue;
@@ -789,7 +795,7 @@ class MatchAggregator {
         }
       }
 
-      if (candidates.length === 0) continue;
+      if (candidates.length === 0 && !coverageReady) continue;
 
       const existingKafkaIds = new Set(
         match.sources
@@ -798,6 +804,23 @@ class MatchAggregator {
       );
 
       let injectedForMatch = 0;
+
+      // Catalog coverage: event feed first, then the team channel, then the
+      // broadcaster label. The label loop below stays as the fallback.
+      if (coverageReady) {
+        const coverageSources = this.kafkaProvider.createSourcesForFixture(match, { now }) || [];
+        for (const source of coverageSources) {
+          if (injectedForMatch >= injectionCap) break;
+          if (!source || !source.id || existingKafkaIds.has(source.id)) continue;
+          existingKafkaIds.add(source.id);
+          match.sources.push(source);
+          injectedForMatch++;
+          totalSourcesAttached++;
+          const mode = source.matchMode === 'event' || source.matchMode === 'team' ? source.matchMode : 'label';
+          byMode[mode] += 1;
+        }
+      }
+
       for (const cand of candidates) {
         if (injectedForMatch >= injectionCap) break;
         const kafkaSource = this.kafkaProvider.createSource(cand.name, cand.context);
@@ -806,6 +829,7 @@ class MatchAggregator {
           match.sources.push(kafkaSource);
           injectedForMatch++;
           totalSourcesAttached++;
+          byMode.label += 1;
         }
       }
 
@@ -815,13 +839,15 @@ class MatchAggregator {
     }
 
     if (enrichedFixtures > 0) {
-      console.log(`[MatchAggregator] Injected ${totalSourcesAttached} Kafka broadcast source(s) into ${enrichedFixtures} live fixture(s).`);
+      console.log('[MatchAggregator] Injected ' + totalSourcesAttached + ' Kafka source(s) into ' + enrichedFixtures +
+        ' live fixture(s) (event ' + byMode.event + ', team ' + byMode.team + ', label ' + byMode.label + ').');
     }
 
     if (this.providerHealthService && typeof this.providerHealthService.recordEnrichment === 'function') {
       this.providerHealthService.recordEnrichment(this.kafkaProvider, {
         enrichedFixtures,
-        totalSourcesAttached
+        totalSourcesAttached,
+        byMode
       });
     }
   }
@@ -1972,6 +1998,21 @@ class MatchAggregator {
     });
 
     console.log(`[MatchAggregator] Sync complete. Merged ${activeMatches.length} active events.`);
+
+    // Search the live window for Trex event channels in parallel with the
+    // enrichment passes below. A failure costs event feeds, never the sync.
+    const kafkaSweepPromise =
+      this.kafkaProvider &&
+      this.kafkaProvider.configured !== false &&
+      typeof this.kafkaProvider.sweepEvents === 'function' &&
+      typeof this.kafkaProvider.isCoverageReady === 'function' &&
+      this.kafkaProvider.isCoverageReady()
+        ? this.kafkaProvider.sweepEvents(activeMatches, { maxSearches: 20 }).catch(err => {
+            const kind = String((err && (err.code || err.name)) || 'Error').replace(/[^a-z0-9_.-]/gi, '').slice(0, 80);
+            console.warn('[MatchAggregator] kafkaProvider.sweepEvents failed:', kind);
+            return 0;
+          })
+        : Promise.resolve(0);
     // ── Provider carry-forward ──────────────────────────────────────────────
     // The cache below is written whenever ANY provider succeeded, so a single
     // provider that blips silently loses every one of its rows. DaddyLive is the
@@ -2219,6 +2260,10 @@ class MatchAggregator {
           error: providerReportedError ? new Error(providerReportedError) : null,
           note: providerReportedError ? 'Kafka channel index refresh failed; last-good index retained' : 'Kafka sports channel index ready'
         });
+      }
+      const sweptFixtures = await kafkaSweepPromise;
+      if (sweptFixtures > 0) {
+        console.log('[MatchAggregator] Event search found feeds for ' + sweptFixtures + ' live fixture(s).');
       }
       this._enrichMatchesWithKafka(activeMatches);
 

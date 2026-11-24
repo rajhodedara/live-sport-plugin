@@ -269,7 +269,7 @@ describe('KafkaAggregator - Task 3: Scheduled Fixture Enrichment', () => {
     );
     expect(providerHealthService.recordEnrichment).toHaveBeenCalledWith(
       mockKafkaProvider,
-      { enrichedFixtures: 0, totalSourcesAttached: 0 }
+      expect.objectContaining({ enrichedFixtures: 0, totalSourcesAttached: 0 })
     );
   });
 });
