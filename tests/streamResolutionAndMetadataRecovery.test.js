@@ -190,7 +190,6 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
 
       const sources = [
         ...mirrors,
-        { source: 'leaf', id: 'leaf_feed_1' },
         { source: 'timstreams', id: 'ts_feed_1' }
       ];
 
@@ -199,11 +198,10 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
       expect(daddySelected).toHaveLength(16);
 
       // Verify that higher priority sources are preserved and ordered ahead of DaddyLive
-      expect(selected[0].source).toBe('leaf');
-      expect(selected[1].source).toBe('timstreams');
+      expect(selected[0].source).toBe('timstreams');
     });
 
-    it('maintains priority order leaf > timstreams > daddylive > vavoo with uncapped daddylive mirrors', () => {
+    it('maintains priority order timstreams > daddylive > vavoo with uncapped daddylive mirrors', () => {
       const sources = [
         { source: 'vavoo', id: 'v1' },
         { source: 'daddylive', id: 'dl1', channelName: 'Sky 1' },
@@ -211,17 +209,15 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
         { source: 'daddylive', id: 'dl3', channelName: 'Sky 3' },
         { source: 'daddylive', id: 'dl4', channelName: 'Sky 4' },
         { source: 'daddylive', id: 'dl5', channelName: 'Sky 1' },
-        { source: 'leaf', id: 'l1' },
         { source: 'timstreams', id: 'ts1' }
       ];
       const selected = selectSources(sources, null);
       const sourceOrder = selected.map(s => s.source);
-      expect(sourceOrder).toEqual(['leaf', 'timstreams', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'vavoo']);
+      expect(sourceOrder).toEqual(['timstreams', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'daddylive', 'vavoo']);
     });
 
-    it('scores stream sources following leaf > timstreams > ppvst > pitsport > daddylive > vavoo > sktech', () => {
+    it('scores stream sources following timstreams > ppvst > pitsport > daddylive > vavoo > sktech', () => {
       const scorer = new StreamScoringService();
-      const leafScore = scorer.calculateScore({ url: 'http://cdn/1.m3u8', resolution: '1080p' }, 'leaf');
       const timScore = scorer.calculateScore({ url: 'http://cdn/2.m3u8', resolution: '1080p' }, 'timstreams');
       const ppvScore = scorer.calculateScore({ url: 'http://cdn/3.m3u8', resolution: '1080p' }, 'ppvst');
       const pitScore = scorer.calculateScore({ url: 'http://cdn/4.m3u8', resolution: '1080p' }, 'pitsport');
@@ -229,7 +225,6 @@ https://sonyliv.workers.dev/cricodi_1080p/index.m3u8`;
       const vavooScore = scorer.calculateScore({ url: 'http://cdn/6.m3u8', resolution: '1080p' }, 'vavoo');
       const sktechScore = scorer.calculateScore({ url: 'http://cdn/7.m3u8', resolution: '1080p' }, 'sktech');
 
-      expect(leafScore).toBeGreaterThan(timScore);
       expect(timScore).toBeGreaterThan(ppvScore);
       expect(ppvScore).toBeGreaterThan(pitScore);
       expect(pitScore).toBeGreaterThan(dlScore);

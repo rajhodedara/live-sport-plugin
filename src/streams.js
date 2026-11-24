@@ -35,7 +35,6 @@ function isEventStreamSource(src) {
 
 const SOURCE_PRIORITY = {
   kafka: 1,
-  leaf: 1,
   scorezone: 1,
   timstreams: 2,
   ppvst: 3,
@@ -58,7 +57,6 @@ const SOURCE_PRIORITY = {
   fullraces: 8,
   hockeyreplays: 8,
   mlblive: 8,
-  leaf_recap: 2,
   admin: 9,
   streamedpk: 9,
   embedindia: 9,
@@ -71,9 +69,9 @@ const SOURCE_PRIORITY = {
 const VERIFY_BODY_MAX_BYTES = 64 * 1024;
 const { lacksPlaylistEvidence } = require('./services/PlaylistEvidence');
 
-const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap'];
-const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
-const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap', 'sktech', 'vavoo', 'ak47live', 'leaf', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
+const KNOWN_REPLAY_SOURCES = ['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive'];
+const KNOWN_LIVE_SOURCES = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'damitv', 'sktech', 'vavoo', 'ak47live', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
+const KNOWN_FALLBACKS = ['ppvst', 'daddylive', 'cdnlive', 'streamsports99', 'timstreams', 'streamsports', 'embedindia', 'embedst', 'streamedpk', 'replayzone', 'livetv', 'damitv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'sktech', 'vavoo', 'ak47live', 'scorezone', 'pitsport', 'sportsbite', 'sportzx', 'roxiestreams', 'moviebox_sports', 'moviebox_tv', 'kafka'];
 
 // Labeling tables hoisted to module scope: they were allocated per request
 // (handleStream) and per formatChannelStreamTitle call.
@@ -101,7 +99,6 @@ const NICE_NAMES = {
   'fullraces': 'FullRaces',
   'hockeyreplays': 'HockeyReplays',
   'mlblive': 'MLBLive',
-  'leaf_recap': 'Highfly Recap',
   admin: 'Streamed.pk',
   echo: 'Streamed.pk',
   golf: 'Streamed.pk',
@@ -134,12 +131,10 @@ const CHANNEL_TITLE_NICE_NAMES = {
   fullraces: 'FullRaces',
   hockeyreplays: 'HockeyReplays',
   mlblive: 'MLBLive',
-  leaf_recap: 'Highfly Recap',
   sktech: 'SKTech',
   vavoo: 'Vavoo',
   ppvst: 'PPV.st',
   ak47live: 'AK47Live',
-  leaf: 'Leaf',
   scorezone: 'ScoreZone',
   pitsport: 'PitSport',
   sportsbite: 'SportsBite',
@@ -298,12 +293,6 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'ak47live') {
     const provider = container.resolve('ak47LiveProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
-  } else if (sourceName === 'leaf') {
-    const provider = container.resolve('leafProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, { ...opts, matchId: match.id });
-  } else if (sourceName === 'leaf_recap') {
-    const provider = container.resolve('leafRecapProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'scorezone') {
     const provider = container.resolve('scorezoneProvider');
@@ -1131,7 +1120,7 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
 //   - ppvst: spawns a full child Node process per resolve (PpvStProvider).
 // Prewarming them all night is what saturated the origin at peak (measured:
 // Cloudflare 524s). They still resolve normally when a user clicks them.
-const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,leaf,scorezone,pitsport';
+const DEFAULT_PREWARM_SKIP_PROVIDERS = 'admin,echo,golf,delta,streamedpk,embedindia,embedst,ppvst,scorezone,pitsport';
 
 function prewarmSkipProvidersSet() {
   const raw = process.env.PREWARM_SKIP_PROVIDERS === undefined
@@ -1405,7 +1394,7 @@ async function handleStream(type, id, config) {
     const getReplaySourceRank = (s) => {
       const name = (s.name || '').toLowerCase();
       const prov = s.source || '';
-      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays' || prov === 'mlblive' || prov === 'leaf_recap') {
+      if (prov === 'soccerfull' || prov === 'replayzone' || prov === 'fullraces' || prov === 'basketballvideo' || prov === 'nflvideo' || prov === 'hockeyreplays' || prov === 'mlblive') {
         if (/part\s*1|1st\s*half|full/i.test(name)) return 1;
         if (/part\s*2|2nd\s*half/i.test(name)) return 2;
         return 3;
@@ -1457,7 +1446,7 @@ async function handleStream(type, id, config) {
   try {
     const { isReplayMatch } = require('./catalog');
     if (isReplayMatch(match)) {
-      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive', 'leaf_recap']);
+      const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
       const replaySources = candidateSources.filter(s => s && REPLAY_SOURCES.has(s.source));
       if (replaySources.length > 0) {
         candidateSources = replaySources;

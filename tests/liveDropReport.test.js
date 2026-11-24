@@ -26,7 +26,7 @@ describe('findDroppedLiveFixtures', () => {
     expect(run(prev, []).total).toBe(0);
   });
   test('marks providers that did not answer', () => {
-    const r = run([row('a', 3)], [{ id: 'q', sources: [{ source: 'leaf' }] }]);
+    const r = run([row('a', 3)], [{ id: 'q', sources: [{ source: 'ppvst' }] }]);
     expect(r.rows[0].providersAnswered.length).toBe(0);
   });
   test('sorts oldest first and caps the rows but keeps the total', () => {

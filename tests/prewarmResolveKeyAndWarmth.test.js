@@ -32,10 +32,10 @@ describe('Prewarm Resolve Key and Cache Warmth Verification', () => {
     });
 
     test('Accepts match object with .id or matchId string interchangeably', () => {
-      const src = { source: 'leaf', id: 'feed_1' };
+      const src = { source: 'ppvst', id: 'feed_1' };
       const matchObj = { id: 'fixture_99', title: 'Arsenal vs Chelsea' };
-      expect(resolveKey(src, matchObj)).toBe('leaf:fixture_99:feed_1');
-      expect(resolveKey(src, 'fixture_99')).toBe('leaf:fixture_99:feed_1');
+      expect(resolveKey(src, matchObj)).toBe('ppvst:fixture_99:feed_1');
+      expect(resolveKey(src, 'fixture_99')).toBe('ppvst:fixture_99:feed_1');
     });
 
     test('Gracefully handles missing or empty source', () => {
@@ -197,7 +197,7 @@ describe('Prewarm Resolve Key and Cache Warmth Verification', () => {
         date: String(Date.now() - 10000),
         sources: [
           { id: 'ch_60', source: 'daddylive' },
-          { id: 'feed_1', source: 'leaf' }
+          { id: 'feed_1', source: 'ppvst' }
         ]
       };
 
@@ -205,7 +205,7 @@ describe('Prewarm Resolve Key and Cache Warmth Verification', () => {
 
       // Populate cache for both priority sources
       streamResolveCache._set(resolveKey(match.sources[0], match.id), 'daddylive', match.id, [{ url: 'https://cdn.example/dlv.m3u8' }], 'ok', 300000);
-      streamResolveCache._set(resolveKey(match.sources[1], match.id), 'leaf', match.id, [{ url: 'https://cdn.example/leaf.m3u8' }], 'ok', 300000);
+      streamResolveCache._set(resolveKey(match.sources[1], match.id), 'ppvst', match.id, [{ url: 'https://cdn.example/ppvst.m3u8' }], 'ok', 300000);
 
       const streamsMod = require('../src/streams');
       const prewarmSpy = jest.spyOn(streamsMod, 'prewarmMatch').mockResolvedValue();

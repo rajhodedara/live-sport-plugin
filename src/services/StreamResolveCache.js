@@ -158,10 +158,6 @@ class StreamResolveCache {
         const u = new URL(target, 'http://localhost');
         target = u.searchParams.get('url') || target;
       }
-      if (target.includes('/api/leaf/manifest.m3u8?') || target.includes('/api/leaf/live.m3u8?')) {
-        const u = new URL(target, 'http://localhost');
-        target = u.searchParams.get('url') || target;
-      }
       const u = new URL(target, 'http://localhost');
       const e = u.searchParams.get('e') || u.searchParams.get('exp') || u.searchParams.get('expires');
       if (e && /^\d+$/.test(e)) {
@@ -199,10 +195,6 @@ class StreamResolveCache {
     if (sourceName === 'daddylive') {
       const val = this.ttl.get(sourceName) || this.defaultTtlMs;
       return Math.min(val, 150 * 1000);
-    }
-    if (sourceName === 'leaf') {
-      const val = this.ttl.get(sourceName);
-      return Math.min(val || (4 * 3600 * 1000), 4 * 3600 * 1000);
     }
     return this.ttl.get(sourceName) || this.defaultTtlMs;
   }
@@ -653,7 +645,7 @@ class StreamResolveCache {
   noteSuccess(key) {
     if (!key) return;
     const sourceName = key.split(':')[0];
-    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : (sourceName === 'leaf' ? 4 * 3600 * 1000 : this.maxTtlMs);
+    const maxTtl = sourceName === 'daddylive' ? 150 * 1000 : this.maxTtlMs;
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);
