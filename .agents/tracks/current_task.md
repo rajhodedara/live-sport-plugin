@@ -1,6 +1,6 @@
 # Session Checkpoint: Kafka 24/7 Networks Enrichment and Priority Promotion
 **Date**: 2026-11-24
-**Status**: COMPLETED, MERGED to `stable`, and LIVE in production (`f243062`)
+**Status**: COMPLETED, MERGED to `stable`, and LIVE in production (`97450b2`)
 **Plan**: `docs/superpowers/plans/2026-11-24-kafka-247-channels-enrichment.md`
 
 ### Production Rollout & Verification
@@ -8,16 +8,19 @@
    - `src/streams.js`: `SOURCE_PRIORITY.kafka: 1`
    - `src/services/StreamScoringService.js`: +35 direct Kafka bonus, +15 reliability bonus
    - `src/services/LanguagePriorityService.js`: Kafka comparison boost
-2. **24/7 Channel Enrichment (`e895ecd`, `f243062`)**:
+2. **24/7 Channel Enrichment (`e895ecd`, `f243062`, `97450b2`)**:
    - `src/providers/KafkaProvider.js`: Detected `isChannel` (category networks / 24/7 TV Channels / `_ch_`), matched by `match.title` in `trex_catalog.sqlite`, attached all matching linear feeds (uncapped, whereas match fixtures remain capped at 1).
    - `src/services/MatchAggregator.js`: Removed exclusion filter for `match.category === 'networks'`, allowing 24/7 channel cards to receive Kafka sources during sync.
+   - `src/services/TrexCatalogDb.js`: Indexed all 44,567 linear & entertainment/news channels into `channel_keys` (up from 6,852).
 3. **Live Verification on VPS (`nuvio-sports` PM2 Cluster)**:
-   - Deployed with `scripts/deploy.sh --no-pull`; health OK.
-   - Run `node scripts/sync-matches.js`: Injected 1,357 Kafka sources into 667 live fixtures/channels. 452 24/7 channel cards now carry Kafka feeds (up from 0).
+   - Deployed `97450b2` with `scripts/deploy.sh --no-pull`; health OK.
+   - Run `node scripts/sync-matches.js`: Injected **6,024 Kafka sources** into **3,157 live fixtures and 24/7 channels** (up from 1,357 and originally 0).
    - Live stream resolution verified:
-     - `TNT Sports 1` (`cdn_ch_xx_tnt-sports-1`): Kafka 1080p stream at Index 1 (Score 150), 1.3 Mbps.
-     - `Sky Sports F1` (`cdn_ch_xx_sky-sports-f1`): Kafka UHD/4K streams at Index 1 & 2 (Score 130), 2160p · 7.3 Mbps.
-     - `Fox Sports 1` (`cdn_ch_xx_fox-sports-1`): Kafka HD stream at Index 1 (Score 130), 1080p · 5.2 Mbps.
+     - `Cartoon Network` (`dlv_ch_339_cartoon-network`): 16 streams, with 10 Kafka feeds (FHD 1080p · 6.8 Mbps, 4K IT 2160p · 3.5 Mbps, 4K NL 2160p · 4.1 Mbps, HD PL, FHD FR).
+     - `CNN` (`dlv_ch_345_cnn`): 8 streams, with Kafka at Rank #1 (FHD 1080p · 7.1 Mbps, 4K 2160p · 5.4 Mbps).
+     - `HBO` (`dlv_ch_321_hbo`): 6 streams, with Kafka at Rank #1 (HD US 1080p60 · 5.7 Mbps, FHD 1080p · 3.1 Mbps).
+     - `Discovery Channel` (`dlv_ch_313_discovery-channel`): 7 streams, with 5 Kafka feeds (FHD DE 1080p · 6.1 Mbps, FHD FR 1080p · 5.1 Mbps).
+     - Sports channels (`TNT Sports 1`, `Sky Sports F1`, `Fox Sports 1`) continue to lead at Rank #1.
 
 ---
 
