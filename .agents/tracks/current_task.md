@@ -1,3 +1,39 @@
+# Session Checkpoint: Complete Removal of Leaf / Highfly Source
+**Date**: 2026-11-24
+**Branch**: `feature/remove-leaf-source`
+**Status**: COMPLETED (all 6 tasks committed, tests 100% green)
+**Plan**: `docs/superpowers/plans/2026-11-24-remove-leaf-source.md`
+
+### Summary of Changes
+1. **Decommissioned Leaf Route and Egress Policy (`d8a6a98`)**:
+   - Deleted `src/routes/leafManifest.js`.
+   - Removed `/api/leaf` from `src/index.js` routes, `STREAM_PREFIXES`, and stream-match regex.
+   - Cleaned `isLeafTarget`, `validateLeafManifestUrl`, and `LEAF_PROXY_URL` from `GuardedEgressPolicy.js` and `impitClient.js`.
+2. **Decommissioned LiveOverlayService & Overlay Freshening (`fd9d05f`)**:
+   - Deleted `src/services/LiveOverlayService.js`.
+   - Unregistered `LiveOverlayService` from `container.js`.
+   - Removed overlay freshening cron loop and cache invalidation from `CronService.js`.
+   - Removed overlay merging from `catalog.js` and `streams.js` (using direct `baseSources`).
+   - Removed overlay builder from `MatchAggregator.js`.
+3. **Unregistered Leaf Providers & Deleted Leaf Services (`e8d2af4`)**:
+   - Deleted `LeafProvider.js`, `LeafRecapProvider.js`, `LeafDiagnostics.js`, `LeafInstallConfig.js`, `LeafMint.js`, `LeafRateLimitState.js`, `LeafState.js`, `LeafStreamProbe.js`, `scripts/leaf-health.mjs`.
+   - Unregistered providers from `container.js` and `MatchAggregator.js`.
+   - Removed replay & carry-forward provider entries from `catalog.js` and `MatchAggregator.js`.
+4. **Deprecate Leaf from Streams, Scoring, and Caching (`f5abd9b`)**:
+   - Removed `leaf` and `leaf_recap` from `src/streams.js` priority, known live/replay, nice names, and resolution dispatch.
+   - Removed +30 direct CDN bonus and reliable sources entry from `StreamScoringService.js`.
+   - Removed from `TimingRelations.js` and `StreamResolveCache.js`.
+   - Updated test suites across `tiktokPrioritization`, `streamResolutionAndMetadataRecovery`, `streamPriorityQuorum`, `prewarmResolveKeyAndWarmth`, and `liveDropReport`.
+5. **Deleted 29 Dedicated Leaf Test Suites & Cleaned Scripts (`002965a`)**:
+   - Deleted all 29 obsolete Leaf and LiveOverlay test files.
+   - Updated offline test harnesses `scripts/test-pr59-offline.cjs` and `scripts/test-pr61-offline.cjs`.
+6. **Documentation & Env Vars Cleaned (`f026e82`)**:
+   - Removed all `LEAF_*` environment variables from `.env.example`.
+   - Updated `.agents/context/ARCHITECTURE.md` and `.agents/context/DECISIONS.md`.
+   - Removed obsolete Leaf comments in `TimStreamsProvider.js`, `MatchAggregator.js`, and `streams.js`.
+
+---
+
 # Session Checkpoint: Kafka 24/7 Networks Enrichment and Priority Promotion
 **Date**: 2026-11-24
 **Status**: COMPLETED, MERGED to `stable`, and LIVE in production (`97450b2`)
