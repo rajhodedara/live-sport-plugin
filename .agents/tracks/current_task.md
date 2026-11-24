@@ -1,3 +1,30 @@
+# Session Checkpoint: Trex Catalog Coverage for Kafka
+**Date**: 2026-11-24
+**Status**: Implemented on branch `kafka-trex-coverage`, not deployed
+**Plan**: `docs/superpowers/plans/2026-11-24-kafka-trex-catalog-coverage.md` (9 tasks, all done)
+**Spec**: `docs/superpowers/specs/2026-11-24-kafka-trex-catalog-coverage-design.md`
+
+### What changed
+- `src/services/TrexCatalogKeys.js`: name normalization, team/channel keys, channel classification, quality and group scoring.
+- `src/services/TrexCatalogDb.js` and `TrexCatalogStore.js`: SQLite schema, transactional full replace, read-only worker lookups, no catalog rows in worker memory.
+- `scripts/refresh_trex_catalog.js`: nightly rebuild from the 546-page generic catalog, or from a CSV snapshot; a failed run leaves the previous database untouched.
+- `src/services/TrexEventSearch.js`: click-path search for per-game event channels, live window -15 min to +4 h, trim-and-retry, request budget, 512 KB body cap, per-fixture cache.
+- `src/services/StreamPolicy.js` and `src/streams.js`: frozen `EXT-X-MEDIA-SEQUENCE:0` playlist guard for Kafka streams, event feeds prepended on the click path.
+- `src/providers/KafkaProvider.js`: `createSourcesForFixture` (event, team, label), `resolveEventStreams`, `sweepEvents`, `isCoverageReady`.
+- `src/services/MatchAggregator.js`: attaches the prioritized sources, runs the 20-search sweep before enrichment, records `byMode` telemetry.
+- Switches: `KAFKA_CATALOG_DB`, `KAFKA_EVENT_SEARCH_ENABLED`, `KAFKA_LIVENESS_GUARD_ENABLED`; deployment order in the handoff, section 5.2.
+
+### Verification
+- Kafka and Trex suites: 121/121 green across 13 files.
+- Neighbouring suites: 61/61 (broadcaster, matchAggregator variants).
+- `node --check` clean on every new or modified source file.
+
+### Next
+1. Operator rollout on the VPS in the order from handoff section 5.2 (deploy with the path empty, build the catalog, set the path, reload, cron, watch).
+2. Whole-branch review before merging to `stable`.
+
+---
+
 # Session Checkpoint: Kafka Live Sports Provider Review and Repair
 **Date**: 2026-11-23
 **Status**: Completed
