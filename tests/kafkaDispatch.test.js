@@ -87,4 +87,67 @@ describe('Kafka Stream Dispatch and Selection', () => {
       container.resolve = originalResolve;
     }
   });
+
+  test('prepends event feeds for non-event Kafka sources and skips them for event sources', async () => {
+    const eventStream = {
+      name: 'Kafka',
+      title: 'Event feed',
+      url: 'https://cdn.example.invalid/e.m3u8',
+      _source: 'kafka'
+    };
+    const mockResolveStream = jest.fn().mockResolvedValue([
+      { name: 'Kafka', title: 'Team feed', url: 'https://cdn.example.invalid/team.m3u8' }
+    ]);
+    const mockResolveEventStreams = jest.fn().mockResolvedValue([eventStream]);
+
+    const fakeKafkaProvider = {
+      resolveStream: mockResolveStream,
+      resolveEventStreams: mockResolveEventStreams
+    };
+
+    const originalResolve = container.resolve;
+    container.resolve = jest.fn((name) => {
+      if (name === 'kafkaProvider') return fakeKafkaProvider;
+      return originalResolve.call(container, name);
+    });
+
+    try {
+      const match = { id: 'm1', category: 'basketball', title: 'Bulls vs Cavaliers' };
+      const opts = {};
+
+      const teamRes = await resolveSource(
+        { source: 'kafka', id: 'flix:team-feed', channelName: 'NBA TEAM| CHICAGO BULLS', matchMode: 'team' },
+        match,
+        null,
+        opts
+      );
+      expect(mockResolveEventStreams).toHaveBeenCalledWith(match, opts);
+      expect(teamRes.map((s) => s.url)).toEqual([
+        'https://cdn.example.invalid/e.m3u8',
+        'https://cdn.example.invalid/team.m3u8'
+      ]);
+
+      mockResolveEventStreams.mockClear();
+      const eventRes = await resolveSource(
+        { source: 'kafka', id: 'fx:ev', channelName: 'NEXT | Bulls vs Cavaliers', matchMode: 'event' },
+        match,
+        null,
+        opts
+      );
+      expect(mockResolveEventStreams).not.toHaveBeenCalled();
+      expect(eventRes.map((s) => s.url)).toEqual(['https://cdn.example.invalid/team.m3u8']);
+
+      mockResolveEventStreams.mockClear();
+      const secondRes = await resolveSource(
+        { source: 'kafka', id: 'flix:team-feed-2', channelName: 'NBA TEAM| CLEVELAND CAVALIERS', matchMode: 'team' },
+        match,
+        null,
+        opts
+      );
+      expect(mockResolveEventStreams).toHaveBeenCalledTimes(1);
+      expect(secondRes[0].url).toBe('https://cdn.example.invalid/e.m3u8');
+    } finally {
+      container.resolve = originalResolve;
+    }
+  });
 });

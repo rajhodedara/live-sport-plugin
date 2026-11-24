@@ -27,6 +27,7 @@ const MANIFEST_PROXY_PATH = /(?:^|\/)api\/manifest(?:\.m3u8|\.mpd)?$/i;
 const MAX_PROXY_DEPTH = 8;
 const CLOAKED_HOST = /(?:^|\.)(?:cowedd\d*[a-z0-9]*|wedd\d+[a-z0-9]*|tiktokcdn|tiktokx-origin)\.[a-z]+$/i;
 const PNG_SEGMENT_PATH = /\.png$/i;
+const FROZEN_MEDIA_SEQUENCE = /#EXT-X-MEDIA-SEQUENCE:\s*0(?!\d)/;
 
 function inspectStreamTarget(stream) {
   const result = { relay: false, dash: false, cloaked: false };
@@ -80,12 +81,22 @@ function isBlockedDashStream(stream) {
   return isRelayedDashStream(stream) || isDashStream(stream);
 }
 
+/**
+ * True when an HLS media playlist is still parked at media sequence 0. Trex
+ * event feeds that never roll over replay their first segment indefinitely.
+ */
+function isFrozenMediaPlaylist(body) {
+  if (typeof body !== 'string' || !body.includes('#EXTM3U')) return false;
+  return FROZEN_MEDIA_SEQUENCE.test(body);
+}
+
 module.exports = {
   isRelayedDashStream,
   isDashStream,
   isBlockedDashStream,
   isPngCloakedStream,
   isBlockedStream,
+  isFrozenMediaPlaylist,
   CLOAKED_HOST,
   PNG_SEGMENT_PATH,
   DASH_RELAY_PATH,

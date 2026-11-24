@@ -13,7 +13,7 @@ const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
 const { manifestPlaybackUrl } = require('./services/ManifestPlaybackUrl');
 const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
-const { isBlockedDashStream, isBlockedStream } = require('./services/StreamPolicy');
+const { isBlockedDashStream, isBlockedStream, isFrozenMediaPlaylist } = require('./services/StreamPolicy');
 const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
 
 let _liveOverlayRef;
@@ -350,6 +350,13 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
   } else if (sourceName === 'kafka') {
     const provider = container.resolve('kafkaProvider');
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
+    // The catalog can hold event feeds this source id does not name; prepend them
+    // so they lead the list. The event source itself already resolves from the
+    // same candidates, so it skips the extra pass.
+    if (typeof provider.resolveEventStreams === 'function' && src.matchMode !== 'event') {
+      const eventStreams = await provider.resolveEventStreams(match, opts);
+      resStreams = [...(eventStreams || []).filter(Boolean), ...(resStreams || [])];
+    }
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
     const pName = sourceName.replace('yaml_', '');
@@ -984,6 +991,15 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Reject Pluto TV takedown slates ("That's a wrap" / "no longer available on this device" loops)
       if (/takedownslate|ptv_takedownslates/i.test(bodySample)) {
         console.log(`[Filter] Dropped Pluto takedown slate: ${targetUrl}`);
+        if (cacheKey) resolveCache.noteFailure(cacheKey);
+        return null;
+      }
+
+      // Reject frozen Trex playlists: a media playlist still parked at
+      // #EXT-X-MEDIA-SEQUENCE:0 never advances, so every viewer loops the same
+      // first segment until the token dies.
+      if (s._source === 'kafka' && process.env.KAFKA_LIVENESS_GUARD_ENABLED !== 'false' && isFrozenMediaPlaylist(bodySample)) {
+        console.log(`[Filter] Dropped frozen playlist (sequence 0): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
