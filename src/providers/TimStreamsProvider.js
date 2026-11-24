@@ -415,8 +415,8 @@ class TimStreamsProvider extends BaseProvider {
 
       rows.push(new StreamEntity({
         name: 'TimStreams',
-        // The parenthesised channel is what streams.js lifts into the row label
-        // (same shape Leaf uses). Without it the row showed no broadcaster at all.
+        // The parenthesised channel is what streams.js lifts into the row label.
+        // Without it the row showed no broadcaster at all.
         title: isChannelCard ? (channel ? `(${channel})` : 'TimStreams') : (channel ? `(${channel}) ${matchTitle}` : `TimStreams ${matchTitle}`),
         url: proxyUrl,
         channelName: channel || undefined,

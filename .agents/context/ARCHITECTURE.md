@@ -98,7 +98,7 @@ In order (each step is load-bearing; reordering breaks routes):
    `/api/options`, `/api/provider-health`, `/api/worker-budget`, `/api/matches`.
 10. Artwork pipeline: `/img/collection/:sport`, `/img/placeholder`, `/img/date`,
     `/img/sport/:sport`, `/img/match`, `/img/badge`, `/img`.
-11. **Playback routers mounted at root** (`:845-851`): `streamProxy`, `manifest`, `leafManifest`,
+11. **Playback routers mounted at root** (`:845-851`): `streamProxy`, `manifest`,
     `hlsResource`, `embed`, `dash`. Each router declares its own `/api/...` paths.
 12. **Four `/api` layers, in this exact order** (`:854-860`):
     1. `PublicResolverApiGate` — allowlist `/stream` + `/health`, 404 everything else (`:854`)
@@ -251,13 +251,11 @@ Behaviour worth knowing before you touch it:
 
 | Target | Proxy chain | Profile |
 |---|---|---|
-| Leaf (`sports.highfly.to`, `papacito.cfd` except `w1.*`) | `LEAF_PROXY_URL` → `WARP_PROXY_URL` → `DAMITV_PROXY_URL` | `chrome` |
 | DamiTV (`damitv.st`, incl. subdomains) | `WARP_PROXY_URL` → `DAMITV_PROXY_URL` | `vanilla` |
 | everything else | none (direct) | `chrome` |
 
 `options.proxyUrl` (including an explicit `null`) overrides the derived choice for that request and
-its whole redirect chain. `validateLeafManifestUrl` separately admits only `https` `*.papacito.cfd`
-with no credentials/port and ≤16 KiB.
+its whole redirect chain.
 
 ### 3.4 `ProviderOutbound` — the compatibility facade
 
@@ -339,7 +337,6 @@ that can produce duplicate cards, and duplication is preferred over cross-source
 |---|---|---|
 | `/api/manifest`, `/api/manifest.m3u8` | `routes/manifest.js` | Playlist **text** (guarded fetch, `hlsua` selects UA) |
 | `/api/manifest.mpd` | `routes/manifest.js` | MPD **text** (BaseURL injected) |
-| `/api/leaf/manifest.m3u8`, `/api/leaf/live.m3u8`, `/api/leaf/m3u8/*` | `routes/leafManifest.js` | Playlist **text** |
 | `/api/soccerfull/manifest` | `routes/soccerFullManifest.js` | Playlist **text** |
 | `/api/hls/resource/:token/media.ts` | `routes/hlsResource.js` | **307 redirect** after HMAC verification |
 | `/api/dash/*.m3u8` | `routes/dash.js` | Playlist **text** from a signed payload |
@@ -516,7 +513,7 @@ no lint** — it builds on the VPS and gates on `node --check dist.next/index.js
 | A match merged with the wrong event (incl. women's/U21/reserves) | `MatchAggregator._sameEventPre` (`:816`), `_squadsCompatible` (`:352`), `EventSquadIdentity` |
 | A provider returns nothing | that provider file → `BaseProvider` → `dispatchToProvider` (`streams.js:199`) |
 | A request is blocked / 403 / "OutboundBlockedError" | `GuardedOutbound.assertOutboundUrl`, `OutboundUrlGuard`, `GuardedEgressPolicy` |
-| A proxy is not being used | `GuardedEgressPolicy.selectGuardedEgress` (`LEAF_PROXY_URL` / `WARP_PROXY_URL` / `DAMITV_PROXY_URL`) |
+| A proxy is not being used | `GuardedEgressPolicy.selectGuardedEgress` (`WARP_PROXY_URL` / `DAMITV_PROXY_URL`) |
 | Native transport is saturated | `NativeGuardedSlot` (`MAX_SLOTS = 4`), `ERR_OUTBOUND_CAPACITY`, `/api/provider-health` |
 | Streams resolve but nothing plays | resolver transport mode (§6.3) → `routes/manifest.js` → `proxyHeaders` |
 | A stream 403s / token expired | `routes/manifest.js` remint path, `StreamResolveCache._ttlFor` |

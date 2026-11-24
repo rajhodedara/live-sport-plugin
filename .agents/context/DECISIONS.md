@@ -16,7 +16,7 @@ be in any new provider's output.
 **Why:** outbound bandwidth saturation on a single VPS; the measured cost is in `StreamPolicy`'s
 header comment. Byte traffic is offloaded to the Cloudflare Worker fleet instead.
 
-**Allowed exceptions:** *text* playlists (`/api/manifest`, `/api/leaf/*`, `/api/soccerfull/manifest`,
+**Allowed exceptions:** *text* playlists (`/api/manifest`, `/api/soccerfull/manifest`,
 `/api/manifest.mpd`) and **307 redirects** (`/api/hls/resource/:token/media.ts`, HMAC-verified).
 These cost kilobytes, not gigabytes.
 

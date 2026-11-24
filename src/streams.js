@@ -1183,14 +1183,7 @@ function schedulePrewarm(task) {
 async function prewarmMatchNow(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match) return;
-    // Prewarm reads the same effective source list the resolver will use, so a
-    // source that only exists in the live overlay is not silently skipped here
-    // if the prewarm skip list ever drops leaf.
-    const overlay = _liveOverlay();
-    const baseSources = Array.isArray(match.sources) ? match.sources : [];
-    const effectiveSources = (overlay && match.id)
-      ? overlay.mergeSources(match.id, baseSources, match.aliasIds)
-      : baseSources;
+    const effectiveSources = Array.isArray(match.sources) ? match.sources : [];
     if (effectiveSources.length === 0) return;
     const resolveCache = container.resolve('streamResolveCache');
     const activeSources = selectSources(effectiveSources, config || null, match);
@@ -1759,7 +1752,7 @@ async function handleStream(type, id, config) {
       if (titleChannelMatch && titleChannelMatch[1]) {
         const inner = titleChannelMatch[1];
         // Skip resolution/bitrate placeholders and Auto/stream markers — they
-        // are quality tags, not channel names (e.g. Leaf's "(FHD)").
+        // are quality tags, not channel names (e.g. "(FHD)").
         if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k|live\s+event|event|live\s+stream|stream\s*\d*)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
           channelName = inner;
         } else {

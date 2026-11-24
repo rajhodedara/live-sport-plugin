@@ -187,7 +187,7 @@ describe('Prewarm Resolve Key and Cache Warmth Verification', () => {
       }
     });
 
-    test('Priority sources (daddylive, ppvst, leaf) skip prewarming once resolved', async () => {
+    test('Priority sources (daddylive, ppvst) skip prewarming once resolved', async () => {
       const match = {
         id: 'match_priority_live',
         title: 'Real Madrid vs Barcelona',

@@ -1257,7 +1257,7 @@ class MatchAggregator {
     const finalAliasSets = [];
     const categoryBuckets = new Map(); // normalized sport category -> array of finalMatches indices
 
-    // Index previous sync kickoff dates to resolve dateless scrapes (e.g. highfly/leaf, ak47 playlists)
+    // Index previous sync kickoff dates to resolve dateless scrapes (e.g. ak47 playlists)
     const prevDateMap = new Map();
     try {
       // Pure reads below — the read-only snapshot avoids a full-catalog clone.
