@@ -96,4 +96,21 @@ describe('TrexCatalogDb', () => {
     expect(() => writeCatalogFile(missing, METAS, { generatedAt: 'x', source: 'csv' })).toThrow();
     expect(fs.existsSync(missing)).toBe(false);
   });
+
+  test('indexes non-sports 24/7 channels (kind: other) into channel_keys', () => {
+    const db = openDatabase(dbPath);
+    ensureSchema(db);
+    const nonSportsMetas = [
+      { id: 'trex:cn', name: 'IT| CARTOON NETWORK 4K', type: 'tv' },
+      { id: 'trex:cnn', name: 'UK| CNN FHD', type: 'tv' }
+    ];
+    replaceCatalog(db, nonSportsMetas, { generatedAt: '2026-11-24', source: 'test' });
+
+    const keys = db.prepare('SELECT norm_key, channel_id FROM channel_keys ORDER BY norm_key').all();
+    expect(keys).toEqual([
+      { norm_key: 'cartoon network', channel_id: 'trex:cn' },
+      { norm_key: 'cnn', channel_id: 'trex:cnn' }
+    ]);
+    db.close();
+  });
 });

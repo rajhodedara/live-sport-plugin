@@ -137,12 +137,12 @@ function replaceCatalog(db, metas, { generatedAt, source } = {}) {
           keys.push(...team.keys);
         }
         counts.teamChannels += 1;
-      } else if (kind === 'linear') {
+      } else if (kind === 'linear' || kind === 'other') {
         const exact = channelKey(name);
         if (exact) keys.push(exact);
         const alias = channelAliasKey(name);
         if (alias) aliases.push({ key: alias, id, score });
-        counts.linearChannels += 1;
+        if (kind === 'linear') counts.linearChannels += 1;
       } else if (kind === 'event') {
         counts.eventChannels += 1;
       }
