@@ -438,6 +438,22 @@ class KafkaProvider extends BaseProvider {
       }
     }
 
+    const isChannel = Boolean(
+      match.category === 'networks' ||
+      match.rawCategory === '24/7 TV Channels' ||
+      match.isChannel ||
+      String(match.id || '').includes('_ch_')
+    );
+
+    if (isChannel && match.title && typeof match.title === 'string') {
+      const context = {};
+      if (match.country) context.country = match.country;
+      if (match.countryCode) context.countryCode = match.countryCode;
+      for (const hit of this.catalogStore.findChannel(match.title, context) || []) {
+        add(hit, 'label');
+      }
+    }
+
     for (const source of Array.isArray(match.sources) ? match.sources : []) {
       if (!source || source.source === 'kafka') continue;
       const label = source.channelName || source.channel_name || source.channel;
@@ -447,9 +463,11 @@ class KafkaProvider extends BaseProvider {
       const countryCode = source.countryCode || match.countryCode;
       if (country) context.country = country;
       if (countryCode) context.countryCode = countryCode;
-      // One source per label: the store's ranking already put the fixture's own
+      // One source per label for fixtures: the store's ranking already put the fixture's own
       // market first, and a second candidate is usually a foreign feed.
-      for (const hit of (this.catalogStore.findChannel(label, context) || []).slice(0, 1)) add(hit, 'label');
+      // For 24/7 channel cards, attach all matching feeds (FHD, 4K, alternate language feeds).
+      const hits = this.catalogStore.findChannel(label, context) || [];
+      for (const hit of isChannel ? hits : hits.slice(0, 1)) add(hit, 'label');
     }
 
     for (const name of this.teamNamesOf(match)) {

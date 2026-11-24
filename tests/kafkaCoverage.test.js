@@ -197,6 +197,79 @@ describe('KafkaProvider coverage sources', () => {
     expect(streams).toEqual([{ name: 'Kafka', url: 'https://cdn.example.invalid/e.m3u8' }]);
   });
 
+  test('matches 24/7 channel cards by match.title and attaches all matching feeds', () => {
+    const store = {
+      isReady: () => true,
+      findTeam: () => [],
+      findChannel: jest.fn((label) => {
+        if (label === 'TNT Sports 1') {
+          return [
+            { id: 'trex:tnt1-fhd', name: 'UK| TNT SPORTS 1 FHD', group: 'UK', score: 3000 },
+            { id: 'trex:tnt1-4k', name: 'UK| TNT SPORTS 1 4K', group: 'UK', score: 4000 }
+          ];
+        }
+        return [];
+      })
+    };
+
+    const provider = new KafkaProvider({ catalogStore: store });
+    const channelCard = {
+      id: 'cdn_ch_xx_tnt-sports-1',
+      title: 'TNT Sports 1',
+      category: 'networks',
+      sources: [
+        { source: 'cdnlive', channelName: 'Stream 1' } // Source label doesn't match
+      ]
+    };
+
+    const sources = provider.createSourcesForFixture(channelCard, { now: NOW });
+    expect(sources.length).toBe(2);
+    expect(sources.map((s) => s.id)).toEqual(['trex:tnt1-fhd', 'trex:tnt1-4k']);
+    expect(sources[0].matchMode).toBe('label');
+    expect(sources[0].channelName).toBe('TNT SPORTS 1 FHD');
+    expect(store.findChannel).toHaveBeenCalledWith('TNT Sports 1', expect.any(Object));
+  });
+
+  test('uncaps feeds on source channelName for 24/7 channels but caps at 1 for match fixtures', () => {
+    const store = {
+      isReady: () => true,
+      findTeam: () => [],
+      findChannel: jest.fn((label) => {
+        if (label === 'Sky Sports F1') {
+          return [
+            { id: 'trex:f1-uhd', name: 'UK| SKY SPORTS F1 UHD', group: 'UK', score: 4000 },
+            { id: 'trex:f1-hd', name: 'UK| SKY SPORTS F1 HD', group: 'UK', score: 3000 }
+          ];
+        }
+        return [];
+      })
+    };
+
+    const provider = new KafkaProvider({ catalogStore: store });
+
+    // 24/7 Channel card with source labeled Sky Sports F1
+    const channelCard = {
+      id: 'cdn_ch_xx_sky-sports-f1',
+      title: 'Sky Sports F1',
+      category: 'networks',
+      sources: [{ source: 'cdnlive', channelName: 'Sky Sports F1' }]
+    };
+    const channelSources = provider.createSourcesForFixture(channelCard, { now: NOW });
+    expect(channelSources.length).toBe(2);
+    expect(channelSources.map((s) => s.id)).toEqual(['trex:f1-uhd', 'trex:f1-hd']);
+
+    // Regular match fixture with source labeled Sky Sports F1
+    const matchFixture = {
+      id: 'live_match_123',
+      title: 'Monaco GP Practice',
+      category: 'formula1',
+      sources: [{ source: 'cdnlive', channelName: 'Sky Sports F1' }]
+    };
+    const fixtureSources = provider.createSourcesForFixture(matchFixture, { now: NOW });
+    expect(fixtureSources.length).toBe(1);
+    expect(fixtureSources[0].id).toBe('trex:f1-uhd');
+  });
+
   test('resolveEventStreams stays empty outside the window and when disabled', async () => {
     const provider = new KafkaProvider({ catalogStore: fakeStore(), eventSearch: fakeEventSearch() });
     provider.resolveStream = jest.fn(async () => [{ name: 'Kafka' }]);
