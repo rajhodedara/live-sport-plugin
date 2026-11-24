@@ -402,17 +402,31 @@ class KafkaProvider extends BaseProvider {
       const rawName = String(candidate.name || candidate.channelName || '');
       // The catalog prefixes a routing group (`US| NBA TV HD`, `NBA TEAM| CHICAGO
       // BULLS`). It is not part of the name a viewer should read, so the label
-      // starts after it; the group still supplies the country when it is a code.
+      // starts after it. The group is a package bucket, not the channel's own
+      // country: `TR| NBA TV 4K` is sold in a Turkish package but the feed is the
+      // US channel, so the name decides and the group only fills in when the name
+      // identifies no country at all.
       const bar = rawName.indexOf('|');
       const channelName = (bar === -1 ? rawName : rawName.slice(bar + 1)).trim();
-      const groupInfo = candidate.country ? null : ChannelCountryService.getCountryInfo(candidate.group);
+      const nameInfo = typeof ChannelCountryService.detectChannelCountry === 'function'
+        ? ChannelCountryService.detectChannelCountry(channelName)
+        : null;
+      const groupInfo = candidate.country || nameInfo
+        ? null
+        : ChannelCountryService.getCountryInfo(candidate.group);
       out.push({
         source: 'kafka',
         id: candidate.id,
         channelName,
         catalogId: GENERIC_CATALOG_ID,
         matchMode,
-        ...(candidate.country ? { country: candidate.country } : groupInfo ? { country: groupInfo.country } : {}),
+        ...(candidate.country
+          ? { country: candidate.country }
+          : nameInfo
+            ? { country: nameInfo.country }
+            : groupInfo
+              ? { country: groupInfo.country }
+              : {}),
         ...(candidate.language ? { language: candidate.language } : {})
       });
     };

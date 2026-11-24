@@ -54,12 +54,21 @@ describe('Kafka source display label', () => {
     expect(source.country).toBeUndefined();
   });
 
-  test('a market prefix becomes the right country instead of the guessed one', () => {
+  test('a package prefix does not overwrite the country the name identifies', () => {
     const provider = providerWith([{ id: 'trex:nba-tr', name: 'TR| NBA TV 4K', group: 'TR', score: 3100 }]);
 
     const [source] = provider.createSourcesForFixture(fixtureWith('Vavoo NBA TV'), { now: NOW });
 
     expect(source.channelName).toBe('NBA TV 4K');
+    expect(source.country).toBe('United States');
+  });
+
+  test('a package prefix becomes the country when the name identifies none', () => {
+    const provider = providerWith([{ id: 'trex:sport5-tr', name: 'TR| SPORT 5 HD', group: 'TR', score: 3100 }]);
+
+    const [source] = provider.createSourcesForFixture(fixtureWith('Vavoo SPORT 5 HD'), { now: NOW });
+
+    expect(source.channelName).toBe('SPORT 5 HD');
     expect(source.country).toBe('Turkey');
   });
 });
