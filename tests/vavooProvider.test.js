@@ -1,7 +1,7 @@
 'use strict';
 
 const VavooProvider = require('../src/providers/VavooProvider');
-const { VavooTokenManager } = require('../src/providers/VavooProvider');
+const { VavooTokenManager, VAVOO_BASE_SITES } = require('../src/providers/VavooProvider');
 const MatchEntity = require('../src/domain/MatchEntity');
 const StreamEntity = require('../src/domain/StreamEntity');
 const MatchAggregator = require('../src/services/MatchAggregator');
@@ -371,7 +371,7 @@ describe('VavooProvider & Dual-Ping Architecture', () => {
       );
 
       expect(streams).toEqual([]);
-      expect(provider.proxyFetch).toHaveBeenCalledTimes(4); // Attempted all 4 base sites
+      expect(provider.proxyFetch).toHaveBeenCalledTimes(VAVOO_BASE_SITES.length); // Attempted all base sites
     });
   });
 });

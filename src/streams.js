@@ -317,13 +317,22 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     resStreams = await provider.resolveStream(src.id, match.category, match.title, src);
   } else if (sourceName === 'kafka') {
     const provider = container.resolve('kafkaProvider');
-    resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
-    // The catalog can hold event feeds this source id does not name; prepend them
-    // so they lead the list. The event source itself already resolves from the
-    // same candidates, so it skips the extra pass.
-    if (typeof provider.resolveEventStreams === 'function' && src.matchMode !== 'event') {
-      const eventStreams = await provider.resolveEventStreams(match, opts);
-      resStreams = [...(eventStreams || []).filter(Boolean), ...(resStreams || [])];
+    const hasDedicatedEventSource = Array.isArray(match?.sources) &&
+      match.sources.some(s => s.source === 'kafka' && s.matchMode === 'event');
+    const shouldResolveEvents = typeof provider.resolveEventStreams === 'function' &&
+      src.matchMode !== 'event' && !hasDedicatedEventSource;
+
+    if (shouldResolveEvents) {
+      const [directStreams, eventStreams] = await Promise.all([
+        provider.resolveStream(src.id, match.category, match.title, src, opts),
+        provider.resolveEventStreams(match, opts).catch(err => {
+          console.warn(`[streams.js] kafka event search failed: ${err?.message || err}`);
+          return [];
+        })
+      ]);
+      resStreams = [...(eventStreams || []).filter(Boolean), ...(directStreams || [])];
+    } else {
+      resStreams = await provider.resolveStream(src.id, match.category, match.title, src, opts);
     }
   } else if (sourceName.startsWith('yaml_')) {
     const yamlProviders = container.resolve('yamlProviders');
@@ -1459,7 +1468,7 @@ async function handleStream(type, id, config) {
   // next request. Previously every source had to settle before anything was
   // returned, so a single slow provider could stall the whole response.
   const HARD_DEADLINE_MS = Number(process.env.STREAM_HARD_DEADLINE_MS || 15000);
-  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 6000), HARD_DEADLINE_MS);
+  const SOFT_DEADLINE_MS = Math.min(Number(process.env.STREAM_SOFT_DEADLINE_MS || 3000), HARD_DEADLINE_MS);
   const resolutionStartedAt = Date.now();
   let timingStream = null;
   if (timingRelations) {
@@ -1527,6 +1536,8 @@ async function handleStream(type, id, config) {
     });
   };
   const priority1Keys = new Set(inFlight.filter(f => f.isPriority1).map(f => f.key));
+  const totalPriority1 = inFlight.filter(f => f.isPriority1).length;
+  const targetP1Quorum = Math.min(PRIORITY1_QUORUM, totalPriority1);
   const priority1ReadyCount = (rows = publicationRows()) => new Set(rows
     .filter(row => isDirectRow(row) && priority1Keys.has(row._cacheKey))
     .map(row => row._cacheKey)).size;
@@ -1542,11 +1553,11 @@ async function handleStream(type, id, config) {
   };
 
   const warmPriority1 = inFlight.filter(f => f.wasWarm);
-  if (new Set(warmPriority1.map(f => f.key)).size >= PRIORITY1_QUORUM) {
+  if (targetP1Quorum > 0 && new Set(warmPriority1.map(f => f.key)).size >= targetP1Quorum) {
     // has() is only a hint: expiry can turn that cheap read into a new mint.
     // Return when enough actual direct results arrive, bounded even if another
     // formerly warm key is still being refreshed.
-    const warm = observeUntil(() => priority1ReadyCount() >= PRIORITY1_QUORUM ||
+    const warm = observeUntil(() => priority1ReadyCount() >= targetP1Quorum ||
       inFlight.every(f => f.settled));
     await settleBefore(warm.promise, Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
     warm.stop();
@@ -1583,7 +1594,7 @@ async function handleStream(type, id, config) {
     const eligible = publicationRows();
     if (eligible.length === 0) return false;
     const priority1Pending = inFlight.some(f => f.isPriority1 && !f.settled);
-    if (priority1Pending && priority1ReadyCount(eligible) < PRIORITY1_QUORUM) return false;
+    if (targetP1Quorum > 0 && priority1Pending && priority1ReadyCount(eligible) < targetP1Quorum) return false;
     const inFlightSourceByKey = new Map(inFlight.map(f => [f.key, f.source]));
     const getRowSource = (row) => row.source || row._source || row.sourceName || inFlightSourceByKey.get(row._cacheKey);
     const hasHigherTierResolved = eligible.some(row => (SOURCE_PRIORITY[getRowSource(row)] || 99) <= 4);
