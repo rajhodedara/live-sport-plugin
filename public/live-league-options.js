@@ -6,6 +6,7 @@
     root.LIVE_LEAGUE_GROUPS = exports.LIVE_LEAGUE_GROUPS;
     root.normalizeLeagueName = exports.normalizeLeagueName;
     root.ALL_CURATED_LEAGUE_IDS = exports.ALL_CURATED_LEAGUE_IDS;
+    root.MAINSTREAM_CURATED_LEAGUE_IDS = exports.MAINSTREAM_CURATED_LEAGUE_IDS;
   }
 })(typeof globalThis !== 'undefined' ? globalThis : typeof self !== 'undefined' ? self : this, function () {
   function normalizeLeagueName(value) {
@@ -141,9 +142,29 @@
     }
   }
 
+  // One-click preset for the Configure page. It favors widely followed
+  // top-flight and international competitions while leaving every resulting
+  // checkbox editable.
+  var MAINSTREAM_CURATED_LEAGUE_IDS = [
+    'mls', 'nwsl', 'epl', 'la-liga', 'serie-a', 'bundesliga', 'ligue-1',
+    'caf-champions-league', 'womens-champions-league', 'ucl', 'europa-league',
+    'liga-mx', 'brasileirao', 'argentine-primera', 'saudi-pro-league',
+    'nfl', 'college-football',
+    'nba', 'wnba', 'college-basketball', 'euroleague',
+    'mlb', 'nhl',
+    'atp', 'wta', 'grand-slams',
+    'ipl', 't20-world-cup', 'big-bash', 'psl',
+    'formula-1', 'motogp', 'nascar', 'indycar',
+    'six-nations', 'super-rugby', 'nrl',
+    'ufc', 'boxing',
+    'pga-tour', 'liv-golf',
+    'pdc-darts'
+  ];
+
   return {
     LIVE_LEAGUE_GROUPS: LIVE_LEAGUE_GROUPS,
     ALL_CURATED_LEAGUE_IDS: ALL_CURATED_LEAGUE_IDS,
+    MAINSTREAM_CURATED_LEAGUE_IDS: MAINSTREAM_CURATED_LEAGUE_IDS,
     normalizeLeagueName: normalizeLeagueName
   };
 });

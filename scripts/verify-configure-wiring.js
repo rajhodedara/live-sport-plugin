@@ -72,7 +72,7 @@ const { JSDOM } = require('jsdom');
   sel.dispatchEvent(new w.Event('change', { bubbles: true }));
 
   // 2. Interaction 1: Open /configure (fresh)
-  // All curated checkboxes and Other checked, summary says "All", decoded manifest config has no liveLeagues
+  // All curated checkboxes and Other checked, summary says "All selected", decoded manifest config has no liveLeagues
   const freshDom = makeDom();
   const fw = freshDom.window;
   const allCuratedCbs = fw.document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
@@ -80,11 +80,28 @@ const { JSDOM } = require('jsdom');
   const otherCb = fw.document.getElementById('liveLeagueOther');
   const summaryCount = fw.document.getElementById('liveLeaguesCount').textContent;
   const freshCfg = seg(fw);
-  const ok1 = allCuratedCbs.length > 0 && allCuratedChecked && otherCb.checked && summaryCount === 'All' && (!freshCfg || freshCfg.liveLeagues === undefined);
+  const ok1 = allCuratedCbs.length > 0 && allCuratedChecked && otherCb.checked && summaryCount === 'All selected' && (!freshCfg || freshCfg.liveLeagues === undefined);
   console.log('Interaction 1 (default state)       :', ok1 ? 'OK' : 'FAILED', { allCuratedChecked, other: otherCb.checked, summaryCount, hasLiveLeagues: Boolean(freshCfg && freshCfg.liveLeagues) });
   if (!ok1) process.exit(1);
 
-  // 3. Interaction 2: Search for 'bundesliga'
+  // 3. Interaction 2: Mainstream only replaces the selection and remains editable
+  fw.document.getElementById('liveLeaguesMainstream').click();
+  const mainstreamCfg = seg(fw);
+  const mainstreamIds = mainstreamCfg && mainstreamCfg.liveLeagues ? mainstreamCfg.liveLeagues.ids : [];
+  const okMainstream = mainstreamIds.includes('epl') &&
+    mainstreamIds.includes('nba') &&
+    !mainstreamIds.includes('laliga-2') &&
+    !mainstreamIds.includes('2-bundesliga') &&
+    mainstreamCfg.liveLeagues.other === false &&
+    mainstreamCfg.liveLeagues.custom.length === 0;
+  const mainstreamNba = fw.document.querySelector('#liveLeagueGroupsContainer input[value="nba"]');
+  mainstreamNba.click();
+  const editableAfterPreset = !seg(fw).liveLeagues.ids.includes('nba');
+  console.log('Interaction 2 (mainstream preset)   :', okMainstream && editableAfterPreset ? 'OK' : 'FAILED', { mainstreamCount: mainstreamIds.length, editableAfterPreset });
+  if (!okMainstream || !editableAfterPreset) process.exit(1);
+  fw.document.getElementById('liveLeaguesAll').click();
+
+  // 4. Interaction 3: Search for 'bundesliga'
   // Both Bundesliga options visible; hidden choices retain their state
   const searchInput = fw.document.getElementById('liveLeagueSearch');
   searchInput.value = 'bundesliga';
@@ -93,7 +110,7 @@ const { JSDOM } = require('jsdom');
   const b2Item = fw.document.querySelector('.league-chip-item[data-label="2 bundesliga"]');
   const eplItem = fw.document.querySelector('.league-chip-item[data-label="premier league"]');
   const ok2 = b1Item && !b1Item.hidden && b2Item && !b2Item.hidden && eplItem && eplItem.hidden && eplItem.querySelector('input').checked === true;
-  console.log('Interaction 2 (search bundesliga)   :', ok2 ? 'OK' : 'FAILED', { b1Visible: !b1Item.hidden, b2Visible: !b2Item.hidden, eplHidden: eplItem.hidden, eplChecked: eplItem.querySelector('input').checked });
+  console.log('Interaction 3 (search bundesliga)   :', ok2 ? 'OK' : 'FAILED', { b1Visible: !b1Item.hidden, b2Visible: !b2Item.hidden, eplHidden: eplItem.hidden, eplChecked: eplItem.querySelector('input').checked });
   if (!ok2) process.exit(1);
 
   // Clear search for subsequent tests
@@ -164,7 +181,7 @@ const { JSDOM } = require('jsdom');
   rw.document.getElementById('liveLeaguesAll').click();
   const cfg7 = seg(rw);
   const count7 = rw.document.getElementById('liveLeaguesCount').textContent;
-  const ok7 = count7 === 'All' && (!cfg7 || cfg7.liveLeagues === undefined);
+  const ok7 = count7 === 'All selected' && (!cfg7 || cfg7.liveLeagues === undefined);
   console.log('Interaction 7 (select all after clr):', ok7 ? 'OK' : 'FAILED', { count7, hasLiveLeagues: Boolean(cfg7 && cfg7.liveLeagues) });
   if (!ok7) process.exit(1);
 

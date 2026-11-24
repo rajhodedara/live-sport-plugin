@@ -111,10 +111,23 @@ describe('live league filter picker markup and script wiring', () => {
     expect(sportsSection).toMatch(/id="liveLeaguesCount"/);
   });
 
+  test('picker is always visible and uses the Select leagues heading', () => {
+    const sportsSection = html.slice(html.indexOf('id="sec-sports"'), html.indexOf('id="sec-teams"'));
+    expect(sportsSection).toMatch(/<section[^>]*id="liveLeaguesDisclosure"/);
+    expect(sportsSection).not.toMatch(/<details[^>]*id="liveLeaguesDisclosure"/);
+    expect(sportsSection).toMatch(/<h3[^>]*id="liveLeaguesSummaryHead"[^>]*>Select leagues<\/h3>/);
+  });
+
   test('labels its search, custom input, and count', () => {
     expect(html).toMatch(/<label[^>]*for="liveLeagueSearch"/);
     expect(html).toMatch(/<label[^>]*for="customLeagueInput"/);
     expect(html).toMatch(/id="liveLeaguesCount"[^>]*aria-live="polite"/);
+  });
+
+  test('offers a Mainstream only preset alongside the global selection controls', () => {
+    expect(html).toMatch(/<button[^>]*id="liveLeaguesMainstream"[^>]*>Mainstream only<\/button>/);
+    expect(script).toMatch(/MAINSTREAM_CURATED_LEAGUE_IDS/);
+    expect(script).toMatch(/liveLeaguesMainstreamBtn\.addEventListener/);
   });
 
   test('script wires liveLeagues to updateLink and restores existingConfig.liveLeagues', () => {

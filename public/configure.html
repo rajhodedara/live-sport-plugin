@@ -221,12 +221,11 @@
     .actionbar { flex-wrap: wrap; }
 
     /* Live Leagues Picker */
-    .live-leagues-disclosure { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
-    .live-leagues-disclosure > summary { cursor: pointer; font-size: 15px; font-weight: 600; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; min-height: 44px; }
-    .live-leagues-disclosure > summary::-webkit-details-marker { display: none; }
-    .live-leagues-disclosure > summary::after { content: ""; width: 8px; height: 8px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(45deg); flex: none; margin-top: -3px; }
-    .live-leagues-disclosure[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
-    .live-leagues-disclosure > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+    .live-leagues-section { margin-top: var(--space-6); border-top: 1px solid var(--line); padding-top: var(--space-6); }
+    .live-leagues-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); flex-wrap: wrap; }
+    .live-leagues-heading h3 { margin: 0 0 4px; font-size: 20px; line-height: 26px; font-weight: 600; }
+    .live-leagues-heading p { margin: 0; color: var(--muted); font-size: 14px; }
+    .live-leagues-heading .count { min-height: 32px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid var(--accent-fill); border-radius: var(--radius-pill); background: var(--surface-2); }
     .live-leagues-content { padding-top: 12px; }
     .live-leagues-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
     .live-leagues-toolbar .search-field { flex: 1; min-width: 200px; margin-bottom: 0; }
@@ -331,11 +330,14 @@
             <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
         </div>
 
-        <details class="crypto-details live-leagues-disclosure" id="liveLeaguesDisclosure">
-          <summary id="liveLeaguesSummaryHead">
-            <span class="disclosure-title">Live leagues</span>
-            <span class="count" id="liveLeaguesCount" aria-live="polite">All</span>
-          </summary>
+        <section class="live-leagues-section" id="liveLeaguesDisclosure" aria-labelledby="liveLeaguesSummaryHead">
+          <div class="live-leagues-heading">
+            <div>
+              <h3 id="liveLeaguesSummaryHead">Select leagues</h3>
+              <p>Choose which competitions appear while they are live.</p>
+            </div>
+            <span class="count" id="liveLeaguesCount" aria-live="polite">All selected</span>
+          </div>
           <div class="live-leagues-content">
             <div class="live-leagues-toolbar">
               <div class="field search-field">
@@ -344,6 +346,7 @@
               </div>
               <div class="panel-tools">
                 <button type="button" class="btn-sm" id="liveLeaguesAll">Select all</button>
+                <button type="button" class="btn-sm" id="liveLeaguesMainstream">Mainstream only</button>
                 <button type="button" class="btn-sm" id="liveLeaguesClear">Clear</button>
               </div>
             </div>
@@ -367,7 +370,7 @@
             </div>
             <div id="liveLeagueLiveRegion" class="visually-hidden" aria-live="polite"></div>
           </div>
-        </details>
+        </section>
       </section>
 
       <!-- 2 · Teams and timezone -->
@@ -775,6 +778,7 @@
     const liveLeaguesCount = document.getElementById('liveLeaguesCount');
     const liveLeagueSearch = document.getElementById('liveLeagueSearch');
     const liveLeaguesAllBtn = document.getElementById('liveLeaguesAll');
+    const liveLeaguesMainstreamBtn = document.getElementById('liveLeaguesMainstream');
     const liveLeaguesClearBtn = document.getElementById('liveLeaguesClear');
     const liveLeagueOther = document.getElementById('liveLeagueOther');
     const customLeagueInput = document.getElementById('customLeagueInput');
@@ -997,6 +1001,26 @@
         updateLink();
       });
     }
+    if (liveLeaguesMainstreamBtn) {
+      liveLeaguesMainstreamBtn.addEventListener('click', () => {
+        const mainstreamIds = new Set(window.MAINSTREAM_CURATED_LEAGUE_IDS || []);
+        const cbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
+        cbs.forEach(cb => {
+          cb.checked = mainstreamIds.has(cb.value);
+          const parent = cb.closest('.checkbox-label');
+          if (parent) parent.classList.toggle('active', cb.checked);
+        });
+        if (liveLeagueOther) {
+          liveLeagueOther.checked = false;
+          const parent = liveLeagueOther.closest('.checkbox-label');
+          if (parent) parent.classList.remove('active');
+        }
+        customLeagues = [];
+        renderCustomLeagueChips();
+        announceLiveLeague('Mainstream leagues selected. You can adjust any league.');
+        updateLink();
+      });
+    }
     if (liveLeaguesClearBtn) {
       liveLeaguesClearBtn.addEventListener('click', () => {
         const cbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
@@ -1204,7 +1228,7 @@
       const isReplayDisabled = replayFilter === 'disabled';
       const items = [
         { k: 'Sports', v: selectedSports.length === checkboxes.length ? 'All' : String(selectedSports.length) },
-        { k: 'Live Leagues', v: liveLeaguesSummary || 'All' },
+        { k: 'Selected leagues', v: liveLeaguesSummary || 'All selected' },
         { k: 'Live Sources', v: selectedLive.length === liveSourceCheckboxes.length ? 'All' : String(selectedLive.length) },
         ...(isReplayDisabled ? [] : [{ k: 'Replay Sources', v: selectedReplay.length === replaySourceCheckboxes.length ? 'All' : String(selectedReplay.length) }]),
         { k: 'Timezone', v: tz || 'n/a' },
@@ -1267,7 +1291,7 @@
 
       let liveLeaguesSummary = 'All';
       if (isLiveLeaguesDefault) {
-        liveLeaguesSummary = 'All';
+        liveLeaguesSummary = 'All selected';
       } else if (selectedCuratedIds.length === 0 && !isOtherChecked && customLeagues.length === 0) {
         liveLeaguesSummary = 'None';
       } else {

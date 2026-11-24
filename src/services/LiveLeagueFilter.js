@@ -1,6 +1,7 @@
 const {
   LIVE_LEAGUE_GROUPS,
   ALL_CURATED_LEAGUE_IDS,
+  MAINSTREAM_CURATED_LEAGUE_IDS,
   normalizeLeagueName,
 } = require('../../public/live-league-options');
 
@@ -237,6 +238,7 @@ function matchesLiveLeague(fixture, selection) {
 module.exports = {
   LIVE_LEAGUE_GROUPS,
   ALL_CURATED_LEAGUE_IDS,
+  MAINSTREAM_CURATED_LEAGUE_IDS,
   normalizeLeagueName,
   parseLiveLeagues,
   matchesLiveLeague,

@@ -3,9 +3,21 @@ const {
   matchesLiveLeague,
   normalizeLeagueName,
   LIVE_LEAGUE_GROUPS,
+  ALL_CURATED_LEAGUE_IDS,
+  MAINSTREAM_CURATED_LEAGUE_IDS,
 } = require('../src/services/LiveLeagueFilter');
 
 describe('LiveLeagueFilter', () => {
+  test('mainstream preset contains only curated IDs and excludes secondary competitions', () => {
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS.length).toBeGreaterThan(0);
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS.every(id => ALL_CURATED_LEAGUE_IDS.includes(id))).toBe(true);
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS).toEqual(expect.arrayContaining(['epl', 'ucl', 'nba', 'nfl', 'formula-1', 'ipl']));
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS).not.toContain('laliga-2');
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS).not.toContain('2-bundesliga');
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS).not.toContain('ufl');
+    expect(MAINSTREAM_CURATED_LEAGUE_IDS).not.toContain('cfl');
+  });
+
   describe('normalizeLeagueName', () => {
     test('folds case and accents, removes punctuation, collapses whitespace', () => {
       expect(normalizeLeagueName('  COPA   do Brasil  ')).toBe('copa do brasil');
