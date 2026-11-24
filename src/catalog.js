@@ -7,6 +7,7 @@ const { parseTimezone } = require('./timezone');
 const { getMatchTier } = require('./services/MainstreamRankingService');
 const { extractTeamsFromTitle } = require('./services/TeamNameExtractor');
 const { filterReplayMatches } = require('./services/ReplayFilterService');
+const { parseLiveLeagues, matchesLiveLeague } = require('./services/LiveLeagueFilter');
 
 function getKickoff(d) {
   if (!d) return 0;
@@ -995,10 +996,19 @@ function _wireLogoInvalidationHook() {
   } catch (_) {}
 }
 
-function _stableSig(obj) {
-  if (obj === null || obj === undefined) return '';
-  if (typeof obj !== 'object') return String(obj);
-  return Object.keys(obj).sort().map(k => `${k}=${_stableSig(obj[k])}`).join('&');
+function _canonicalJson(val) {
+  if (val === undefined) return 'undefined';
+  if (val === null) return 'null';
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'string') return JSON.stringify(val);
+  if (Array.isArray(val)) {
+    return '[' + val.map(_canonicalJson).join(',') + ']';
+  }
+  if (typeof val === 'object') {
+    const keys = Object.keys(val).sort();
+    return '{' + keys.map(k => JSON.stringify(k) + ':' + _canonicalJson(val[k])).join(',') + '}';
+  }
+  return JSON.stringify(String(val));
 }
 
 async function handleCatalog(type, id, extra, config) {
@@ -1014,7 +1024,7 @@ async function handleCatalog(type, id, extra, config) {
     const cacheService = container.resolve('cacheService');
     const gen = (cacheService && cacheService.rev) || 0;
     const conf = config || (extra && extra.config) || {};
-    const pageKey = `${type}|${id}|${_stableSig(extra || {})}|${_stableSig(conf)}|${gen}`;
+    const pageKey = `catalogPage\0${type}\0${id}\0${_canonicalJson(extra || {})}\0${_canonicalJson(conf)}\0${gen}`;
 
     const hit = _catalogPageCache.get(pageKey);
     if (hit && Date.now() <= hit.expiresAt) {
@@ -1530,6 +1540,19 @@ async function handleCatalogUncached(type, id, extra, config) {
     }
     return true;
   });
+
+  // Filter currently live non-channel fixtures by live leagues preference.
+  // Replays keep their existing behavior (guarded by !isReplayMode).
+  const liveLeaguesSelection = parseLiveLeagues(conf.liveLeagues);
+  if (liveLeaguesSelection !== null && !isReplayMode) {
+    filteredMatches = filteredMatches.filter(m => {
+      const isChannel = m.category === 'networks' || Boolean(m.isChannel);
+      if (!isChannel && isMatchLive(m)) {
+        return matchesLiveLeague(m, liveLeaguesSelection);
+      }
+      return true;
+    });
+  }
 
   filteredMatches = sortCatalogMatches(filteredMatches, isReplayMode);
 
