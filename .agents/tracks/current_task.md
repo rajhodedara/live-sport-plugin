@@ -15,7 +15,7 @@
 - Switches: `KAFKA_CATALOG_DB`, `KAFKA_EVENT_SEARCH_ENABLED`, `KAFKA_LIVENESS_GUARD_ENABLED`; deployment order in the handoff, section 5.2.
 
 ### Verification
-- Kafka and Trex suites: 121/121 green across 13 files.
+- Kafka and Trex suites: 197/197 green across 21 suites (including the broadcaster and aggregator neighbours).
 - Neighbouring suites: 61/61 (broadcaster, matchAggregator variants).
 - `node --check` clean on every new or modified source file.
 
