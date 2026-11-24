@@ -3,6 +3,7 @@ const ChannelCountryService = require('./services/ChannelCountryService');
 const ChannelIdentityService = require('./services/ChannelIdentityService');
 const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutError } = require('./services/retry');
 const { mapWithConcurrency } = require('./services/BoundedMap');
+const { probeBitrate } = require('./services/StreamBitrateProbe');
 const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
   inconclusiveStreamsReason } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
@@ -816,6 +817,18 @@ async function runVerificationAttempt(targetUrl, headers, deadlineAt, options) {
   }
 }
 
+// Verified bodies arrive through the manifest proxy, so a relative segment URI
+// in the playlist resolves against the upstream URL, not against our /api route.
+function upstreamPlaylistUrl(targetUrl) {
+  if (typeof targetUrl !== 'string') return targetUrl;
+  try {
+    const inner = new URL(targetUrl, 'http://localhost').searchParams.get('url');
+    return inner || targetUrl;
+  } catch (_) {
+    return targetUrl;
+  }
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
   // No new probe starts after the shared budget is spent; those streams are kept
   // unverified (same policy as a 403 with no referer) instead of being dropped.
@@ -1046,6 +1059,19 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
 
         if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe && !bodyTruncated) {
           await measureStreamSpeed(s, targetUrl, bodySample, referer, origin, m3u8Parser, verifyDeadlineAt);
+        }
+
+        // Single-variant playlist (Kafka/Trex): nothing above could name a tier,
+        // so read the first segment's length once and turn it into a real
+        // bitrate. Cheap because the body is cancelled on the headers.
+        if (s.measureBitrate && !s.bitrate && !bodyTruncated && !isMpd && !isMp4) {
+          const measured = await probeBitrate({
+            playlistText: bodySample,
+            playlistUrl: upstreamPlaylistUrl(targetUrl),
+            timeoutMs: Math.max(300, Math.min(2500, verifyDeadlineAt - Date.now()))
+          });
+          if (measured.bitrate) s.bitrate = measured.bitrate;
+          if (measured.resolution && (!s.resolution || s.resolution === 'HD')) s.resolution = measured.resolution;
         }
       }
 

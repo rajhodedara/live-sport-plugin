@@ -5,6 +5,7 @@ const ChannelIdentityService = require('../services/ChannelIdentityService');
 const ChannelCountryService = require('../services/ChannelCountryService');
 const StreamEntity = require('../domain/StreamEntity');
 const { isBlockedStream } = require('../services/StreamPolicy');
+const { resolutionFromTag } = require('../services/StreamBitrateProbe');
 const { getRequestBaseUrl } = require('../config');
 
 const GENERIC_CATALOG_ID = 'flix-live-tv-v2-trex';
@@ -570,18 +571,27 @@ class KafkaProvider extends BaseProvider {
           streamUrl = proxyUrl;
         }
 
+        // The upstream's `name` is a player label ("▶ Watch Live"), not a
+        // quality, and its single-variant playlist declares no RESOLUTION or
+        // BANDWIDTH. Only the tier packed into its title is trustworthy here
+        // ("US| NBA TV HD · UHD"); everything else is measured from the first
+        // segment during verification.
+        const declaredResolution = resolutionFromTag(s.title) || resolutionFromTag(channelLabel);
         const entity = new StreamEntity({
           name: 'Kafka',
           title,
           url: streamUrl,
           behaviorHints: s.behaviorHints,
-          resolution: s.resolution,
-          quality: s.quality || s.name,
+          // 'HD' is the app-wide stand-in for an unknown tier; the measurement
+          // replaces it with a real one when the segment answers.
+          resolution: declaredResolution || 'HD',
           channelName: channelLabel,
           sourceName: this.sourceName,
           country: src && src.country,
           language: (src && src.language) || s.language
         });
+        // Verified streams that opt in get one cheap header read for a bitrate.
+        entity.measureBitrate = true;
 
         streams.push(entity);
       }
