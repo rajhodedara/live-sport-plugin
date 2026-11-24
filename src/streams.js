@@ -17,28 +17,6 @@ const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream, isBlockedStream, isFrozenMediaPlaylist } = require('./services/StreamPolicy');
 const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
 
-let _liveOverlayRef;
-/**
- * Resolve the live overlay once per process.
- *
- * Guarded rather than required: streams.js is loaded by unit tests with a
- * partial container, and a missing registration must degrade to "no overlay"
- * instead of throwing while resolving somebody's stream.
- */
-function _liveOverlay() {
-  if (_liveOverlayRef !== undefined) return _liveOverlayRef;
-  try {
-    if (typeof container.hasRegistration === 'function' && !container.hasRegistration('liveOverlayService')) {
-      _liveOverlayRef = null;
-      return null;
-    }
-    _liveOverlayRef = container.resolve('liveOverlayService') || null;
-  } catch (_) {
-    _liveOverlayRef = null;
-  }
-  return _liveOverlayRef;
-}
-
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
   return ChannelCountryService.detectChannelCountry(channelName);
@@ -1412,15 +1390,7 @@ async function handleStream(type, id, config) {
   if (!matchId) return { streams: [] };
   const match = cacheService.findMatch(matchId);
 
-  // Live overlay (see LiveOverlayService): an ephemeral provider publishes
-  // sources outside the catalog snapshot. Merge BEFORE the empty-sources guard,
-  // or the exact case this exists for - a card whose catalog sources do not
-  // contain the live source yet - would return no streams at all.
-  const overlay = _liveOverlay();
-  const baseSources = (match && Array.isArray(match.sources)) ? match.sources : [];
-  const effectiveSources = (overlay && match && match.id)
-    ? overlay.mergeSources(match.id, baseSources, match.aliasIds)
-    : baseSources;
+  const effectiveSources = (match && Array.isArray(match.sources)) ? match.sources : [];
 
   if (!match || effectiveSources.length === 0) {
     return { streams: [] };

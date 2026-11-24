@@ -264,14 +264,3 @@ test('LRU eviction during publication does not displace the newer unrelated entr
   expect(cache.entries.has(otherKey)).toBe(true);
   expect(cache.entries.has(key)).toBe(false);
 });
-
-test('a Leaf overlay change fences a publication even after its local entry expired', async () => {
-  slowPublicationCache();
-  const leafKey = 'leaf:partial:old-feed';
-  const cron = new CronService({ streamResolveCache: cache });
-  setTimeout(() => { expect(cache.get(leafKey)).toBeNull(); cron._invalidateOverlayMatch(match.id); }, 2000);
-  const pending = cache.getOrCreate(leafKey, async () => markInconclusiveStreams([web()], 'capacity'));
-  await jest.advanceTimersByTimeAsync(2000);
-  expect(await pending).toEqual([]);
-  expect(cache.entries.has(leafKey)).toBe(false);
-});
