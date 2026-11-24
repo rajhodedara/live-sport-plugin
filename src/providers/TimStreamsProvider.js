@@ -35,6 +35,10 @@ class TimStreamsProvider extends BaseProvider {
     });
   }
 
+  isEnabled() {
+    return process.env.TIMSTREAMS_ENABLED === 'true';
+  }
+
   async getMatches() {
     const matches = [];
     try {

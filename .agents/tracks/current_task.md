@@ -29,6 +29,28 @@
 **Date**: 2026-11-23
 **Status**: Completed
 
+## 2026-11-24 update: Kafka/Trex coverage expansion (in progress, not implemented)
+
+- Full context handoff: `docs/evidence-kafka-trex/HANDOFF_KAFKA_TREX_2026-11-24.md` (gitignored on purpose, it holds host details). Read it first.
+- Verified: the upstream has 3 catalogs; NBA/NFL/NHL/MLB coverage lives in the generic `flix-live-tv-v2-trex` catalog as team channels, per-game event channels and RSNs, not in the two dedicated sports catalogs.
+- Catalog health audit tool exists as new files only (`scripts/run_stratified_health_audit.js` + three `src/services/Health*.js` modules, 28 tests). Measured: 85.7% +/- 2.9% of channels answer, but 39% of those are frozen `MEDIA-SEQUENCE:0` slates, so a liveness guard is mandatory before widening Kafka coverage.
+- Agreed design: small pre-normalized index (team + sports channels, ~1 MB, +2.5 MB per worker, refreshed daily by a standalone job) plus live `search=` for event channels near kickoff. Memory measured on the VPS: a sync already costs +119 MB per worker; the index is 2% of that.
+- 2026-11-24: owner chose the SQLite design (all 54k rows on disk, daily refresh, click-path event search, frozen rule in `verifyStreams`) and set the priority: event channel first (it carries the 4K/FHD feeds), then team channel, then broadcaster label. Design approved: `docs/superpowers/specs/2026-11-24-kafka-trex-catalog-coverage-design.md`. Implementation plan written (9 tasks): `docs/superpowers/plans/2026-11-24-kafka-trex-catalog-coverage.md`; execution method not yet chosen; no code written.
+
+## 2026-11-24 update: Unregistered TimStreams and PitSport providers (PNG steganography breakage)
+
+- Upstream embeds on `embdlol.st` / `vixnuvew` moved to canvas pixel PNG steganography, breaking direct HLS extraction for TimStreams and PitSport.
+- Deactivated both providers from active catalog sync and carry-forward:
+  - Added `isEnabled()` method to `TimStreamsProvider` (`TIMSTREAMS_ENABLED === 'true'`) and `PitSportProvider` (`PITSPORT_ENABLED === 'true'`), defaulting to `false`.
+  - Gated their inclusion in `src/services/MatchAggregator.js` so they are not included in `this.providers` by default, preventing catalog scraping and duplicate/ghost card creation.
+  - Dynamically gated `CARRY_FORWARD_PROVIDERS` in `MatchAggregator.js` so `pitsport` is only carried forward if active in `this.providers`.
+  - Updated `tests/pitSportProvider.test.js` and `tests/timStreamsProvider.test.js` to assert default deactivation in `MatchAggregator.providers` and successful registration when explicitly enabled.
+- Verification:
+  - `npm test -- tests/pitSportCatalogCarryForward.test.js tests/pitSportTransientRecovery.test.js tests/timFeedIsolation.test.js tests/timStreamsChannels.test.js tests/timStreamsStreamDetails.test.js tests/timStreamsTransientRecovery.test.js tests/streamHardDeadline.test.js tests/streamPartialRecovery.test.js tests/streamPriorityQuorum.test.js tests/streamResolutionAndMetadataRecovery.test.js tests/timStreamsProvider.test.js tests/pitSportProvider.test.js` — 36 suites, 429/429 tests passing.
+  - `node --check` passed for all modified source and test files.
+  - `git diff --check` clean.
+  - `npm run build --ignore-scripts` verified into `dist.next/` and syntax checked with `node --check dist.next/index.js`.
+
 ### What Was Completed
 - Reviewed the Kafka implementation against repository standards and `docs/superpowers/plans/2026-11-23-kafka-live-sports-provider.md`.
 - Kept the enrichment-only architecture: `src/providers/KafkaProvider.js` returns no standalone matches and resolves `/stream/tv/{metaId}.json` through guarded egress.
