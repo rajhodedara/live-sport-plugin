@@ -219,6 +219,36 @@
     .bar-hint[hidden] { display: none; }
     .bar-hint button { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; text-align: left; }
     .actionbar { flex-wrap: wrap; }
+
+    /* Live Leagues Picker */
+    .live-leagues-disclosure { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+    .live-leagues-disclosure > summary { cursor: pointer; font-size: 15px; font-weight: 600; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 0; min-height: 44px; }
+    .live-leagues-disclosure > summary::-webkit-details-marker { display: none; }
+    .live-leagues-disclosure > summary::after { content: ""; width: 8px; height: 8px; border-right: 1.8px solid currentColor; border-bottom: 1.8px solid currentColor; transform: rotate(45deg); flex: none; margin-top: -3px; }
+    .live-leagues-disclosure[open] > summary::after { transform: rotate(225deg); margin-top: 3px; }
+    .live-leagues-disclosure > summary:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; border-radius: 4px; }
+    .live-leagues-content { padding-top: 12px; }
+    .live-leagues-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .live-leagues-toolbar .search-field { flex: 1; min-width: 200px; margin-bottom: 0; }
+    .live-leagues-toolbar .panel-tools { margin-left: auto; display: flex; gap: 8px; }
+    .live-league-groups { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; }
+    .league-group-title { font-family: var(--font-display, 'Outfit', sans-serif); font-size: 15px; font-weight: 700; color: var(--text-muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: 0.05em; text-align: left; }
+    .league-other-row { margin: 16px 0; }
+    .other-chip { max-width: 260px; }
+    .custom-league-field { margin-top: 16px; }
+    .custom-input-group { display: flex; gap: 8px; margin-top: 6px; }
+    .custom-input-group input { flex: 1; }
+    .field-feedback { font-size: 13px; color: var(--accent); margin-top: 6px; min-height: 18px; }
+    .field-feedback[hidden] { display: none; }
+    .custom-league-chips { margin-top: 8px; }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); border: 0; }
+    .summary-warning { color: var(--accent); grid-column: 1 / -1; margin-top: 6px; font-weight: 600; list-style: none; }
+    @media (max-width: 480px) {
+      .live-leagues-toolbar { flex-direction: column; align-items: stretch; }
+      .live-leagues-toolbar .panel-tools { justify-content: flex-start; }
+      .live-league-groups .chip-grid { grid-template-columns: 1fr; }
+      .other-chip { max-width: 100%; }
+    }
   </style>
 </head>
 
@@ -300,6 +330,44 @@
             <label class="checkbox-label active"><input type="checkbox" value="darts" checked> Darts</label>
             <label class="checkbox-label active"><input type="checkbox" value="other" checked> Other Sports</label>
         </div>
+
+        <details class="crypto-details live-leagues-disclosure" id="liveLeaguesDisclosure">
+          <summary id="liveLeaguesSummaryHead">
+            <span class="disclosure-title">Live leagues</span>
+            <span class="count" id="liveLeaguesCount" aria-live="polite">All</span>
+          </summary>
+          <div class="live-leagues-content">
+            <div class="live-leagues-toolbar">
+              <div class="field search-field">
+                <label for="liveLeagueSearch">Find a league</label>
+                <input type="text" id="liveLeagueSearch" placeholder="Find a league" autocomplete="off" spellcheck="false">
+              </div>
+              <div class="panel-tools">
+                <button type="button" class="btn-sm" id="liveLeaguesAll">Select all</button>
+                <button type="button" class="btn-sm" id="liveLeaguesClear">Clear</button>
+              </div>
+            </div>
+
+            <div id="liveLeagueGroupsContainer" class="live-league-groups"></div>
+
+            <div class="league-other-row">
+              <label class="checkbox-label active other-chip">
+                <input type="checkbox" id="liveLeagueOther" checked> Other competitions
+              </label>
+            </div>
+
+            <div class="field custom-league-field">
+              <label for="customLeagueInput">Add a custom league</label>
+              <div class="custom-input-group">
+                <input type="text" id="customLeagueInput" placeholder="e.g. Copa do Brasil" maxlength="60" autocomplete="off" spellcheck="false">
+                <button type="button" class="btn-sm" id="addCustomLeagueBtn">Add</button>
+              </div>
+              <p class="field-feedback" id="customLeagueFeedback" aria-live="polite" hidden></p>
+              <ul class="team-chips custom-league-chips" id="customLeagueChips" aria-label="Custom leagues"></ul>
+            </div>
+            <div id="liveLeagueLiveRegion" class="visually-hidden" aria-live="polite"></div>
+          </div>
+        </details>
       </section>
 
       <!-- 2 · Teams and timezone -->
@@ -652,6 +720,7 @@
     <button type="button" class="btn btn-ghost" id="barCopy">Copy link</button>
   </div>
 
+  <script src="/live-league-options.js"></script>
   <script src="/provider-icons.js"></script>
   <script src="/nav-toggle.js"></script>
   <script>
@@ -699,6 +768,262 @@
       }
     } catch (e) {
       console.warn("Could not parse existing config from URL", e);
+    }
+
+    // Live leagues picker state and DOM references
+    let customLeagues = [];
+    const liveLeaguesCount = document.getElementById('liveLeaguesCount');
+    const liveLeagueSearch = document.getElementById('liveLeagueSearch');
+    const liveLeaguesAllBtn = document.getElementById('liveLeaguesAll');
+    const liveLeaguesClearBtn = document.getElementById('liveLeaguesClear');
+    const liveLeagueOther = document.getElementById('liveLeagueOther');
+    const customLeagueInput = document.getElementById('customLeagueInput');
+    const addCustomLeagueBtn = document.getElementById('addCustomLeagueBtn');
+    const customLeagueChips = document.getElementById('customLeagueChips');
+    const customLeagueFeedback = document.getElementById('customLeagueFeedback');
+    const liveLeagueLiveRegion = document.getElementById('liveLeagueLiveRegion');
+
+    function announceLiveLeague(msg) {
+      if (liveLeagueLiveRegion) liveLeagueLiveRegion.textContent = msg;
+    }
+
+    function showCustomLeagueFeedback(msg) {
+      if (!customLeagueFeedback) return;
+      if (!msg) {
+        customLeagueFeedback.textContent = '';
+        customLeagueFeedback.hidden = true;
+      } else {
+        customLeagueFeedback.textContent = msg;
+        customLeagueFeedback.hidden = false;
+        announceLiveLeague(msg);
+      }
+    }
+
+    function renderCustomLeagueChips() {
+      if (!customLeagueChips) return;
+      customLeagueChips.textContent = '';
+      customLeagues.forEach((name, i) => {
+        const li = document.createElement('li');
+        li.appendChild(document.createTextNode(name));
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Remove ' + name);
+        x.textContent = '\u00d7';
+        x.addEventListener('click', () => {
+          customLeagues.splice(i, 1);
+          renderCustomLeagueChips();
+          announceLiveLeague('Removed ' + name);
+          updateLink();
+        });
+        li.appendChild(x);
+        customLeagueChips.appendChild(li);
+      });
+    }
+
+    function buildLiveLeagueGroups() {
+      const grpContainer = document.getElementById('liveLeagueGroupsContainer');
+      if (!grpContainer || !window.LIVE_LEAGUE_GROUPS) return;
+      grpContainer.textContent = '';
+
+      for (const group of window.LIVE_LEAGUE_GROUPS) {
+        const grpDiv = document.createElement('div');
+        grpDiv.className = 'league-group';
+        grpDiv.setAttribute('data-group', group.label);
+
+        const h3 = document.createElement('h3');
+        h3.className = 'league-group-title';
+        h3.textContent = group.label;
+        grpDiv.appendChild(h3);
+
+        const grid = document.createElement('div');
+        grid.className = 'chip-grid';
+
+        for (const opt of group.options) {
+          const labelEl = document.createElement('label');
+          labelEl.className = 'checkbox-label active league-chip-item';
+          const normLabel = window.normalizeLeagueName ? window.normalizeLeagueName(opt.label) : opt.label.toLowerCase();
+          labelEl.setAttribute('data-label', normLabel);
+          const aliasNorms = (opt.aliases || []).map(a => window.normalizeLeagueName ? window.normalizeLeagueName(a) : a.toLowerCase()).join(' ');
+          labelEl.setAttribute('data-aliases', aliasNorms);
+
+          const cb = document.createElement('input');
+          cb.type = 'checkbox';
+          cb.value = opt.id;
+          cb.checked = true;
+          cb.setAttribute('data-category', (opt.categories && opt.categories[0]) || '');
+
+          cb.addEventListener('change', (e) => {
+            const parent = e.target.closest('.checkbox-label');
+            if (parent) {
+              if (e.target.checked) parent.classList.add('active');
+              else parent.classList.remove('active');
+            }
+            announceLiveLeague((e.target.checked ? 'Selected ' : 'Unselected ') + opt.label);
+            updateLink();
+          });
+
+          labelEl.appendChild(cb);
+          labelEl.appendChild(document.createTextNode(' ' + opt.label));
+          grid.appendChild(labelEl);
+        }
+
+        grpDiv.appendChild(grid);
+        grpContainer.appendChild(grpDiv);
+      }
+    }
+
+    function addCustomLeague(rawName) {
+      if (!rawName || typeof rawName !== 'string') return;
+      const trimmed = rawName.trim();
+      if (!trimmed) return;
+      if (trimmed.length > 60) {
+        showCustomLeagueFeedback('Name must be 60 characters or less.');
+        return;
+      }
+      const norm = window.normalizeLeagueName ? window.normalizeLeagueName(trimmed) : trimmed.toLowerCase();
+      if (!norm) return;
+
+      // Check if it matches a curated label or alias:
+      let curatedMatch = null;
+      if (window.LIVE_LEAGUE_GROUPS) {
+        for (const group of window.LIVE_LEAGUE_GROUPS) {
+          for (const opt of group.options) {
+            const optNorm = window.normalizeLeagueName ? window.normalizeLeagueName(opt.label) : opt.label.toLowerCase();
+            if (optNorm === norm) {
+              curatedMatch = opt;
+              break;
+            }
+            for (const alias of opt.aliases || []) {
+              const aliasNorm = window.normalizeLeagueName ? window.normalizeLeagueName(alias) : alias.toLowerCase();
+              if (aliasNorm === norm) {
+                curatedMatch = opt;
+                break;
+              }
+            }
+            if (curatedMatch) break;
+          }
+          if (curatedMatch) break;
+        }
+      }
+
+      if (curatedMatch) {
+        const cb = document.querySelector('#liveLeagueGroupsContainer input[value="' + curatedMatch.id + '"]');
+        if (cb) {
+          if (!cb.checked) {
+            cb.checked = true;
+            const parent = cb.closest('.checkbox-label');
+            if (parent) parent.classList.add('active');
+            updateLink();
+          }
+          try { cb.focus(); } catch (_) {}
+        }
+        showCustomLeagueFeedback('"' + trimmed + '" is already available as curated option: ' + curatedMatch.label + '.');
+        if (customLeagueInput) customLeagueInput.value = '';
+        return;
+      }
+
+      // Deduplication by normalized name
+      if (customLeagues.some(c => (window.normalizeLeagueName ? window.normalizeLeagueName(c) : c.toLowerCase()) === norm)) {
+        showCustomLeagueFeedback('"' + trimmed + '" is already added.');
+        if (customLeagueInput) customLeagueInput.value = '';
+        return;
+      }
+
+      if (customLeagues.length >= 12) {
+        showCustomLeagueFeedback('Maximum of 12 custom leagues reached.');
+        return;
+      }
+
+      customLeagues.push(trimmed);
+      if (customLeagueInput) customLeagueInput.value = '';
+      showCustomLeagueFeedback('');
+      renderCustomLeagueChips();
+      announceLiveLeague('Added ' + trimmed);
+      updateLink();
+    }
+
+    function filterLiveLeagues(queryRaw) {
+      const q = window.normalizeLeagueName ? window.normalizeLeagueName(queryRaw) : (queryRaw || '').toLowerCase().trim();
+      let visibleCount = 0;
+      const groups = document.querySelectorAll('.league-group');
+      groups.forEach(grp => {
+        let grpVisible = 0;
+        const items = grp.querySelectorAll('.league-chip-item');
+        items.forEach(item => {
+          const label = item.getAttribute('data-label') || '';
+          const aliases = item.getAttribute('data-aliases') || '';
+          const matches = !q || label.includes(q) || aliases.includes(q);
+          item.hidden = !matches;
+          if (matches) {
+            grpVisible++;
+            visibleCount++;
+          }
+        });
+        grp.hidden = grpVisible === 0;
+      });
+      announceLiveLeague(q ? (visibleCount + ' leagues found') : 'All leagues shown');
+    }
+
+    buildLiveLeagueGroups();
+
+    if (liveLeagueSearch) {
+      liveLeagueSearch.addEventListener('input', (e) => filterLiveLeagues(e.target.value));
+    }
+    if (liveLeagueOther) {
+      liveLeagueOther.addEventListener('change', (e) => {
+        const parent = e.target.closest('.checkbox-label');
+        if (parent) {
+          if (e.target.checked) parent.classList.add('active');
+          else parent.classList.remove('active');
+        }
+        announceLiveLeague((e.target.checked ? 'Selected ' : 'Unselected ') + 'Other competitions');
+        updateLink();
+      });
+    }
+    if (liveLeaguesAllBtn) {
+      liveLeaguesAllBtn.addEventListener('click', () => {
+        const cbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
+        cbs.forEach(cb => {
+          cb.checked = true;
+          const parent = cb.closest('.checkbox-label');
+          if (parent) parent.classList.add('active');
+        });
+        if (liveLeagueOther) {
+          liveLeagueOther.checked = true;
+          const parent = liveLeagueOther.closest('.checkbox-label');
+          if (parent) parent.classList.add('active');
+        }
+        announceLiveLeague('All live leagues selected');
+        updateLink();
+      });
+    }
+    if (liveLeaguesClearBtn) {
+      liveLeaguesClearBtn.addEventListener('click', () => {
+        const cbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
+        cbs.forEach(cb => {
+          cb.checked = false;
+          const parent = cb.closest('.checkbox-label');
+          if (parent) parent.classList.remove('active');
+        });
+        if (liveLeagueOther) {
+          liveLeagueOther.checked = false;
+          const parent = liveLeagueOther.closest('.checkbox-label');
+          if (parent) parent.classList.remove('active');
+        }
+        customLeagues = [];
+        renderCustomLeagueChips();
+        announceLiveLeague('All live leagues cleared');
+        updateLink();
+      });
+    }
+    if (addCustomLeagueBtn && customLeagueInput) {
+      addCustomLeagueBtn.addEventListener('click', () => addCustomLeague(customLeagueInput.value));
+      customLeagueInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          addCustomLeague(customLeagueInput.value);
+        }
+      });
     }
 
     // Store IANA zones so each event uses its own seasonal rules. Labels avoid
@@ -829,6 +1154,34 @@
       }
     }
 
+    if (existingConfig.liveLeagues && typeof existingConfig.liveLeagues === 'object') {
+      const ll = existingConfig.liveLeagues;
+      const idsSet = new Set(Array.isArray(ll.ids) ? ll.ids : []);
+      const cbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
+      cbs.forEach(cb => {
+        const isChecked = idsSet.has(cb.value);
+        cb.checked = isChecked;
+        const parent = cb.closest('.checkbox-label');
+        if (parent) {
+          if (isChecked) parent.classList.add('active');
+          else parent.classList.remove('active');
+        }
+      });
+      if (liveLeagueOther) {
+        const otherChecked = Boolean(ll.other);
+        liveLeagueOther.checked = otherChecked;
+        const parent = liveLeagueOther.closest('.checkbox-label');
+        if (parent) {
+          if (otherChecked) parent.classList.add('active');
+          else parent.classList.remove('active');
+        }
+      }
+      if (Array.isArray(ll.custom)) {
+        customLeagues = ll.custom.slice(0, 12);
+        renderCustomLeagueChips();
+      }
+    }
+
     // Provider icon tiles on the source chips (sport glyph or monogram, nothing fetched).
     if (window.ProviderIcon) {
       document.querySelectorAll('#liveSourcesGrid .checkbox-label, #replaySourcesGrid .checkbox-label').forEach(l => {
@@ -842,7 +1195,7 @@
     let effectiveOrigin = window.location.origin;
 
     // Renders the live summary chips from the current selections.
-    function renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams) {
+    function renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams, liveLeaguesSummary) {
       if (!configSummary) return;
       // Values come straight from user input, so escape before interpolating
       // into innerHTML.
@@ -851,6 +1204,7 @@
       const isReplayDisabled = replayFilter === 'disabled';
       const items = [
         { k: 'Sports', v: selectedSports.length === checkboxes.length ? 'All' : String(selectedSports.length) },
+        { k: 'Live Leagues', v: liveLeaguesSummary || 'All' },
         { k: 'Live Sources', v: selectedLive.length === liveSourceCheckboxes.length ? 'All' : String(selectedLive.length) },
         ...(isReplayDisabled ? [] : [{ k: 'Replay Sources', v: selectedReplay.length === replaySourceCheckboxes.length ? 'All' : String(selectedReplay.length) }]),
         { k: 'Timezone', v: tz || 'n/a' },
@@ -858,9 +1212,13 @@
         { k: 'Replays', v: isReplayDisabled ? 'Hidden' : (replayFilter === 'mainstream' ? 'Mainstream' : 'All') },
         { k: 'Web Streams', v: webStreams === 'disabled' ? 'Hidden' : 'Included' }
       ];
+      let warningHtml = '';
+      if (liveLeaguesSummary === 'None') {
+        warningHtml = '<li class="summary-warning">⚠️ No live fixtures will appear. Select a league to show live fixtures.</li>';
+      }
       configSummary.innerHTML = items
         .map(i => '<li><span>' + esc(i.k) + '</span> <b>' + esc(i.v) + '</b></li>')
-        .join('');
+        .join('') + warningHtml;
     }
 
     function updateLink() {
@@ -893,6 +1251,30 @@
       if (replayFilter && replayFilter !== 'all') config.replayFilter = replayFilter;
       if (webStreams === 'disabled') config.webStreams = 'disabled';
 
+      // Live leagues calculation
+      const curatedLeagueCbs = document.querySelectorAll('#liveLeagueGroupsContainer input[type="checkbox"]');
+      const selectedCuratedIds = Array.from(curatedLeagueCbs).filter(cb => cb.checked).map(cb => cb.value);
+      const isOtherChecked = liveLeagueOther ? liveLeagueOther.checked : true;
+      const isLiveLeaguesDefault = (curatedLeagueCbs.length > 0 && selectedCuratedIds.length === curatedLeagueCbs.length) && isOtherChecked && (customLeagues.length === 0);
+
+      if (!isLiveLeaguesDefault) {
+        config.liveLeagues = {
+          ids: selectedCuratedIds,
+          custom: customLeagues.slice(),
+          other: isOtherChecked
+        };
+      }
+
+      let liveLeaguesSummary = 'All';
+      if (isLiveLeaguesDefault) {
+        liveLeaguesSummary = 'All';
+      } else if (selectedCuratedIds.length === 0 && !isOtherChecked && customLeagues.length === 0) {
+        liveLeaguesSummary = 'None';
+      } else {
+        const total = selectedCuratedIds.length + (isOtherChecked ? 1 : 0) + customLeagues.length;
+        liveLeaguesSummary = total + ' selected';
+      }
+      if (liveLeaguesCount) liveLeaguesCount.textContent = liveLeaguesSummary;
 
       if (selectedSports.length < checkboxes.length) {
         config.sports = selectedSports.join(',');
@@ -913,8 +1295,19 @@
         const base64Str = btoa(unescape(encodeURIComponent(JSON.stringify(config))));
         const encoded = base64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
         manifestUrl = window.location.origin + '/' + encoded + '/manifest.json';
-        collectionsUrl = window.location.origin + '/' + encoded + '/collections.json';
-        downloadUrl = window.location.origin + '/' + encoded + '/api/collections/download';
+      }
+
+      // Collections links carry replay settings and languages, but omit liveLeagues
+      const colConfig = { ...config };
+      delete colConfig.liveLeagues;
+      if (Object.keys(colConfig).length > 0) {
+        const colBase64Str = btoa(unescape(encodeURIComponent(JSON.stringify(colConfig))));
+        const colEncoded = colBase64Str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        collectionsUrl = window.location.origin + '/' + colEncoded + '/collections.json';
+        downloadUrl = window.location.origin + '/' + colEncoded + '/api/collections/download';
+      } else {
+        collectionsUrl = effectiveOrigin + '/collections.json';
+        downloadUrl = effectiveOrigin + '/api/collections/download';
       }
 
       // Pin the replay scope (and languages) onto the Collections import URL as
@@ -940,7 +1333,7 @@
       if (manualUrl) manualUrl.value = manifestUrl;
       if (collectionsUrlInput) collectionsUrlInput.value = collectionsUrl;
 
-      renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams);
+      renderSummary(selectedSports, selectedLive, selectedReplay, tz, languages, replayFilter, webStreams, liveLeaguesSummary);
       renderProgress(selectedSports, selectedLive, selectedReplay, teams, tz, replayFilter);
       applyValidity();
       const finishSummary = document.getElementById('finishSummary');

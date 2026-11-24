@@ -94,3 +94,31 @@ describe('existing controls remain wired', () => {
     expect(script).toMatch(/timezoneSelect\.addEventListener\(\s*'change'\s*,\s*updateLink\s*\)/);
   });
 });
+
+describe('live league filter picker markup and script wiring', () => {
+  test('loads /live-league-options.js before the configure inline script', () => {
+    const optionsScriptIdx = html.indexOf('src="/live-league-options.js"');
+    const inlineScriptIdx = html.search(/<script>[\s\S]*?<\/script>/);
+    expect(optionsScriptIdx).toBeGreaterThan(-1);
+    expect(optionsScriptIdx).toBeLessThan(inlineScriptIdx);
+  });
+
+  test('picker lives inside #sec-sports', () => {
+    const sportsSection = html.slice(html.indexOf('id="sec-sports"'), html.indexOf('id="sec-teams"'));
+    expect(sportsSection).toMatch(/id="liveLeaguesDisclosure"/);
+    expect(sportsSection).toMatch(/id="liveLeagueSearch"/);
+    expect(sportsSection).toMatch(/id="customLeagueInput"/);
+    expect(sportsSection).toMatch(/id="liveLeaguesCount"/);
+  });
+
+  test('labels its search, custom input, and count', () => {
+    expect(html).toMatch(/<label[^>]*for="liveLeagueSearch"/);
+    expect(html).toMatch(/<label[^>]*for="customLeagueInput"/);
+    expect(html).toMatch(/id="liveLeaguesCount"[^>]*aria-live="polite"/);
+  });
+
+  test('script wires liveLeagues to updateLink and restores existingConfig.liveLeagues', () => {
+    expect(script).toMatch(/existingConfig\.liveLeagues/);
+    expect(script).toMatch(/config\.liveLeagues\s*=/);
+  });
+});
