@@ -62,8 +62,8 @@ describe('KafkaProvider coverage sources', () => {
       expect(source.source).toBe('kafka');
       expect(source.catalogId).toBe('flix-live-tv-v2-trex');
     }
-    expect(sources[2].channelName).toBe('NBA TEAM| CHICAGO BULLS');
-    expect(sources[1].channelName).toBe('US| CHICAGO SPORTS NETWORK');
+    expect(sources[2].channelName).toBe('CHICAGO BULLS');
+    expect(sources[1].channelName).toBe('CHICAGO SPORTS NETWORK');
   });
 
   test('passes the source country as label context', () => {

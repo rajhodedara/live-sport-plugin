@@ -408,13 +408,20 @@ class KafkaProvider extends BaseProvider {
     const add = (candidate, matchMode) => {
       if (!candidate || !candidate.id || seen.has(candidate.id) || out.length >= cap) return;
       seen.add(candidate.id);
+      const rawName = String(candidate.name || candidate.channelName || '');
+      // The catalog prefixes a routing group (`US| NBA TV HD`, `NBA TEAM| CHICAGO
+      // BULLS`). It is not part of the name a viewer should read, so the label
+      // starts after it; the group still supplies the country when it is a code.
+      const bar = rawName.indexOf('|');
+      const channelName = (bar === -1 ? rawName : rawName.slice(bar + 1)).trim();
+      const groupInfo = candidate.country ? null : ChannelCountryService.getCountryInfo(candidate.group);
       out.push({
         source: 'kafka',
         id: candidate.id,
-        channelName: candidate.name || candidate.channelName || '',
+        channelName,
         catalogId: GENERIC_CATALOG_ID,
         matchMode,
-        ...(candidate.country ? { country: candidate.country } : {}),
+        ...(candidate.country ? { country: candidate.country } : groupInfo ? { country: groupInfo.country } : {}),
         ...(candidate.language ? { language: candidate.language } : {})
       });
     };
