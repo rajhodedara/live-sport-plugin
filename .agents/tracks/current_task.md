@@ -1,8 +1,16 @@
 # Session Checkpoint: Trex Catalog Coverage for Kafka
 **Date**: 2026-11-24
-**Status**: Implemented on branch `kafka-trex-coverage`, not deployed
+**Status**: MERGED to `stable` and LIVE in production since 2026-11-24 05:51Z (`f434b1d`)
 **Plan**: `docs/superpowers/plans/2026-11-24-kafka-trex-catalog-coverage.md` (9 tasks, all done)
 **Spec**: `docs/superpowers/specs/2026-11-24-kafka-trex-catalog-coverage-design.md`
+### Production rollout (2026-11-24)
+- Deployed `4167c03` then `c74b081` then `f434b1d` with `scripts/deploy.sh --no-pull`; health OK each time.
+- Catalog built on the box: `data/trex_catalog.sqlite`, 54,611 channels (237 team, 6,852 linear, 3,035 event), 8.1 MB, 138 s.
+- `.env`: added `KAFKA_CATALOG_DB=/root/nuvio-live-sports/data/trex_catalog.sqlite`, removed the dead `KAFKA_INJECTION_CAP`; backup written beside it.
+- Cron installed: `0 */6 * * * ` with `flock -n /tmp/trex-refresh.lock` and `--disable-warning=ExperimentalWarning`. Verified live: 143 s, exit 0, database replaced in place, no pm2 reload needed.
+- Live result: 217 fixtures carry 402 Kafka sources (7 event, 126 team, 268 label, then 127 team after the last sync), and the rendered label shows measured quality, e.g. `1080p · 4.2 Mbps` and `2160p · 6.2 Mbps`.
+- Two defects found by deploying and fixed: `prepare-build.js` wiped `data/matches_cache.json` on every build (now held and restored by `deploy.sh`), and the refresh job could not see `.env` from cron (now loads it itself).
+
 
 ### What changed
 - `src/services/TrexCatalogKeys.js`: name normalization, team/channel keys, channel classification, quality and group scoring.
