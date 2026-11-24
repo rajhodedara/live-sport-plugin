@@ -140,44 +140,36 @@ describe('KafkaAggregator - Task 3: Scheduled Fixture Enrichment', () => {
     expect(replayRow.sources.some((s) => s.source === 'kafka')).toBe(false);
   });
 
-  test('respects KAFKA_INJECTION_CAP on number of Kafka sources attached per fixture', async () => {
-    const originalCap = process.env.KAFKA_INJECTION_CAP;
-    process.env.KAFKA_INJECTION_CAP = '1';
+  test('attaches every Kafka source a multi-broadcaster fixture matches', async () => {
+    const mockProvider = {
+      name: 'DummyLive',
+      sourceName: 'daddylive',
+      getMatches: jest.fn().mockResolvedValue([
+        new MatchEntity({
+          id: 'multi-broadcaster-1',
+          title: 'Big Match',
+          category: 'football',
+          date: String(Date.UTC(2100, 0, 1)),
+          sources: [
+            { source: 'daddylive', id: '1', channelName: 'Sky Sports Cricket' },
+            { source: 'daddylive', id: '2', channelName: 'TNT Sports 1' }
+          ]
+        })
+      ])
+    };
 
-    try {
-      const mockProvider = {
-        name: 'DummyLive',
-        sourceName: 'daddylive',
-        getMatches: jest.fn().mockResolvedValue([
-          new MatchEntity({
-            id: 'multi-broadcaster-1',
-            title: 'Big Match',
-            category: 'football',
-            date: String(Date.UTC(2100, 0, 1)),
-            sources: [
-              { source: 'daddylive', id: '1', channelName: 'Sky Sports Cricket' },
-              { source: 'daddylive', id: '2', channelName: 'TNT Sports 1' }
-            ]
-          })
-        ])
-      };
+    const aggregator = new MatchAggregator({
+      daddyLiveProvider: mockProvider,
+      kafkaProvider: mockKafkaProvider,
+      cacheService: mockCacheService
+    });
 
-      const aggregator = new MatchAggregator({
-        daddyLiveProvider: mockProvider,
-        kafkaProvider: mockKafkaProvider,
-        cacheService: mockCacheService
-      });
-
-      const results = await aggregator.syncMatches();
-      const match = results[0];
-      const kafkaSources = match.sources.filter((s) => s.source === 'kafka');
-      expect(kafkaSources).toHaveLength(1);
-    } finally {
-      if (originalCap === undefined) delete process.env.KAFKA_INJECTION_CAP;
-      else process.env.KAFKA_INJECTION_CAP = originalCap;
-    }
+    const results = await aggregator.syncMatches();
+    const match = results[0];
+    const kafkaSources = match.sources.filter((s) => s.source === 'kafka');
+    expect(kafkaSources).toHaveLength(2);
+    expect(kafkaSources.map((s) => s.channelName)).toEqual(['Sky Sports Cricket', 'TNT Sports 1']);
   });
-
   test('handles Kafka refresh failure gracefully without aborting sync or corrupting fixtures', async () => {
     mockKafkaProvider.refreshIndex = jest.fn().mockRejectedValue(new Error('Network timeout'));
 

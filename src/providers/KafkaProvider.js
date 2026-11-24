@@ -17,9 +17,6 @@ const DEFAULT_MAX_ITEMS = 1000;
 const DEFAULT_MAX_CATALOGS = 50;
 const DEFAULT_INDEX_TTL_MS = 900000; // 15 minutes
 
-/** Sources injected per fixture when KAFKA_INJECTION_CAP is unset: event, team, label. */
-const DEFAULT_INJECTION_CAP = 3;
-
 const SPORTS_CATALOG_PATTERN = /\b(?:sport|sports|event|events|ppv|football|soccer|cricket|basketball|baseball|american football|nfl|nba|nhl|hockey|tennis|motorsport|motor racing|formula 1|f1|mma|ufc|boxing|wrestling|rugby|golf|volleyball|handball|cycling|athletics|darts|snooker|aussie rules|gaelic football|hurling|netball|badminton|table tennis|swimming|diving|gymnastics|skiing|biathlon|skating|futsal|beach soccer|water polo|lacrosse|field hockey|horse racing|triathlon|esports|chess|espn|dazn|flosports|flo sports|bein|tsn)\b/i;
 
 function safeErrorKind(error) {
@@ -376,11 +373,6 @@ class KafkaProvider extends BaseProvider {
     return process.env.KAFKA_EVENT_SEARCH_ENABLED !== 'false';
   }
 
-  _injectionCap() {
-    const raw = Number(process.env.KAFKA_INJECTION_CAP);
-    return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : DEFAULT_INJECTION_CAP;
-  }
-
   /** Team names of a fixture, from objects with a name or from plain strings. */
   teamNamesOf(match) {
     if (!match) return [];
@@ -396,18 +388,16 @@ class KafkaProvider extends BaseProvider {
    * Builds the Kafka sources a fixture deserves, best first: the live event
    * feed (only inside the live window), then the broadcaster of the match
    * (the source labels), then the club channels as the last fallback. Ids are
-   * deduped, so an id reached twice keeps its earlier, stronger mode, and
-   * KAFKA_INJECTION_CAP bounds the result (default 3).
+   * deduped, so an id reached twice keeps its earlier, stronger mode. There is
+   * no fixed cap: an id that matches twice is listed once, and a broadcaster
+   * label that matches nothing adds nothing.
    */
   createSourcesForFixture(match, { now = Date.now() } = {}) {
     if (!match || !this.isCoverageReady()) return [];
-    const cap = this._injectionCap();
-    if (cap <= 0) return [];
-
     const out = [];
     const seen = new Set();
     const add = (candidate, matchMode) => {
-      if (!candidate || !candidate.id || seen.has(candidate.id) || out.length >= cap) return;
+      if (!candidate || !candidate.id || seen.has(candidate.id)) return;
       seen.add(candidate.id);
       const rawName = String(candidate.name || candidate.channelName || '');
       // The catalog prefixes a routing group (`US| NBA TV HD`, `NBA TEAM| CHICAGO
@@ -446,12 +436,10 @@ class KafkaProvider extends BaseProvider {
       // One source per label: the store's ranking already put the fixture's own
       // market first, and a second candidate is usually a foreign feed.
       for (const hit of (this.catalogStore.findChannel(label, context) || []).slice(0, 1)) add(hit, 'label');
-      if (out.length >= cap) break;
     }
 
     for (const name of this.teamNamesOf(match)) {
       for (const hit of this.catalogStore.findTeam(name) || []) add(hit, 'team');
-      if (out.length >= cap) break;
     }
 
     return out;

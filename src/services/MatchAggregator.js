@@ -761,7 +761,6 @@ class MatchAggregator {
     const coverageReady = Boolean(
       typeof this.kafkaProvider.isCoverageReady === 'function' && this.kafkaProvider.isCoverageReady()
     );
-    const injectionCap = Number(process.env.KAFKA_INJECTION_CAP) || 4;
     const now = Date.now();
     const liveWindowMs = 14 * 3600 * 1000;
     const byMode = { event: 0, team: 0, label: 0 };
@@ -810,7 +809,6 @@ class MatchAggregator {
       if (coverageReady) {
         const coverageSources = this.kafkaProvider.createSourcesForFixture(match, { now }) || [];
         for (const source of coverageSources) {
-          if (injectedForMatch >= injectionCap) break;
           if (!source || !source.id || existingKafkaIds.has(source.id)) continue;
           existingKafkaIds.add(source.id);
           match.sources.push(source);
@@ -822,7 +820,6 @@ class MatchAggregator {
       }
 
       for (const cand of candidates) {
-        if (injectedForMatch >= injectionCap) break;
         const kafkaSource = this.kafkaProvider.createSource(cand.name, cand.context);
         if (kafkaSource && kafkaSource.id && !existingKafkaIds.has(kafkaSource.id)) {
           existingKafkaIds.add(kafkaSource.id);

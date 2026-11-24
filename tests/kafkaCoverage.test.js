@@ -101,14 +101,36 @@ describe('KafkaProvider coverage sources', () => {
     expect(provider.teamNamesOf({ team1: null, team2: { name: '  ' } })).toEqual([]);
   });
 
-  test('honors KAFKA_INJECTION_CAP', () => {
-    process.env.KAFKA_INJECTION_CAP = '1';
-    const provider = new KafkaProvider({ catalogStore: fakeStore(), eventSearch: fakeEventSearch() });
+  test('attaches every matching source, with no fixed cap', () => {
+    const store = fakeStore({
+      findChannel: jest.fn((label) => [{
+        id: `trex:${String(label).toLowerCase().replace(/\s+/g, '-')}`,
+        name: `US| ${String(label).toUpperCase()}`,
+        group: 'US',
+        score: 2000
+      }])
+    });
+    const provider = new KafkaProvider({ catalogStore: store, eventSearch: fakeEventSearch() });
 
-    const sources = provider.createSourcesForFixture(fixture(), { now: NOW });
+    const sources = provider.createSourcesForFixture(fixture({
+      sources: [
+        { source: 'daddylive', id: 'd1', channelName: 'NBA TV', countryCode: 'US' },
+        { source: 'daddylive', id: 'd2', channelName: 'ESPN', countryCode: 'US' },
+        { source: 'daddylive', id: 'd3', channelName: 'TNT', countryCode: 'US' }
+      ]
+    }), { now: NOW });
 
-    expect(sources).toHaveLength(1);
-    expect(sources[0].matchMode).toBe('event');
+    expect(sources.map((s) => s.matchMode)).toEqual(['event', 'label', 'label', 'label', 'team']);
+    expect(new Set(sources.map((s) => s.id)).size).toBe(sources.length);
+  });
+
+  test('an empty catalog match still adds nothing', () => {
+    const provider = new KafkaProvider({
+      catalogStore: fakeStore({ findChannel: jest.fn(() => []), findTeam: jest.fn(() => []) }),
+      eventSearch: fakeEventSearch({ cachedFor: jest.fn(() => []) })
+    });
+
+    expect(provider.createSourcesForFixture(fixture(), { now: NOW })).toEqual([]);
   });
 
   test('dedupes a channel id shared by the label and team paths, keeping label', () => {
