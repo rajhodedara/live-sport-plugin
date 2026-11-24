@@ -2,6 +2,8 @@
 
 const container = require('../src/container');
 const KafkaProvider = require('../src/providers/KafkaProvider');
+const { TrexCatalogStore } = require('../src/services/TrexCatalogStore');
+const { TrexEventSearch } = require('../src/services/TrexEventSearch');
 
 describe('Kafka Container Registration', () => {
   const originalEnv = process.env;
@@ -26,5 +28,22 @@ describe('Kafka Container Registration', () => {
   test('disabled by default when environment variables are unset', () => {
     const provider = container.resolve('kafkaProvider');
     expect(provider.configured).toBe(false);
+  });
+
+  test('registers the Trex catalog store and event search as singletons', () => {
+    const store = container.resolve('trexCatalogStore');
+    const eventSearch = container.resolve('trexEventSearch');
+
+    expect(store).toBeInstanceOf(TrexCatalogStore);
+    expect(eventSearch).toBeInstanceOf(TrexEventSearch);
+    expect(container.resolve('trexCatalogStore')).toBe(store);
+    expect(container.resolve('trexEventSearch')).toBe(eventSearch);
+  });
+
+  test('injects the store and event search into kafkaProvider', () => {
+    const provider = container.resolve('kafkaProvider');
+
+    expect(provider.catalogStore).toBe(container.resolve('trexCatalogStore'));
+    expect(provider.eventSearch).toBe(container.resolve('trexEventSearch'));
   });
 });

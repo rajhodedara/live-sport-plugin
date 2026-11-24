@@ -16,6 +16,9 @@ const DEFAULT_MAX_ITEMS = 1000;
 const DEFAULT_MAX_CATALOGS = 50;
 const DEFAULT_INDEX_TTL_MS = 900000; // 15 minutes
 
+/** Sources injected per fixture when KAFKA_INJECTION_CAP is unset: event, team, label. */
+const DEFAULT_INJECTION_CAP = 3;
+
 const SPORTS_CATALOG_PATTERN = /\b(?:sport|sports|event|events|ppv|football|soccer|cricket|basketball|baseball|american football|nfl|nba|nhl|hockey|tennis|motorsport|motor racing|formula 1|f1|mma|ufc|boxing|wrestling|rugby|golf|volleyball|handball|cycling|athletics|darts|snooker|aussie rules|gaelic football|hurling|netball|badminton|table tennis|swimming|diving|gymnastics|skiing|biathlon|skating|futsal|beach soccer|water polo|lacrosse|field hockey|horse racing|triathlon|esports|chess|espn|dazn|flosports|flo sports|bein|tsn)\b/i;
 
 function safeErrorKind(error) {
@@ -36,6 +39,9 @@ class KafkaProvider extends BaseProvider {
     this.lastRefreshSucceeded = null;
     this.lastRefreshErrorKind = null;
     this.lastIndexedChannelCount = 0;
+
+    this.catalogStore = (opts && opts.catalogStore) || null;
+    this.eventSearch = (opts && opts.eventSearch) || null;
   }
 
   get configured() {
@@ -355,6 +361,143 @@ class KafkaProvider extends BaseProvider {
     };
   }
 
+  /** True when the Trex catalog store is open and answering. */
+  isCoverageReady() {
+    return Boolean(
+      this.catalogStore &&
+        typeof this.catalogStore.isReady === 'function' &&
+        this.catalogStore.isReady()
+    );
+  }
+
+  /** Event search is on unless KAFKA_EVENT_SEARCH_ENABLED is exactly "false". */
+  _eventSearchEnabled() {
+    return process.env.KAFKA_EVENT_SEARCH_ENABLED !== 'false';
+  }
+
+  _injectionCap() {
+    const raw = Number(process.env.KAFKA_INJECTION_CAP);
+    return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : DEFAULT_INJECTION_CAP;
+  }
+
+  /** Team names of a fixture, from objects with a name or from plain strings. */
+  teamNamesOf(match) {
+    if (!match) return [];
+    const names = [];
+    for (const team of [match.team1, match.team2]) {
+      const value = team && typeof team === 'object' ? team.name : team;
+      if (typeof value === 'string' && value.trim()) names.push(value.trim());
+    }
+    return names;
+  }
+
+  /**
+   * Builds the Kafka sources a fixture deserves, best first: the event feed
+   * (only inside the live window), then the team channels, then the
+   * broadcaster labels of the sources the match already carries. Ids are
+   * deduped, so an id reached twice keeps its earlier, stronger mode, and
+   * KAFKA_INJECTION_CAP bounds the result (default 3).
+   */
+  createSourcesForFixture(match, { now = Date.now() } = {}) {
+    if (!match || !this.isCoverageReady()) return [];
+    const cap = this._injectionCap();
+    if (cap <= 0) return [];
+
+    const out = [];
+    const seen = new Set();
+    const add = (candidate, matchMode) => {
+      if (!candidate || !candidate.id || seen.has(candidate.id) || out.length >= cap) return;
+      seen.add(candidate.id);
+      out.push({
+        source: 'kafka',
+        id: candidate.id,
+        channelName: candidate.name || candidate.channelName || '',
+        catalogId: GENERIC_CATALOG_ID,
+        matchMode,
+        ...(candidate.country ? { country: candidate.country } : {}),
+        ...(candidate.language ? { language: candidate.language } : {})
+      });
+    };
+
+    if (this.eventSearch && this._eventSearchEnabled()) {
+      const kickoff = Number(match.date);
+      if (Number.isFinite(kickoff) && this.eventSearch.isInWindow(kickoff, now)) {
+        for (const candidate of this.eventSearch.cachedFor(match.id) || []) add(candidate, 'event');
+      }
+    }
+
+    for (const name of this.teamNamesOf(match)) {
+      for (const hit of this.catalogStore.findTeam(name) || []) add(hit, 'team');
+      if (out.length >= cap) return out;
+    }
+
+    for (const source of Array.isArray(match.sources) ? match.sources : []) {
+      if (!source || source.source === 'kafka') continue;
+      const label = source.channelName || source.channel_name || source.channel;
+      if (!label || typeof label !== 'string') continue;
+      const context = {};
+      const country = source.country || match.country;
+      const countryCode = source.countryCode || match.countryCode;
+      if (country) context.country = country;
+      if (countryCode) context.countryCode = countryCode;
+      for (const hit of this.catalogStore.findChannel(label, context) || []) add(hit, 'label');
+      if (out.length >= cap) break;
+    }
+
+    return out;
+  }
+
+  /** Searches the live window for event channels and returns how many fixtures gained one. */
+  async sweepEvents(matches, { maxSearches } = {}) {
+    if (!this.eventSearch || !this._eventSearchEnabled() || !Array.isArray(matches) || matches.length === 0) return 0;
+    try {
+      const results = await this.eventSearch.sweep(matches, maxSearches === undefined ? {} : { maxSearches });
+      let gained = 0;
+      if (results && typeof results.forEach === 'function') {
+        results.forEach((candidates) => {
+          if (Array.isArray(candidates) && candidates.length > 0) gained += 1;
+        });
+      }
+      return gained;
+    } catch (err) {
+      console.warn(`[KafkaProvider] event sweep failed: ${safeErrorKind(err)}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Streams of the fixture's event feed, resolved on the click path. Returns
+   * [] outside the live window, when the search is disabled, or on any
+   * failure: the caller keeps its other sources either way.
+   */
+  async resolveEventStreams(match, opts = {}) {
+    if (!this.eventSearch || !this._eventSearchEnabled() || !match) return [];
+    const now = Number.isFinite(opts && opts.now) ? opts.now : Date.now();
+    const kickoff = Number(match.date);
+    if (!Number.isFinite(kickoff) || !this.eventSearch.isInWindow(kickoff, now)) return [];
+
+    let candidates;
+    try {
+      candidates = (await this.eventSearch.findForFixture(match)) || [];
+    } catch (err) {
+      console.warn(`[KafkaProvider] event search failed: ${safeErrorKind(err)}`);
+      return [];
+    }
+
+    const streams = [];
+    for (const candidate of candidates.slice(0, 2)) {
+      if (!candidate || !candidate.id) continue;
+      const src = { channelName: candidate.name || '', matchMode: 'event' };
+      if (candidate.country) src.country = candidate.country;
+      try {
+        const resolved = await this.resolveStream(candidate.id, match.category, match.title, src, opts);
+        if (Array.isArray(resolved)) streams.push(...resolved);
+      } catch (err) {
+        console.warn(`[KafkaProvider] event stream resolve failed: ${safeErrorKind(err)}`);
+      }
+    }
+    return streams;
+  }
   /**
    * Kafka is enrichment only; it publishes zero standalone MatchEntity rows.
    */

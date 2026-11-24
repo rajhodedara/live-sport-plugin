@@ -1,5 +1,5 @@
 const ReplayZoneProvider = require('./providers/ReplayZoneProvider');
-const { createContainer, asClass, asValue, InjectionMode } = require('awilix');
+const { createContainer, asClass, asFunction, asValue, InjectionMode } = require('awilix');
 
 const CacheService = require('./services/CacheService');
 const CircuitBreakerService = require('./services/CircuitBreakerService');
@@ -46,6 +46,8 @@ const RoxieStreamsProvider = require('./providers/RoxieStreamsProvider');
 const MovieBoxSportsProvider = require('./providers/MovieBoxSportsProvider');
 const MovieBoxTVProvider = require('./providers/MovieBoxTVProvider');
 const KafkaProvider = require('./providers/KafkaProvider');
+const { TrexCatalogStore } = require('./services/TrexCatalogStore');
+const { TrexEventSearch } = require('./services/TrexEventSearch');
 const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
@@ -81,7 +83,11 @@ container.register({
   broadcasterMatchService: asValue(new BroadcasterMatchService()),
   // Self-healing iframe-domain knowledge base (DaddyLive family). Singleton so
   // runtime discoveries accumulate for the process lifetime.
-  iframeDomainRegistry: asValue(new IframeDomainRegistry())
+  iframeDomainRegistry: asValue(new IframeDomainRegistry()),
+  // Trex catalog coverage: the store opens the SQLite catalog lazily and the
+  // event search owns its own cache, so both are safe singletons.
+  trexCatalogStore: asFunction(() => new TrexCatalogStore()).singleton(),
+  trexEventSearch: asFunction(() => new TrexEventSearch()).singleton()
 });
 
 // Build dynamic YAML Providers
@@ -119,7 +125,10 @@ container.register({
   roxiestreamsProvider: asClass(RoxieStreamsProvider).singleton(),
   movieboxSportsProvider: asClass(MovieBoxSportsProvider).singleton(),
   movieboxTvProvider: asClass(MovieBoxTVProvider).singleton(),
-  kafkaProvider: asClass(KafkaProvider).singleton(),
+  kafkaProvider: asClass(KafkaProvider).singleton().inject(() => ({
+    catalogStore: container.resolve('trexCatalogStore'),
+    eventSearch: container.resolve('trexEventSearch')
+  })),
   yamlProviders: asValue(yamlProviders)
 });
 
