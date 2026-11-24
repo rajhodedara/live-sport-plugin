@@ -392,9 +392,9 @@ class KafkaProvider extends BaseProvider {
   }
 
   /**
-   * Builds the Kafka sources a fixture deserves, best first: the event feed
-   * (only inside the live window), then the team channels, then the
-   * broadcaster labels of the sources the match already carries. Ids are
+   * Builds the Kafka sources a fixture deserves, best first: the live event
+   * feed (only inside the live window), then the broadcaster of the match
+   * (the source labels), then the club channels as the last fallback. Ids are
    * deduped, so an id reached twice keeps its earlier, stronger mode, and
    * KAFKA_INJECTION_CAP bounds the result (default 3).
    */
@@ -426,11 +426,6 @@ class KafkaProvider extends BaseProvider {
       }
     }
 
-    for (const name of this.teamNamesOf(match)) {
-      for (const hit of this.catalogStore.findTeam(name) || []) add(hit, 'team');
-      if (out.length >= cap) return out;
-    }
-
     for (const source of Array.isArray(match.sources) ? match.sources : []) {
       if (!source || source.source === 'kafka') continue;
       const label = source.channelName || source.channel_name || source.channel;
@@ -440,7 +435,14 @@ class KafkaProvider extends BaseProvider {
       const countryCode = source.countryCode || match.countryCode;
       if (country) context.country = country;
       if (countryCode) context.countryCode = countryCode;
-      for (const hit of this.catalogStore.findChannel(label, context) || []) add(hit, 'label');
+      // One source per label: the store's ranking already put the fixture's own
+      // market first, and a second candidate is usually a foreign feed.
+      for (const hit of (this.catalogStore.findChannel(label, context) || []).slice(0, 1)) add(hit, 'label');
+      if (out.length >= cap) break;
+    }
+
+    for (const name of this.teamNamesOf(match)) {
+      for (const hit of this.catalogStore.findTeam(name) || []) add(hit, 'team');
       if (out.length >= cap) break;
     }
 

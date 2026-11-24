@@ -15,6 +15,13 @@ const { teamQueryKeys, channelKey } = require('./TrexCatalogKeys');
 
 const RETRY_AFTER_MS = 60 * 1000;
 
+/** Market words a broadcaster label often carries after its name (`NBA TV USA`, `Sport 5 Israel`). */
+const MARKET_SUFFIXES = new Set([
+  'usa', 'us', 'uk', 'gb', 'ie', 'ca', 'canada', 'israel', 'au', 'australia', 'nz',
+  'de', 'germany', 'fr', 'france', 'es', 'spain', 'it', 'italy', 'tr', 'turkey',
+  'pl', 'poland', 'br', 'brazil', 'mx', 'mexico', 'ar', 'argentina'
+]);
+
 function errorKind(error) {
   return String((error && (error.code || error.name)) || 'Error').replace(/[^a-z0-9_.-]/gi, '').slice(0, 80);
 }
@@ -102,7 +109,15 @@ class TrexCatalogStore {
 
   /** Broadcaster label -> linear channel candidates, preferring the fixture's country. */
   findChannel(label, context = {}) {
-    return this._query(channelKey(label), context || {});
+    const key = channelKey(label);
+    if (!key) return [];
+    const hits = this._query(key, context || {});
+    if (hits.length) return hits;
+    // A label such as `NBA TV USA` names the same channel as `NBA TV`; drop one
+    // trailing market word and retry. Anything else keeps the exact-match rule.
+    const tokens = key.split(' ');
+    if (tokens.length < 3 || !MARKET_SUFFIXES.has(tokens[tokens.length - 1])) return hits;
+    return this._query(tokens.slice(0, -1).join(' '), context || {});
   }
 
   stats() {

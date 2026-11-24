@@ -57,6 +57,7 @@ function coverageProvider(overrides = {}) {
     sweepEvents: jest.fn().mockResolvedValue(1),
     createSourcesForFixture: jest.fn(() => [
       { source: 'kafka', id: 'fx:ev', channelName: 'NEXT | BULLS VS CAVALIERS 8K', catalogId: 'flix-live-tv-v2-trex', matchMode: 'event' },
+      { source: 'kafka', id: 'flix:sky-cricket', channelName: 'Sky Sports Cricket', catalogId: 'flix-live-tv-v2-trex', matchMode: 'label' },
       { source: 'kafka', id: 'fx:team', channelName: 'NBA TEAM| CHICAGO BULLS', catalogId: 'flix-live-tv-v2-trex', matchMode: 'team' }
     ]),
     ...overrides
@@ -68,7 +69,7 @@ function cacheService() {
 }
 
 describe('MatchAggregator Kafka catalog coverage', () => {
-  test('attaches event then team then label sources and passes the clock', async () => {
+  test('attaches event then label then team sources and passes the clock', async () => {
     const kafkaProvider = coverageProvider();
     const aggregator = new MatchAggregator({
       daddyLiveProvider: liveProvider(),
@@ -80,7 +81,7 @@ describe('MatchAggregator Kafka catalog coverage', () => {
     const match = results.find((row) => row.id === 'coverage-fixture');
 
     const kafkaSources = match.sources.filter((source) => source.source === 'kafka');
-    expect(kafkaSources.map((source) => source.id)).toEqual(['fx:ev', 'fx:team', 'flix:sky-cricket']);
+    expect(kafkaSources.map((source) => source.id)).toEqual(['fx:ev', 'flix:sky-cricket', 'fx:team']);
     expect(kafkaProvider.createSourcesForFixture).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'coverage-fixture' }),
       { now: expect.any(Number) }

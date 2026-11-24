@@ -56,14 +56,14 @@ describe('KafkaProvider coverage sources', () => {
 
     const sources = provider.createSourcesForFixture(fixture(), { now: NOW });
 
-    expect(sources.map((s) => s.matchMode)).toEqual(['event', 'team', 'label']);
-    expect(sources.map((s) => s.id)).toEqual(['trex:event', 'trex:bulls', 'trex:csn']);
+    expect(sources.map((s) => s.matchMode)).toEqual(['event', 'label', 'team']);
+    expect(sources.map((s) => s.id)).toEqual(['trex:event', 'trex:csn', 'trex:bulls']);
     for (const source of sources) {
       expect(source.source).toBe('kafka');
       expect(source.catalogId).toBe('flix-live-tv-v2-trex');
     }
-    expect(sources[1].channelName).toBe('NBA TEAM| CHICAGO BULLS');
-    expect(sources[2].channelName).toBe('US| CHICAGO SPORTS NETWORK');
+    expect(sources[2].channelName).toBe('NBA TEAM| CHICAGO BULLS');
+    expect(sources[1].channelName).toBe('US| CHICAGO SPORTS NETWORK');
   });
 
   test('passes the source country as label context', () => {
@@ -81,11 +81,11 @@ describe('KafkaProvider coverage sources', () => {
   test('has no event source outside the window or with an empty cache', () => {
     const provider = new KafkaProvider({ catalogStore: fakeStore(), eventSearch: fakeEventSearch() });
 
-    expect(provider.createSourcesForFixture(fixture({ date: TOO_LATE }), { now: NOW }).map((s) => s.matchMode)).toEqual(['team', 'label']);
+    expect(provider.createSourcesForFixture(fixture({ date: TOO_LATE }), { now: NOW }).map((s) => s.matchMode)).toEqual(['label', 'team']);
 
     const emptyCache = fakeEventSearch({ cachedFor: jest.fn(() => []) });
     const second = new KafkaProvider({ catalogStore: fakeStore(), eventSearch: emptyCache });
-    expect(second.createSourcesForFixture(fixture(), { now: NOW }).map((s) => s.matchMode)).toEqual(['team', 'label']);
+    expect(second.createSourcesForFixture(fixture(), { now: NOW }).map((s) => s.matchMode)).toEqual(['label', 'team']);
   });
 
   test('returns only the label source for a title-only fixture and never throws', () => {
@@ -111,7 +111,7 @@ describe('KafkaProvider coverage sources', () => {
     expect(sources[0].matchMode).toBe('event');
   });
 
-  test('dedupes a channel id shared by the team and label paths, keeping team', () => {
+  test('dedupes a channel id shared by the label and team paths, keeping label', () => {
     const store = fakeStore({
       findTeam: jest.fn(() => [{ id: 'trex:same', name: 'NBA TEAM| CHICAGO BULLS', group: 'NBA TEAM', league: 'nba', score: 3000 }]),
       findChannel: jest.fn(() => [{ id: 'trex:same', name: 'US| CHICAGO BULLS', group: 'US', score: 2000 }])
@@ -121,7 +121,7 @@ describe('KafkaProvider coverage sources', () => {
     const sources = provider.createSourcesForFixture(fixture(), { now: NOW });
 
     expect(sources).toHaveLength(1);
-    expect(sources[0]).toMatchObject({ id: 'trex:same', matchMode: 'team' });
+    expect(sources[0]).toMatchObject({ id: 'trex:same', matchMode: 'label' });
   });
 
   test('reports not ready and injects nothing when the store is unavailable', () => {
