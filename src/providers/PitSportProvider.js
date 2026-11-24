@@ -19,6 +19,10 @@ class PitSportProvider extends BaseProvider {
     this.watchApiUrl = 'https://api.embdlol.st/watch';
   }
 
+  isEnabled() {
+    return process.env.PITSPORT_ENABLED === 'true';
+  }
+
   /**
    * Fetch live and upcoming matches from PitSport home catalog.
    *

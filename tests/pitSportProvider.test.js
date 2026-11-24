@@ -3,6 +3,7 @@
 process.env.NODE_ENV = 'test';
 
 const PitSportProvider = require('../src/providers/PitSportProvider');
+const MatchAggregator = require('../src/services/MatchAggregator');
 const container = require('../src/container');
 const { selectSources } = require('../src/streams');
 const MatchEntity = require('../src/domain/MatchEntity');
@@ -11,8 +12,16 @@ const StreamEntity = require('../src/domain/StreamEntity');
 describe('PitSportProvider', () => {
   let provider;
 
+  const originalEnv = { ...process.env };
+
   beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.PITSPORT_ENABLED = 'true';
     provider = new PitSportProvider();
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
   });
 
   describe('Container & DI Registration', () => {
@@ -23,10 +32,26 @@ describe('PitSportProvider', () => {
       expect(resolved.name).toBe('PitSport');
     });
 
-    test('is registered in MatchAggregator providers list', () => {
-      const resolved = container.resolve('pitSportProvider');
-      const aggregator = container.resolve('matchAggregator');
-      expect(aggregator.providers).toContain(resolved);
+    test('is disabled by default in MatchAggregator providers list', () => {
+      delete process.env.PITSPORT_ENABLED;
+      const disabledProvider = new PitSportProvider();
+      const aggregator = new MatchAggregator({ pitSportProvider: disabledProvider });
+      expect(aggregator.providers).not.toContain(disabledProvider);
+      expect(disabledProvider.isEnabled()).toBe(false);
+    });
+
+    test('is registered in MatchAggregator providers list when PITSPORT_ENABLED=true', () => {
+      process.env.PITSPORT_ENABLED = 'true';
+      const enabledProvider = new PitSportProvider();
+      const aggregator = new MatchAggregator({ pitSportProvider: enabledProvider });
+      expect(aggregator.providers).toContain(enabledProvider);
+      expect(enabledProvider.isEnabled()).toBe(true);
+    });
+
+    test('is disabled by default with isEnabled() === false', () => {
+      delete process.env.PITSPORT_ENABLED;
+      const disabledProvider = new PitSportProvider();
+      expect(disabledProvider.isEnabled()).toBe(false);
     });
 
     test('selectSources includes and prioritizes pitsport source', () => {

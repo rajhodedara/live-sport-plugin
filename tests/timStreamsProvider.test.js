@@ -9,6 +9,8 @@ jest.mock('../src/services/StreamedWasmPool', () => ({
 process.env.NODE_ENV = 'test';
 
 const TimStreamsProvider = require('../src/providers/TimStreamsProvider');
+const MatchAggregator = require('../src/services/MatchAggregator');
+const container = require('../src/container');
 const { isMatchLive } = require('../src/catalog');
 
 function getNYString(offsetMs) {
@@ -30,6 +32,7 @@ describe('TimStreamsProvider Robust Date and Live Status Handling', () => {
   let provider;
 
   beforeEach(() => {
+    process.env.TIMSTREAMS_ENABLED = 'true';
     provider = new TimStreamsProvider({
       circuitBreaker: {
         wrap: (name, fn) => ({ fire: fn }),
@@ -37,6 +40,10 @@ describe('TimStreamsProvider Robust Date and Live Status Handling', () => {
       }
     });
     provider.fetchChannels = { fire: async () => ({ channels: [] }) };
+  });
+
+  afterEach(() => {
+    delete process.env.TIMSTREAMS_ENABLED;
   });
 
   test('future event is classified as upcoming with popular=0 and is not live', async () => {
@@ -145,12 +152,17 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
   let provider;
 
   beforeEach(() => {
+    process.env.TIMSTREAMS_ENABLED = 'true';
     provider = new TimStreamsProvider({
       circuitBreaker: {
         wrap: (name, fn) => ({ fire: fn }),
         wrapSync: (name, fn) => ({ fire: fn })
       }
     });
+  });
+
+  afterEach(() => {
+    delete process.env.TIMSTREAMS_ENABLED;
   });
 
   test('decodeObfuscatedScript decodes XOR script with 2-paren syntax', () => {
@@ -260,5 +272,41 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
     expect(mainStream.url).toContain(encodeURIComponent(finalM3u8));
     expect(mainStream.behaviorHints.proxyHeaders.request.Referer).toBe('https://ehgembxe.cfd');
     expect(mainStream.resolution).toBe('HD');
+  });
+});
+
+describe('TimStreams Container & DI Registration', () => {
+  const mockCb = { wrapSync: (n, f) => ({ fire: f }), wrap: (n, f) => ({ fire: f }) };
+
+  test('resolves from container as TimStreamsProvider singleton', () => {
+    const resolved = container.resolve('timStreamsProvider');
+    expect(resolved).toBeInstanceOf(TimStreamsProvider);
+    expect(resolved.name).toBe('TimStreams');
+  });
+
+  test('is disabled by default in MatchAggregator providers list', () => {
+    delete process.env.TIMSTREAMS_ENABLED;
+    const disabledProvider = new TimStreamsProvider({ circuitBreaker: mockCb });
+    const aggregator = new MatchAggregator({ timStreamsProvider: disabledProvider });
+    expect(aggregator.providers).not.toContain(disabledProvider);
+    expect(disabledProvider.isEnabled()).toBe(false);
+  });
+
+  test('is registered in MatchAggregator providers list when TIMSTREAMS_ENABLED=true', () => {
+    process.env.TIMSTREAMS_ENABLED = 'true';
+    try {
+      const enabledProvider = new TimStreamsProvider({ circuitBreaker: mockCb });
+      const aggregator = new MatchAggregator({ timStreamsProvider: enabledProvider });
+      expect(aggregator.providers).toContain(enabledProvider);
+      expect(enabledProvider.isEnabled()).toBe(true);
+    } finally {
+      delete process.env.TIMSTREAMS_ENABLED;
+    }
+  });
+
+  test('is disabled by default with isEnabled() === false', () => {
+    delete process.env.TIMSTREAMS_ENABLED;
+    const disabledProvider = new TimStreamsProvider({ circuitBreaker: mockCb });
+    expect(disabledProvider.isEnabled()).toBe(false);
   });
 });
