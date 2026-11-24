@@ -8,7 +8,7 @@ const vm = require('node:vm');
 // Do not load the app, providers, native modules, workers or a listening server.
 const source = fs.readFileSync(path.join(__dirname, '../src/index.js'), 'utf8');
 const start = source.indexOf('const STREAM_PREFIXES =');
-const end = source.indexOf('/**\n * Decodes a config URL segment.', start);
+const end = source.lastIndexOf('/**', source.indexOf('Decodes a config URL segment.', start));
 
 function rewriteResponse(body, streamBase = 'https://media.addon.example') {
   let middleware;
@@ -30,10 +30,10 @@ function rewriteResponse(body, streamBase = 'https://media.addon.example') {
   return { body: JSON.parse(output.toString('utf8')), output, headers };
 }
 
-test('publishes relative and legacy absolute Leaf/manifest endpoints on the stream host', () => {
+test('publishes relative and legacy absolute manifest endpoints on the stream host', () => {
   const values = [
-    '/api/leaf/manifest.m3u8?url=https%3A%2F%2Fupstream.example%2Flive.m3u8%3Ftoken%3Done%252Ftwo',
-    'http://localhost:7000/api/leaf/manifest.m3u8?url=fixture',
+    '/api/manifest?url=https%3A%2F%2Fupstream.example%2Flive.m3u8%3Ftoken%3Done%252Ftwo',
+    'http://localhost:7000/api/manifest?url=fixture',
     '/api/soccerfull/manifest?url=fixture',
     '/api/dash/index.m3u8?d=fixture',
     '/api/hls/resource/fixture/media.ts?psig=fixture',
@@ -59,8 +59,8 @@ test('keeps posters, metadata artwork and watch links on the addon host', () => 
 });
 
 test('falls back to the addon host when no dedicated stream host is configured', () => {
-  const { body } = rewriteResponse({ streams: [{ url: '/api/leaf/manifest.m3u8?url=fixture' }] }, '');
-  expect(body.streams[0].url).toBe('https://addon.example/api/leaf/manifest.m3u8?url=fixture');
+  const { body } = rewriteResponse({ streams: [{ url: '/api/manifest?url=fixture' }] }, '');
+  expect(body.streams[0].url).toBe('https://addon.example/api/manifest?url=fixture');
 });
 
 test('does not hijack third-party generic HLS paths or endpoint-name lookalikes', () => {
@@ -78,7 +78,7 @@ test('does not hijack third-party generic HLS paths or endpoint-name lookalikes'
 });
 
 test('preserves raw nested signed queries and fragments during host rewriting', () => {
-  const suffix = '/api/leaf/manifest.m3u8?url=https%3A%2F%2Fupstream.example%2Flive.m3u8%3Fa%3Done%252Ftwo%26b%3Dthree%252Bfour#player';
+  const suffix = '/api/manifest?url=https%3A%2F%2Fupstream.example%2Flive.m3u8%3Fa%3Done%252Ftwo%26b%3Dthree%252Bfour#player';
   const { body } = rewriteResponse({ streams: [{ url: 'http://localhost:7000' + suffix }] });
   expect(body.streams[0].url).toBe('https://media.addon.example' + suffix);
 });

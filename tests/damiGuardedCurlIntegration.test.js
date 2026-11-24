@@ -60,7 +60,6 @@ test.each([
   ['hostname prefix lookalike', 'https://notdamitv.st/c/fixture.m3u8', { proxyUrl: proxy }, false],
   ['Dami only in query', 'https://other.example.org/c/fixture.m3u8?source=damitv.st', { proxyUrl: proxy }, false],
   ['ordinary provider', 'https://other.example.org/c/fixture.m3u8', {}, false],
-  ['Leaf gateway', 'https://papacito.cfd/c/fixture.m3u8', {}, false],
   ['explicit direct Dami', mediaUrl, { proxyUrl: null }, false],
   ['Dami POST', mediaUrl, { method: 'POST', body: 'fixture' }, false],
   ['Dami GET with body', mediaUrl, { body: 'fixture' }, false]

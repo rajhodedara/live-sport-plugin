@@ -313,7 +313,7 @@ describe('ScoreZoneProvider & Manifest Proxy Test Suite', () => {
     const content = fs.readFileSync(indexPath, 'utf8');
 
     expect(content).toContain("'/api/scorezone'");
-    expect(content).toMatch(/api\\\/leaf\|api\\\/scorezone/);
+    expect(content).toMatch(/api\\\/soccerfull\|api\\\/scorezone/);
   });
 
   // 11. manifest route sets CORS ACAO * and private no-store

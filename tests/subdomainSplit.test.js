@@ -71,7 +71,6 @@ describe('Subdomain Split Architecture (Stream vs Metadata Isolation)', () => {
         '/api/hls',
         '/hls/resource',
         '/api/soccerfull',
-        '/api/leaf',
         '/api/mp4proxy',
         '/api/fastmp4',
         '/api/hlschunk'
@@ -119,7 +118,7 @@ describe('Subdomain Split Architecture (Stream vs Metadata Isolation)', () => {
                 return `${currentBaseUrl}${url}`;
               }
             }
-            const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull|api\/leaf)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
+            const streamMatch = url.match(/^(?:https?:\/\/[^\/]+)(\/(?:api\/manifest|api\/dash|api\/mp4proxy|api\/fastmp4|api\/hlschunk|api\/hls|hls\/resource|api\/soccerfull)(?:[?\/].*|\.[A-Za-z0-9]+)?)$/);
             if (streamMatch) {
               modified = true;
               return `${effectiveStreamBaseUrl}${streamMatch[1]}`;

@@ -27,9 +27,9 @@ function setup({ constructionFails = false, status = 200, requestFails = false }
   return { client: require('../src/impitClient'), Impit, request, fetch };
 }
 
-test('required Leaf proxy initialization failure rejects before any direct request', async () => {
+test('required WARP proxy initialization failure rejects before any direct request', async () => {
   const t = setup({ constructionFails: true });
-  await expect(t.client.safeFetch('https://sports.highfly.to/fixture/catalog.json', { attempts: 1 }))
+  await expect(t.client.safeFetch('https://damitv.st/fixture/catalog.json', { attempts: 1 }))
     .rejects.toMatchObject({ code: 'EPROXYUNAVAILABLE' });
   expect(t.request).not.toHaveBeenCalled();
 });
@@ -42,9 +42,9 @@ test('explicit proxy initialization failure on another host rejects before any d
   expect(t.request).not.toHaveBeenCalled();
 });
 
-test('successful Leaf proxy still uses the stable Chrome142 profile', async () => {
+test('successful WARP proxy still uses the stable Chrome142 profile', async () => {
   const t = setup();
-  expect((await t.client.safeFetch('https://sports.highfly.to/fixture/catalog.json', { attempts: 1 })).status).toBe(200);
+  expect((await t.client.safeFetch('https://damitv.st/fixture/catalog.json', { attempts: 1 })).status).toBe(200);
   expect(t.Impit).toHaveBeenCalledWith({ browser: 'chrome142', proxyUrl: 'socks5://127.0.0.1:40000' });
   expect(t.fetch).toHaveBeenCalledTimes(1);
   expect(t.request).not.toHaveBeenCalled();
@@ -52,13 +52,13 @@ test('successful Leaf proxy still uses the stable Chrome142 profile', async () =
 
 test('initialized proxy HTTP403 remains visible without a direct retry', async () => {
   const t = setup({ status: 403 });
-  expect((await t.client.safeFetch('https://sports.highfly.to/fixture/stream.json', { attempts: 1 })).status).toBe(403);
+  expect((await t.client.safeFetch('https://damitv.st/fixture/stream.json', { attempts: 1 })).status).toBe(403);
   expect(t.request).not.toHaveBeenCalled();
 });
 
 test('initialized proxy fetch failure rejects without a direct retry', async () => {
   const t = setup({ requestFails: true });
-  await expect(t.client.safeFetch('https://sports.highfly.to/fixture/catalog.json', { attempts: 1 })).rejects.toThrow('mock proxy request failure');
+  await expect(t.client.safeFetch('https://damitv.st/fixture/catalog.json', { attempts: 1 })).rejects.toThrow('mock proxy request failure');
   expect(t.request).not.toHaveBeenCalled();
 });
 
