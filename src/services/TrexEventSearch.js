@@ -35,6 +35,7 @@ const WINDOW_AFTER_MS = 4 * 3600 * 1000;
 const SEARCH_TIMEOUT_MS = 8000;
 const SEARCH_BODY_LIMIT = 512 * 1024;
 const MAX_CANDIDATES = 2;
+const BUDGET_EXHAUSTED = 'BUDGET_EXHAUSTED';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
 
 function errorKind(error) {
@@ -78,26 +79,53 @@ function metaGroup(meta) {
   return bar === -1 ? '' : name.slice(0, bar).trim();
 }
 
+function bodyTooLarge() {
+  const error = new Error('event search body too large');
+  error.code = 'BODY_TOO_LARGE';
+  return error;
+}
+
 /**
  * Reads a JSON body, refusing anything above `SEARCH_BODY_LIMIT` bytes. A
- * declared `content-length` is checked before the read; a stub or a chunked
- * response without one is measured afterwards.
+ * declared `content-length` is checked before the read; a streaming body is
+ * read chunk by chunk and cancelled as soon as the cap is crossed, so it is
+ * never buffered whole. A stub without a stream falls back to `text()`, which
+ * does buffer first and only measures afterwards.
  */
 async function readJsonBody(response) {
   const headers = response.headers;
   const declared = typeof headers?.get === 'function' ? Number(headers.get('content-length')) : NaN;
-  if (Number.isFinite(declared) && declared > SEARCH_BODY_LIMIT) {
-    const error = new Error('event search body too large');
-    error.code = 'BODY_TOO_LARGE';
-    throw error;
+  if (Number.isFinite(declared) && declared > SEARCH_BODY_LIMIT) throw bodyTooLarge();
+
+  const stream = response.body;
+  if (stream && typeof stream.getReader === 'function') {
+    const reader = stream.getReader();
+    const chunks = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value == null) continue;
+      const chunk = typeof value === 'string'
+        ? Buffer.from(value, 'utf8')
+        : Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      total += chunk.length;
+      if (total > SEARCH_BODY_LIMIT) {
+        try {
+          await reader.cancel();
+        } catch {
+          // the cap is enforced either way
+        }
+        throw bodyTooLarge();
+      }
+      chunks.push(chunk);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
   }
+
   if (typeof response.text === 'function') {
     const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > SEARCH_BODY_LIMIT) {
-      const error = new Error('event search body too large');
-      error.code = 'BODY_TOO_LARGE';
-      throw error;
-    }
+    if (Buffer.byteLength(text, 'utf8') > SEARCH_BODY_LIMIT) throw bodyTooLarge();
     return JSON.parse(text);
   }
   return response.json();
@@ -175,8 +203,20 @@ class TrexEventSearch {
     return candidates.sort((a, b) => b.score - a.score).slice(0, MAX_CANDIDATES);
   }
 
-  /** One upstream search; throws on transport, HTTP, body and parse failures. */
-  async _request(tokens) {
+  /**
+   * One upstream search; throws on transport, HTTP, body and parse failures.
+   * With a `budget`, every attempt spends one unit before it is sent, retries
+   * included; an exhausted budget throws without touching the network.
+   */
+  async _request(tokens, budget) {
+    if (budget) {
+      if (budget.remaining <= 0) {
+        const error = new Error('event search budget exhausted');
+        error.code = BUDGET_EXHAUSTED;
+        throw error;
+      }
+      budget.remaining -= 1;
+    }
     if (!this.baseUrl) {
       const error = new Error('missing upstream base URL');
       error.code = 'NO_BASE_URL';
@@ -210,11 +250,13 @@ class TrexEventSearch {
   }
 
   /** Candidates for one token list, or null when the request failed. */
-  async _searchTokens(tokens, requiredToken) {
+  async _searchTokens(tokens, requiredToken, budget) {
     try {
-      return this._rank(await this._request(tokens), requiredToken);
+      return this._rank(await this._request(tokens, budget), requiredToken);
     } catch (error) {
-      console.warn(`[TrexEventSearch] search failed: ${errorKind(error)}`);
+      if (error && error.code !== BUDGET_EXHAUSTED) {
+        console.warn(`[TrexEventSearch] search failed: ${errorKind(error)}`);
+      }
       return null;
     }
   }
@@ -224,7 +266,7 @@ class TrexEventSearch {
    * that also name the away team; a query that finds nothing is retried once
    * without its last token. Returns null when a request failed.
    */
-  async _search(match) {
+  async _search(match, budget = null) {
     const home = teamName(match && match.team1);
     const away = teamName(match && match.team2);
     const primary = home || away;
@@ -233,10 +275,10 @@ class TrexEventSearch {
     if (tokens.length === 0) return [];
     const requiredToken = normalizeName(secondary).split(' ').filter(Boolean)[0] || '';
 
-    let candidates = await this._searchTokens(tokens, requiredToken);
+    let candidates = await this._searchTokens(tokens, requiredToken, budget);
     if (candidates === null) return null;
     if (candidates.length === 0 && tokens.length > 1) {
-      candidates = await this._searchTokens(tokens.slice(0, -1), requiredToken);
+      candidates = await this._searchTokens(tokens.slice(0, -1), requiredToken, budget);
       if (candidates === null) return null;
     }
     return candidates;
@@ -248,13 +290,21 @@ class TrexEventSearch {
    * retries upstream; a settled empty result is cached like any other.
    */
   async findForFixture(match, { force = false } = {}) {
+    return this._resolve(match, { force });
+  }
+
+  /**
+   * Shared body of `findForFixture` and `sweep`; `budget` bounds the upstream
+   * requests the search may spend, trim-and-retry included.
+   */
+  async _resolve(match, { force = false, budget = null } = {}) {
     const fixtureId = match && match.id != null ? String(match.id) : '';
     if (!fixtureId) return [];
     if (!force) {
       const entry = this._fresh(fixtureId);
       if (entry) return entry.candidates.slice();
     }
-    const candidates = await this._search(match);
+    const candidates = await this._search(match, budget);
     if (candidates === null) return [];
     this._remember(fixtureId, candidates);
     return candidates.slice();
@@ -262,8 +312,9 @@ class TrexEventSearch {
 
   /**
    * Searches every fixture in the live window, nearest kickoff first, with at
-   * most `maxSearches` upstream searches across `concurrency` workers. Fixtures
-   * already cached are free and fixtures past the budget keep `[]`.
+   * most `maxSearches` upstream requests across `concurrency` workers. A
+   * trim-and-retry spends a second unit, so the walk stops and the remaining
+   * fixtures keep `[]` once the budget is spent. Cached fixtures are free.
    */
   async sweep(matches, { maxSearches = DEFAULT_MAX_SEARCHES } = {}) {
     const nowMs = this.now();
@@ -279,15 +330,14 @@ class TrexEventSearch {
 
     const results = new Map(live.map((item) => [item.id, this.cachedFor(item.id)]));
     const pending = live.filter((item) => !this._fresh(item.id));
-    const budget = Math.min(toCount(maxSearches, DEFAULT_MAX_SEARCHES), pending.length);
-    const selected = pending.slice(0, budget);
+    const budget = { remaining: toCount(maxSearches, DEFAULT_MAX_SEARCHES) };
 
     let cursor = 0;
-    const workers = Array.from({ length: Math.min(this.concurrency, selected.length) }, async () => {
-      while (cursor < selected.length) {
-        const item = selected[cursor];
+    const workers = Array.from({ length: Math.min(this.concurrency, pending.length) }, async () => {
+      while (budget.remaining > 0 && cursor < pending.length) {
+        const item = pending[cursor];
         cursor += 1;
-        results.set(item.id, await this.findForFixture(item.match));
+        results.set(item.id, await this._resolve(item.match, { budget }));
       }
     });
     await Promise.all(workers);

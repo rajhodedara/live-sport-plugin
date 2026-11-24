@@ -69,6 +69,20 @@ describe('TrexEventSearch', () => {
     expect(ids(search.cachedFor('f1'))).toEqual(['trex:1', 'trex:2']);
   });
 
+  test('keeps at most two candidates when three listings match', async () => {
+    const metas = [
+      ...METAS.slice(0, 2),
+      { id: 'trex:4', name: 'ESPN3 | Wofford vs. Wake Forest (2026-11-23 18:00)' }
+    ];
+    const search = new TrexEventSearch({
+      baseUrl: BASE,
+      fetchImpl: async () => jsonResponse(metas),
+      now: () => NOW
+    });
+
+    expect(ids(await search.findForFixture(FIXTURE))).toHaveLength(2);
+  });
+
   test('serves nothing for an unknown or expired fixture id', async () => {
     let clock = NOW;
     const fetchImpl = async () => jsonResponse(METAS);
@@ -81,6 +95,38 @@ describe('TrexEventSearch', () => {
 
     clock = NOW + 600000;
     expect(search.cachedFor('f1')).toEqual([]);
+  });
+
+  test('evicts the oldest cache entry above maxEntries', async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return jsonResponse(METAS);
+    };
+    const search = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW, maxEntries: 1 });
+
+    await search.findForFixture({ ...FIXTURE, id: 'a' });
+    await search.findForFixture({ ...FIXTURE, id: 'b' });
+
+    expect(calls).toBe(2);
+    expect(search.cachedFor('a')).toEqual([]);
+    expect(ids(search.cachedFor('b'))).toEqual(['trex:1', 'trex:2']);
+  });
+
+  test('force skips a warm cache and costs one extra request', async () => {
+    let calls = 0;
+    const fetchImpl = async () => {
+      calls += 1;
+      return jsonResponse(METAS);
+    };
+    const search = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+
+    await search.findForFixture(FIXTURE);
+    await search.findForFixture(FIXTURE);
+    expect(calls).toBe(1);
+
+    expect(ids(await search.findForFixture(FIXTURE, { force: true }))).toEqual(['trex:1', 'trex:2']);
+    expect(calls).toBe(2);
   });
 
   test('retries once without the last token when the query finds nothing', async () => {
@@ -107,6 +153,34 @@ describe('TrexEventSearch', () => {
     expect(calls[0]).toContain('search=east carolina pirates.json');
     expect(calls[1]).toContain('search=east carolina.json');
     expect(ids(found)).toEqual(['trex:9']);
+  });
+
+  test('counts a trim-and-retry against the sweep budget and stops the walk', async () => {
+    const calls = [];
+    const fetchImpl = async (url) => {
+      const decoded = decode(url);
+      calls.push(decoded);
+      if (decoded.includes('search=east carolina pirates.json')) return jsonResponse([]);
+      if (decoded.includes('search=east carolina.json')) {
+        return jsonResponse([{ id: 'trex:9', name: 'NEXT | INDIANA STATE VS. EAST CAROLINA | 8K EXCLUSIVE' }]);
+      }
+      return jsonResponse([{ id: 'trex:other', name: 'NEXT | OTHER VS. RIVALS | 8K EXCLUSIVE' }]);
+    };
+    const search = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW, concurrency: 1 });
+
+    const results = await search.sweep([
+      { id: 'f2', date: String(NOW + 60000), team1: { name: 'East Carolina Pirates' }, team2: { name: 'Indiana State' } },
+      { id: 'f3', date: String(NOW + 120000), team1: { name: 'Alpha' }, team2: { name: 'Rivals' } },
+      { id: 'f4', date: String(NOW + 180000), team1: { name: 'Beta' }, team2: { name: 'Rivals' } }
+    ], { maxSearches: 2 });
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toContain('search=east carolina pirates.json');
+    expect(calls[1]).toContain('search=east carolina.json');
+    expect(calls.some((call) => call.includes('search=alpha.json'))).toBe(false);
+    expect(ids(results.get('f2'))).toEqual(['trex:9']);
+    expect(results.get('f3')).toEqual([]);
+    expect(results.get('f4')).toEqual([]);
   });
 
   test('returns an empty list on a 502, caches nothing, and retries on the next call', async () => {
@@ -145,6 +219,36 @@ describe('TrexEventSearch', () => {
       expect(await search.findForFixture(FIXTURE)).toEqual([]);
       expect(search.cachedFor('f1')).toEqual([]);
       expect(warn).toHaveBeenCalledWith('[TrexEventSearch] search failed: BODY_TOO_LARGE');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('stops reading a streamed body at the 512 KB cap', async () => {
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let pulls = 0;
+      const body = new ReadableStream({
+        pull(controller) {
+          pulls += 1;
+          if (pulls > 10) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(new Uint8Array(200 * 1024).fill(120));
+        }
+      });
+      const search = new TrexEventSearch({
+        baseUrl: BASE,
+        fetchImpl: async () => ({ ok: true, status: 200, body }),
+        now: () => NOW
+      });
+
+      expect(await search.findForFixture(FIXTURE)).toEqual([]);
+      expect(search.cachedFor('f1')).toEqual([]);
+      expect(warn).toHaveBeenCalledWith('[TrexEventSearch] search failed: BODY_TOO_LARGE');
+      expect(pulls).toBeGreaterThanOrEqual(3);
+      expect(pulls).toBeLessThan(10);
     } finally {
       warn.mockRestore();
     }
