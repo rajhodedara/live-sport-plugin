@@ -45,8 +45,10 @@ class StreamScoringService {
       score -= 30; // Deprioritize worker-heavy streams
     } else {
       // Direct CDN bonus for providers that bypass Cloudflare Workers entirely:
-      // leaf (+30), timstreams (+25), ppvst (+20), pitsport (+15), daddylive (+10), vavoo (+5), sktech (+5)
-      if (src === 'leaf') {
+      // kafka (+35), leaf (+30), timstreams (+25), ppvst (+20), pitsport (+15), daddylive (+10), vavoo (+5), sktech (+5)
+      if (src === 'kafka') {
+        score += 35;
+      } else if (src === 'leaf') {
         score += 30;
       } else if (src === 'timstreams') {
         score += 25;
@@ -70,7 +72,7 @@ class StreamScoringService {
 
     // 4. Source Reliability
     // Non-TikTok (or zero-bandwidth ByteRange) reliable sources
-    const reliableSources = ['leaf', 'timstreams', 'ppvst', 'pitsport', 'daddylive', 'golf', 'echo', 'delta', 'vavoo'];
+    const reliableSources = ['kafka', 'leaf', 'timstreams', 'ppvst', 'pitsport', 'daddylive', 'golf', 'echo', 'delta', 'vavoo'];
     if ((!isTikTok || isZeroBandwidthByteRange) && reliableSources.includes(src)) {
       score += 15;
     }

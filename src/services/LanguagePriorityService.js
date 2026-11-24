@@ -333,6 +333,11 @@ function compareStreams(a, b, priorities) {
     const rankDelta = languageRank(a && a.language, priorities) - languageRank(b && b.language, priorities);
     if (rankDelta) return rankDelta;
 
+    // Within each language: Kafka (Priority 1) streams are placed at the top of the list
+    const aIsKafka = Boolean(a && (a._source === 'kafka' || a.sourceName === 'kafka')) ? 1 : 0;
+    const bIsKafka = Boolean(b && (b._source === 'kafka' || b.sourceName === 'kafka')) ? 1 : 0;
+    if (aIsKafka !== bIsKafka) return bIsKafka - aIsKafka;
+
     // Within each language: prefer standard feed, backup last
     const aIsBackup = Boolean(a && (a.isBackup || a._isBackup || (a.title && /\bbackup\b/i.test(a.title))));
     const bIsBackup = Boolean(b && (b.isBackup || b._isBackup || (b.title && /\bbackup\b/i.test(b.title))));

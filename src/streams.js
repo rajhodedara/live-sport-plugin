@@ -56,6 +56,7 @@ function isEventStreamSource(src) {
 }
 
 const SOURCE_PRIORITY = {
+  kafka: 1,
   leaf: 1,
   scorezone: 1,
   timstreams: 2,
@@ -65,7 +66,6 @@ const SOURCE_PRIORITY = {
   daddylive: 5,
   roxiestreams: 5,
   vavoo: 6,
-  kafka: 6,
   sktech: 7,
   damitv: 8,
   ak47live: 8,

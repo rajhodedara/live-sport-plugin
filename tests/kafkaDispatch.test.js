@@ -22,9 +22,9 @@ describe('Kafka Stream Dispatch and Selection', () => {
     expect(CHANNEL_TITLE_NICE_NAMES.kafka).toBe('Kafka');
   });
 
-  test('kafka has an explicit priority in SOURCE_PRIORITY near Vavoo', () => {
+  test('kafka has top-tier priority 1 in SOURCE_PRIORITY', () => {
     expect(SOURCE_PRIORITY.kafka).toBeDefined();
-    expect(SOURCE_PRIORITY.kafka).toBe(6);
+    expect(SOURCE_PRIORITY.kafka).toBe(1);
   });
 
   test('selectSources includes kafka in default fallback list and filters by liveSources config', () => {
@@ -149,5 +149,36 @@ describe('Kafka Stream Dispatch and Selection', () => {
     } finally {
       container.resolve = originalResolve;
     }
+  });
+
+  test('compareStreams places kafka streams at the top of the list for the language tier', () => {
+    const { compareStreams, parseLanguagePriority, DIRECT_STREAM_NAME } = require('../src/services/LanguagePriorityService');
+    const priorities = parseLanguagePriority({});
+
+    const daddyliveStream = {
+      name: DIRECT_STREAM_NAME,
+      _source: 'daddylive',
+      language: 'English',
+      resolution: '1080p',
+      score: 110,
+      speedScore: 90
+    };
+
+    const kafkaStream = {
+      name: DIRECT_STREAM_NAME,
+      _source: 'kafka',
+      language: 'English',
+      resolution: '1080p',
+      score: 90,
+      speedScore: 80
+    };
+
+    // Kafka stream must outrank non-Kafka stream in same language
+    expect(compareStreams(kafkaStream, daddyliveStream, priorities)).toBeLessThan(0);
+    expect(compareStreams(daddyliveStream, kafkaStream, priorities)).toBeGreaterThan(0);
+
+    const sorted = [daddyliveStream, kafkaStream].sort((a, b) => compareStreams(a, b, priorities));
+    expect(sorted[0]._source).toBe('kafka');
+    expect(sorted[1]._source).toBe('daddylive');
   });
 });
