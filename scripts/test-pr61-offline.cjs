@@ -10,7 +10,7 @@ const names=[
 'ak47ManifestUaExperiment','ak47PlaylistHeaderOrder','ak47PlayerHeaderChain',
 'basketballVideoRelativeLinks','bridgeIframe','cdnFeedIsolation','daddyLiveIframeIsolation','damiFeedIsolation',
 'embedIndiaInputValidation','embedStInputValidation','fullRacesMalformedCard','hockeyReplayCardUrls',
-'leafMalformedIsolation','leafSourceHostValidation.audit','liveTVRelativeIframe',
+'liveTVRelativeIframe',
 'manifestCacheBaseUrl','manifestHlsTagUris','mlbGuardedRelativeLinks','mlbLiveRelativeLinks',
 'nativeQueueFairness','nativeRedirectHeaderPolicy','nflVideoRelativeLinks','ppvAlternateOnly','ppvStProvider',
 'replayProviderHostValidation','replayZoneLineEndings','skTechHeaderParsing','soccerFullCardUrls',

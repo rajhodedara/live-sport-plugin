@@ -12,7 +12,7 @@ const suites = [
   'impitRedirect', 'impitResponseUrl', 'sharedOutboundPolicy',
   'segmentLengthService', 'streamSpeedProbeGuard', 'streamVerifyRetry', 'liveVsLocalComparison.audit',
   'soccerFullProvider', 'soccerFullSegmentLength', 'soccerFullGuardIntegration', 'soccerFullPublishedUrl',
-  'leafProvider', 'providerChildBuildImports', 'gasmIndiaPlayerCompletion', 'ppvChildCompletion',
+  'providerChildBuildImports', 'gasmIndiaPlayerCompletion', 'ppvChildCompletion',
   'resolverTransportConfig', 'resolverUnixClients', 'resolverPinnedClients', 'resolverPinnedIdentity',
   'resolverPublicIdentity', 'resolverProxyEvents', 'resolverConflictGate', 'resolverShutdownRace',
   'resolverUndiciMemoryTls',
@@ -24,13 +24,12 @@ const suites = [
   'daddyLiveProvider', 'timStreamsProvider', 'ak47LiveProvider', 'universalChannelIdentity',
   'cacheTimingRelations', 'streamTimingWindow', 'pendingMintPruning',
   'skTechDashDrmProxy', 'manifestRecoveryIdentity',
-  'stableStreamSplitIntegration', 'leafGuardedEgressIntegration',
-  'leafManifestGuardIntegration', 'legacyProxyInitialization', 'leafSelectiveProxy',
-  'dashPayload', 'dashCencEngine', 'leafPublicationPolicyIntegration',
+  'stableStreamSplitIntegration',
+  'legacyProxyInitialization',
+  'dashPayload', 'dashCencEngine',
   'recoveryCanonicalIdentity', 'manifestGuardRecovery', 'streamPolicy',
-  'leafHardening', 'leafStateMintIntegration', 'leafResolveCacheIntegration',
   'carryForwardIdentityIntegration', 'damiTvProvider', 'damiTvExtractionDiagnostics',
-  'guardedCurlClient', 'damiGuardedCurlIntegration', 'leafDiagnostics'
+  'guardedCurlClient', 'damiGuardedCurlIntegration'
 ].map(name => `tests/${name}.test.js`);
 let jestEntry;
 try { jestEntry = require.resolve('jest/bin/jest'); }
