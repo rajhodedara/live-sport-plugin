@@ -16,6 +16,15 @@
  * The manifest URL is never logged; failures report a bounded kind only.
  */
 
+// Cron does not inherit the application environment, and the manifest URL is a
+// secret that must never live in the crontab. Load the app's .env when the job
+// runs from the deploy directory; --base-url or an exported variable still wins
+// when dotenv or the file is absent.
+try {
+  require('dotenv').config({ quiet: true });
+} catch (_) {
+  /* standalone use without dotenv */
+}
 const fs = require('fs');
 const path = require('path');
 
