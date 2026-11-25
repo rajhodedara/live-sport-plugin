@@ -74,12 +74,20 @@
   ],
   "license": "MIT",
   "jest": {
+    "maxWorkers": 2,
+    "roots": [
+      "<rootDir>/tests"
+    ],
     "testPathIgnorePatterns": [
       "/node_modules/",
       "/test-scripts/",
       "/scratch/",
       "/nuvio-proxy-2/",
-        "/review-checkouts/",
+      "/review-checkouts/",
+      "/.worktrees/",
+      "/.review-wt/",
+      "/dist/",
+      "/dist.next/",
       "/tests/load/"
     ],
     "testMatch": [

@@ -567,7 +567,17 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // ONLY for continuous 24/7 TV channels (e.g. networks catalog) — NEVER discard provider thumbnails
   // for sporting events, motorsport, or replays!
   const is247Channel = (match.category === 'networks' || match.isChannel || (match.id && (match.id.startsWith('dlv_ch_') || match.id.startsWith('cdn_ch_') || match.id.startsWith('sktech_ch_') || match.id.startsWith('vavoo_') || match.id.startsWith('scorezone_ch_') || match.id.includes('_ch_')))) && !isMatchup;
-  const customLogo = (is247Channel || (!isReplay && !isMotorsport)) ? getChannelLogo(match.title) : null;
+  // Live and upcoming sporting events always use our own generated /img/match
+  // poster regardless of what artwork a provider supplies; provider artwork is
+  // only used for 24/7 channels and replays.
+  const useOwnEventPoster = !isReplay && !is247Channel;
+  if (useOwnEventPoster) {
+    providerPoster = null;
+    providerThumb = null;
+    providerLogo = null;
+    isChannelThumbnail = false;
+  }
+  const customLogo = is247Channel ? getChannelLogo(match.title) : null;
   if (customLogo && !isMatchup && !isReplay && !isMotorsport) {
     isChannelThumbnail = false; // We want to use it as the main artwork, not a tiny badge
     providerLogo = customLogo;
@@ -699,7 +709,7 @@ function mapMatchToMetaPreview(match, config = {}, reqType = 'tv') {
   // Using our crisp plugin badge ensures our branded logo is displayed every time a stream buffers.
   const logo = `${BASE_URL}/logo.png`;
   
-  const matchBackground = match.background ? normalizeImageUrl(match.background) : null;
+  const matchBackground = (!useOwnEventPoster && match.background) ? normalizeImageUrl(match.background) : null;
   // If the poster was embedded, embed the background too since it defaults to poster
   const embedBg = (!matchBackground && poster.includes('embed=1')) || false;
   let background = matchBackground ? (buildImg(matchBackground, posterText, color) || poster) : poster;
