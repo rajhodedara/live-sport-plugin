@@ -49,6 +49,7 @@ const ProviderHealthService = require('./services/ProviderHealthService');
 const BroadcasterMatchService = require('./services/BroadcasterMatchService');
 const DashToHlsService = require('./services/DashToHlsService');
 const HlsQualityProbe = require('./services/HlsQualityProbe');
+const UsageStatsService = require('./services/UsageStatsService');
 
 const container = createContainer({
   injectionMode: InjectionMode.PROXY
@@ -80,7 +81,8 @@ container.register({
   // Trex catalog coverage: the store opens the SQLite catalog lazily and the
   // event search owns its own cache, so both are safe singletons.
   trexCatalogStore: asFunction(() => new TrexCatalogStore()).singleton(),
-  trexEventSearch: asFunction(() => new TrexEventSearch()).singleton()
+  trexEventSearch: asFunction(() => new TrexEventSearch()).singleton(),
+  usageStatsService: asFunction(() => new UsageStatsService()).singleton()
 });
 
 // Build dynamic YAML Providers

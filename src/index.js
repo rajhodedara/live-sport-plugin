@@ -58,6 +58,12 @@ const app = express();
 
 app.set('trust proxy', true);
 app.use(cors());
+app.use((req, _res, next) => {
+  try {
+    container.resolve('usageStatsService').recordRequest(req);
+  } catch (_) {}
+  next();
+});
 
 // Artwork under /posters is large (the replay hero JPEGs are ~100-200 KB) and
 // rarely changes, but it used to be sent with no-store. That made Cloudflare
@@ -1308,6 +1314,8 @@ app.get([
   }
   next();
 });
+
+app.use(require('./routes/stats'));
 
 // Mount the Stremio addon router
 app.use(getRouter(builder.getInterface()));
