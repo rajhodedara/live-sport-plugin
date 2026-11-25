@@ -1728,6 +1728,23 @@ async function handleStream(type, id, config) {
       };
     };
 
+    const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
+    const isTvChannel = Boolean(
+      (type === 'tv' || type === 'channel') &&
+      (match ? (
+        match.category === 'networks' ||
+        match.isChannel ||
+        String(match.date) === '0' ||
+        match.kickoff === 0 ||
+        String(match.id || '').includes('_ch_') ||
+        String(id || '').includes('_ch_')
+      ) : (
+        String(id || '').includes('_ch_') ||
+        String(id || '').includes('channel')
+      ))
+    );
+    const hasPendingKafkaChannel = () => isTvChannel && inFlight.some(f => f.source === 'kafka' && !f.settled);
+
     const warmPriority1 = inFlight.filter(f => f.wasWarm);
     if (targetP1Quorum > 0 && new Set(warmPriority1.map(f => f.key)).size >= targetP1Quorum) {
       // has() is only a hint: expiry can turn that cheap read into a new mint.
@@ -1735,6 +1752,7 @@ async function handleStream(type, id, config) {
       // formerly warm key is still being refreshed.
       const warm = observeUntil(() => {
         if (inFlight.every(f => f.settled)) return true;
+        if (hasPendingKafkaChannel()) return false;
         const eligible = publicationRows();
         const hasEventProgress = hasVerifiedKafkaEvent(eligible);
         if (inFlight.some(f => f.eventDiscovery && !f.settled) && !hasEventProgress) return false;
@@ -1763,24 +1781,10 @@ async function handleStream(type, id, config) {
     // If no stream is available, or fewer than three distinct Priority-1
     // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
     // cannot stall a normal event once a playable Priority-1 quorum is ready.
-    const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
-    const isTvChannel = Boolean(
-      (type === 'tv' || type === 'channel') &&
-      (match ? (
-        match.category === 'networks' ||
-        match.isChannel ||
-        String(match.date) === '0' ||
-        match.kickoff === 0 ||
-        String(match.id || '').includes('_ch_') ||
-        String(id || '').includes('_ch_')
-      ) : (
-        String(id || '').includes('_ch_') ||
-        String(id || '').includes('channel')
-      ))
-    );
     const hasEventDiscovery = inFlight.some(f => f.eventDiscovery);
     const readyToRespond = () => {
       if (inFlight.every(f => f.settled)) return true;
+      if (hasPendingKafkaChannel()) return false;
       const eligible = publicationRows();
       const hasEventProgress = hasVerifiedKafkaEvent(eligible);
       const withinSoftDeadline = (Date.now() - resolutionStartedAt) < SOFT_DEADLINE_MS;

@@ -262,4 +262,94 @@ describe('handleStream hard response deadline', () => {
       if (prevManifest === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = prevManifest;
     }
   });
+
+  test('for 24/7 TV channel, waits for all kafka sources to settle even after TV_CHANNEL_QUORUM is met', async () => {
+    const channelMatch = {
+      id: 'dlv_ch_247_espn',
+      title: 'ESPN',
+      category: 'networks',
+      isChannel: true,
+      sources: [
+        { source: 'kafka', id: 'k1' },
+        { source: 'kafka', id: 'k2' },
+        { source: 'daddylive', id: 'dl1' }
+      ]
+    };
+    const k1 = deferred();
+    const k2 = deferred();
+    const dl1 = deferred();
+    const services = {
+      cacheService: { findMatch: () => channelMatch },
+      streamResolveCache: {
+        getOrCreate: jest.fn(key => (key.endsWith(':k1') ? k1.promise : key.endsWith(':k2') ? k2.promise : dl1.promise))
+      },
+      streamScorer: { calculateScore: () => 1 }
+    };
+    container.resolve.mockImplementation(name => services[name]);
+
+    let response;
+    handleStream('tv', 'nuvio_sport_dlv_ch_247_espn').then(value => { response = value; });
+
+    await jest.advanceTimersByTimeAsync(20);
+    // 5 direct streams already ready (meets default TV_CHANNEL_QUORUM = 5), but k2 is still pending
+    k1.resolve([playable('https://cdn.example/k1.m3u8')]);
+    dl1.resolve([
+      playable('https://cdn.example/dl1.m3u8'),
+      playable('https://cdn.example/dl2.m3u8'),
+      playable('https://cdn.example/dl3.m3u8'),
+      playable('https://cdn.example/dl4.m3u8')
+    ]);
+    await jest.advanceTimersByTimeAsync(110);
+    expect(response).toBeUndefined();
+
+    // Once the remaining kafka source resolves at 150ms, handleStream responds immediately
+    k2.resolve([playable('https://cdn.example/k2.m3u8')]);
+    await jest.advanceTimersByTimeAsync(10);
+    expect(response).toBeDefined();
+    expect(response.streams.map(s => s.url)).toEqual(expect.arrayContaining([
+      'https://cdn.example/k1.m3u8',
+      'https://cdn.example/k2.m3u8'
+    ]));
+  });
+
+  test('for 24/7 TV channel with warm Priority-1 quorum, still waits for unsettled kafka sources', async () => {
+    const channelMatch = {
+      id: 'dlv_ch_247_sky',
+      title: 'Sky Sports',
+      category: 'networks',
+      isChannel: true,
+      sources: [
+        { source: 'kafka', id: 'k1' },
+        { source: 'kafka', id: 'k2' },
+        { source: 'kafka', id: 'k3' },
+        { source: 'kafka', id: 'k4' }
+      ]
+    };
+    const d = { k1: deferred(), k2: deferred(), k3: deferred(), k4: deferred() };
+    const services = {
+      cacheService: { findMatch: () => channelMatch },
+      streamResolveCache: {
+        has: jest.fn(() => true),
+        getOrCreate: jest.fn(key => d[key.split(':').pop()].promise)
+      },
+      streamScorer: { calculateScore: () => 1 }
+    };
+    container.resolve.mockImplementation(name => services[name]);
+
+    let response;
+    handleStream('tv', 'nuvio_sport_dlv_ch_247_sky').then(value => { response = value; });
+
+    await jest.advanceTimersByTimeAsync(10);
+    d.k1.resolve([playable('https://cdn.example/k1.m3u8')]);
+    d.k2.resolve([playable('https://cdn.example/k2.m3u8')]);
+    d.k3.resolve([playable('https://cdn.example/k3.m3u8')]);
+    // 3 warm Priority-1 sources resolved, but k4 is still pending
+    await jest.advanceTimersByTimeAsync(110);
+    expect(response).toBeUndefined();
+
+    d.k4.resolve([playable('https://cdn.example/k4.m3u8')]);
+    await jest.advanceTimersByTimeAsync(10);
+    expect(response).toBeDefined();
+    expect(response.streams).toHaveLength(4);
+  });
 });
