@@ -314,6 +314,8 @@ app.get('/api/matches', (req, res) => {
   res.json(matches);
 });
 
+app.use(require('./routes/stats'));
+
 // ─── Self-hosted image pipeline ───────────────────────────────────────
 // /img?url=...          → cached upstream image, or a generated category-colored
 //                         placeholder on any failure (dead URL, non-image body,
@@ -1314,8 +1316,6 @@ app.get([
   }
   next();
 });
-
-app.use(require('./routes/stats'));
 
 // Mount the Stremio addon router
 app.use(getRouter(builder.getInterface()));
