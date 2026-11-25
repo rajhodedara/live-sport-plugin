@@ -87,4 +87,43 @@ describe('Kafka frozen-playlist rule in verifyStreams', () => {
       else process.env.KAFKA_LIVENESS_GUARD_ENABLED = previous;
     }
   });
+
+  describe('requireLivePlaylist event verification mode', () => {
+    test('drops 502, ended sequence-0, and ended advancing playlists while keeping live and master playlists', async () => {
+      const stream = makeStream('kafka');
+      const cache = makeCache();
+
+      safeFetch.mockResolvedValue({ status: 502, text: async () => 'Bad Gateway' });
+      await expect(verifyStreams([stream], null, parser, cache, { requireLivePlaylist: true })).resolves.toEqual([]);
+
+      safeFetch.mockResolvedValue({
+        status: 200,
+        text: async () => '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:4,\nseg0.ts\n#EXT-X-ENDLIST\n'
+      });
+      await expect(verifyStreams([stream], null, parser, cache, { requireLivePlaylist: true })).resolves.toEqual([]);
+
+      safeFetch.mockResolvedValue({
+        status: 200,
+        text: async () => '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:12\n#EXTINF:4,\nseg12.ts\n#EXT-X-ENDLIST\n'
+      });
+      await expect(verifyStreams([stream], null, parser, cache, { requireLivePlaylist: true })).resolves.toEqual([]);
+
+      safeFetch.mockResolvedValue({ status: 403, text: async () => 'Forbidden' });
+      await expect(verifyStreams([stream], null, parser, cache, { requireLivePlaylist: true })).resolves.toEqual([]);
+
+      safeFetch.mockResolvedValue({
+        status: 200,
+        text: async () => '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1280x720\n720p.m3u8\n'
+      });
+      const master = await verifyStreams([stream], null, parser, cache, { requireLivePlaylist: true });
+      expect(master).toHaveLength(1);
+
+      safeFetch.mockResolvedValue({
+        status: 200,
+        text: async () => '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:9\n#EXTINF:4,\nseg9.ts\n'
+      });
+      const live = await verifyStreams([makeStream('kafka')], null, parser, cache, { requireLivePlaylist: true });
+      expect(live).toHaveLength(1);
+    });
+  });
 });

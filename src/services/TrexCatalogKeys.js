@@ -33,10 +33,18 @@
  * removed first: NFKD unfolds them into plain letters, which would leave a
  * `raw` token in `SKY SPORTS ᴿᴬᵂ`.
  */
+const LATIN_FOLD = Object.freeze({
+  '\u00f8': 'o', '\u00d8': 'O', '\u0142': 'l', '\u0141': 'L',
+  '\u0111': 'd', '\u0110': 'D', '\u00e6': 'ae', '\u00c6': 'AE',
+  '\u0153': 'oe', '\u0152': 'OE', '\u00df': 'ss', '\u1e9e': 'SS'
+});
+const LATIN_FOLD_RE = /[\u00f8\u00d8\u0142\u0141\u0111\u0110\u00e6\u00c6\u0153\u0152\u00df\u1e9e]/g;
+
 function normalizeName(value) {
   if (value == null) return '';
   return String(value)
     .replace(/\p{Lm}+/gu, '')
+    .replace(LATIN_FOLD_RE, ch => LATIN_FOLD[ch])
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -123,12 +131,15 @@ const TEAM_LEAGUES = Object.freeze({
   'ahl team': 'ahl',
   'nfl teams': 'nfl',
   'la liga': 'la liga',
-  'serie a': 'serie a'
+  'serie a': 'serie a',
+  champ: 'efl championship',
+  l1: 'efl league one',
+  l2: 'efl league two'
 });
 
-/** Club fillers that carry no identity (`Atlético de Madrid`, `Valencia CF`, `AC Milan`, `Utah Hockey Club`). */
+/** Club fillers that carry no identity (`Atlético de Madrid`, `Valencia CF`, `AC Milan`, `AS Roma`, `Utah Hockey Club`). */
 const TEAM_STOPWORDS = Object.freeze([
-  'de', 'del', 'fc', 'cf', 'ac', 'sc', 'club', 'afc', 'fk', 'sk', 'bk', 'if', 'cd', 'ud'
+  'de', 'del', 'fc', 'cf', 'ac', 'sc', 'as', 'club', 'afc', 'fk', 'sk', 'bk', 'if', 'cd', 'ud'
 ]);
 
 const TEAM_STOPWORD_SET = new Set(TEAM_STOPWORDS);
@@ -204,8 +215,29 @@ function teamChannelKeys(rawName) {
   return keys.length ? { league, keys } : null;
 }
 
+const TEAM_QUERY_ALIASES = Object.freeze({
+  inter: ['inter milan'],
+  internazionale: ['inter milan'],
+  villarreal: ['villareal'],
+  'athletic club': ['athletic bilbao'],
+  'deportivo alaves': ['alaves'],
+  'hellas verona': ['verona'],
+  'west brom': ['west bromwich albion'],
+  wolverhampton: ['wolverhampton wanderers'],
+  bolton: ['bolton wanderers'],
+  blackburn: ['blackburn rovers'],
+  derby: ['derby county']
+});
+
 function teamQueryKeys(teamName) {
-  return emitTeamKeys(identityTokens(teamName));
+  const tokens = identityTokens(teamName);
+  const primary = emitTeamKeys(tokens);
+  const extra = Object.hasOwn(TEAM_QUERY_ALIASES, tokens.join(' '))
+    ? TEAM_QUERY_ALIASES[tokens.join(' ')]
+    : Object.hasOwn(TEAM_QUERY_ALIASES, normalizeName(teamName))
+      ? TEAM_QUERY_ALIASES[normalizeName(teamName)]
+      : [];
+  return extra.length ? [...new Set([...primary, ...extra])] : primary;
 }
 
 /** The first three cleaned words of a team name, for the upstream `search=` query. */

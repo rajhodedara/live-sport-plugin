@@ -85,6 +85,56 @@ describe('ProviderHealthService', () => {
     });
   });
 
+  test('accumulates Kafka event-first playback and search metrics with snapshot isolation', () => {
+    const service = new ProviderHealthService();
+
+    service.recordKafkaPlayback({
+      discovered: 8,
+      localHits: 3,
+      sqliteHits: 2,
+      upstreamSearches: 1,
+      sharedSearches: 4,
+      attempts: 3,
+      verified: 1,
+      reason: 'exhausted',
+      searchStats: { requests: 1, sweepRequests: 0, shared: 4 }
+    });
+    service.recordKafkaPlayback({
+      discovered: 9,
+      localHits: 2,
+      sqliteHits: 2,
+      upstreamSearches: 0,
+      sharedSearches: 0,
+      attempts: 9,
+      verified: 4,
+      reason: 'complete',
+      searchStats: { requests: 1, sweepRequests: 0, shared: 4 }
+    });
+    service.recordKafkaSearchStats({ requests: 5, sweepRequests: 4, shared: 6 });
+
+    const snap = service.snapshot();
+    const kafka = snap.providers.find((item) => item.id === 'kafka');
+    expect(kafka.eventPlayback).toEqual({
+      mints: 2,
+      discovered: 17,
+      localHits: 5,
+      sqliteHits: 4,
+      upstreamSearches: 1,
+      sharedSearches: 4,
+      attempts: 12,
+      verified: 5,
+      stops: { exhausted: 1, complete: 1 },
+      searchTotals: { requests: 5, sweepRequests: 4, shared: 6 }
+    });
+
+    const serialized = JSON.stringify(snap);
+    expect(serialized).not.toContain('http');
+    expect(serialized).not.toContain('manifest.json');
+
+    snap.providers.find((item) => item.id === 'kafka').eventPlayback.stops.complete = 99;
+    expect(service.snapshot().providers.find((item) => item.id === 'kafka').eventPlayback.stops.complete).toBe(1);
+  });
+
   test('reports sync lifecycle and returns isolated snapshots', () => {
     const service = new ProviderHealthService();
     service.startSync();

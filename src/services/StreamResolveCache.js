@@ -23,7 +23,7 @@ const { withTimingWork } = require('./TimingContext');
 const resolverConflictState = require('./ResolverConflictState');
 const { allowsLegacyResolverTcp } = require('./ResolverTrustPolicy');
 const { createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError,
-  inconclusiveStreamsReason, DIRECT_RETRY_HINT } = require('./StreamResolutionOutcome');
+  inconclusiveStreamsReason, partialStreamsTtlMs, DIRECT_RETRY_HINT } = require('./StreamResolutionOutcome');
 
 // behaviorHints are small plain-JSON trees; a tight recursive copy beats V8's
 // generic structuredClone serializer by 5-15x on these shapes, and cloneStream
@@ -237,7 +237,7 @@ class StreamResolveCache {
       this.entries.delete(key);
       return false;
     }
-    return entry.status === 'deferred' || (entry.status === 'ok' && Boolean(entry.retryReason));
+    return entry.status === 'deferred' || (entry.status === 'ok' && (Boolean(entry.retryReason) || Boolean(entry.partial)));
   }
 
   /**
@@ -510,10 +510,14 @@ class StreamResolveCache {
           status = 'ok';
           ttl = this._ttlFor(sourceName);
           storedStreams = streams.map(clonePublicStream);
+          const partialTtlMs = partialStreamsTtlMs(streams);
           const retryReason = inconclusiveStreamsReason(streams);
           if (retryReason && storedStreams.every(s => s && !s.url && typeof s.externalUrl === 'string')) {
             storedStreams[0][DIRECT_RETRY_HINT] = retryReason;
             ttl = Math.min(ttl, 2000);
+            this.statsCounters.deferrals++;
+          } else if (partialTtlMs > 0) {
+            ttl = Math.min(ttl, partialTtlMs);
             this.statsCounters.deferrals++;
           }
           // A PPV web fallback is usable as a hand-off, but it must not delay
@@ -530,14 +534,18 @@ class StreamResolveCache {
             }
           }
           localEntry = this._set(key, sourceName, matchId, storedStreams, 'ok', ttl);
+          if (partialTtlMs > 0) localEntry.partial = true;
         } else {
           localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
         }
         // Keep publication authority until the RPC settles, even if an expiry
         // reader has already removed this entry from the local map.
         operation.publicationEntry = localEntry;
-        // Write-through so the other worker inherits the mint instantly.
-        if (claimed && this._sharedAvailable()) {
+        // Write-through so the other worker inherits complete/valid mints; never
+        // publish incomplete partial progress across the shared L2 cache.
+        if (claimed && localEntry.partial) {
+          await releaseOwnedClaim();
+        } else if (claimed && this._sharedAvailable()) {
           const publish = token => this._sharedJson(
             _sharedKey(key),
             {
@@ -649,7 +657,7 @@ class StreamResolveCache {
     const next = Math.min(this._ttlFor(sourceName) * 2, maxTtl);
     this.ttl.set(sourceName, next);
     const e = this.entries.get(key);
-    if (e && e.status === 'ok' && !e.retryReason && e.expiresAt > Date.now()) {
+    if (e && e.status === 'ok' && !e.retryReason && !e.partial && e.expiresAt > Date.now()) {
       e.expiresAt = Math.max(e.expiresAt, Date.now() + next);
     }
   }

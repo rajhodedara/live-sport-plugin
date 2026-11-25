@@ -264,3 +264,66 @@ test('LRU eviction during publication does not displace the newer unrelated entr
   expect(cache.entries.has(otherKey)).toBe(true);
   expect(cache.entries.has(key)).toBe(false);
 });
+
+test('incomplete event discovery uses short freshness, keeps background probes shared across viewers, and exposes added feeds on retry', async () => {
+  const prevFlags = [process.env.KAFKA_EVENT_FIRST_ENABLED, process.env.KAFKA_ENABLED, process.env.KAFKA_MANIFEST_URL];
+  process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+  process.env.KAFKA_ENABLED = 'true';
+  process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+  const KafkaProvider = require('../src/providers/KafkaProvider');
+
+  try {
+    const candidates = [
+      { id: 'trex:fast', name: 'Live | Team A vs Team B | Feed 1', score: 9000 },
+      { id: 'trex:slow1', name: 'Live | Team A vs Team B | Feed 2', score: 8000 },
+      { id: 'trex:slow2', name: 'Live | Team A vs Team B | Feed 3', score: 7000 }
+    ];
+    let activeProbes = 0;
+    let peakProbes = 0;
+    let releaseSlow1;
+    let releaseSlow2;
+    const resolveStream = jest.fn(async (id) => {
+      activeProbes += 1;
+      peakProbes = Math.max(peakProbes, activeProbes);
+      try {
+        if (id === 'trex:slow1') await new Promise(r => { releaseSlow1 = r; });
+        if (id === 'trex:slow2') await new Promise(r => { releaseSlow2 = r; });
+        return [{ name: 'Kafka', title: id, url: `https://cdn.fixture.test/${id}.m3u8` }];
+      } finally {
+        activeProbes -= 1;
+      }
+    });
+    const kafkaProvider = new KafkaProvider({
+      catalogStore: { isReady: () => true, findEvents: () => candidates, findChannel: () => [], findTeam: () => [] },
+      eventSearch: { cachedFor: () => [], findForFixture: async () => [], isInWindow: () => true }
+    });
+    kafkaProvider.resolveStream = resolveStream;
+
+    const eventMatch = {
+      id: 'partial-ev', title: 'Team A vs Team B', category: 'football',
+      date: Date.now(), team1: 'Team A', team2: 'Team B', sources: []
+    };
+    services.kafkaProvider = kafkaProvider;
+    services.cacheService = { findMatch: () => eventMatch };
+
+    const viewPromises = Array.from({ length: 20 }, () => handleStream('tv', 'nuvio_sport_partial-ev', {}));
+    await jest.advanceTimersByTimeAsync(110);
+    const firstBatch = await Promise.all(viewPromises);
+    expect(peakProbes).toBe(2);
+    expect(firstBatch.every(r => r.streams.length === 1 && r.cacheMaxAge === 2)).toBe(true);
+
+    releaseSlow1();
+    releaseSlow2();
+    await jest.advanceTimersByTimeAsync(2000);
+
+    const refreshed = await handleStream('tv', 'nuvio_sport_partial-ev', {});
+    expect(refreshed.streams.map(s => s.url)).toHaveLength(3);
+    expect(refreshed.cacheMaxAge).toBe(30);
+    expect(resolveStream).toHaveBeenCalledTimes(3);
+  } finally {
+    const [a, b, c] = prevFlags;
+    if (a === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = a;
+    if (b === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = b;
+    if (c === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = c;
+  }
+});

@@ -12,6 +12,7 @@
 
 const { openDatabase } = require('./TrexCatalogDb');
 const { teamQueryKeys, channelKey } = require('./TrexCatalogKeys');
+const { fixturePairKeys, matchesFixture } = require('./TrexFixtureMatch');
 
 const RETRY_AFTER_MS = 60 * 1000;
 
@@ -68,19 +69,21 @@ class TrexCatalogStore {
     }
   }
 
-  _query(normKey, context) {
+  _query(normKey, context, { kind = '' } = {}) {
     if (!normKey || !this.isReady()) return [];
     let rows;
     try {
+      const kindSql = kind ? ' AND c.kind = ?' : '';
+      const params = kind ? [normKey, kind] : [normKey];
       rows = this.db
         .prepare(
           `SELECT c.id AS id, c.name AS name, c.grp AS grp, c.league AS league, k.score AS score
              FROM channel_keys k
              JOIN channels c ON c.id = k.channel_id
-            WHERE k.norm_key = ?
+            WHERE k.norm_key = ?${kindSql}
             ORDER BY k.score DESC`
         )
-        .all(normKey);
+        .all(...params);
     } catch (error) {
       console.warn(`[TrexCatalogStore] query failed: ${errorKind(error)}`);
       return [];
@@ -101,7 +104,7 @@ class TrexCatalogStore {
   findTeam(teamName) {
     if (!this.isReady()) return [];
     for (const key of teamQueryKeys(teamName)) {
-      const hits = this._query(key);
+      const hits = this._query(key, {}, { kind: 'team' });
       if (hits.length) return hits;
     }
     return [];
@@ -137,6 +140,26 @@ class TrexCatalogStore {
     } catch (error) {
       console.warn(`[TrexCatalogStore] stats failed: ${errorKind(error)}`);
       return { rows: 0, teams: 0, channels: 0, generatedAt: null };
+    }
+  }
+
+  /** Indexed opponent-pair lookup. The legacy catalog still supports its
+   * regular broadcaster/team lookups until a v2 refresh commits. */
+  findEvents(match) {
+    const keys = [...fixturePairKeys(match)];
+    if (!keys.length || !this.isReady()) return [];
+    try {
+      if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='event_pairs'").get()) return [];
+      const params = keys.map(() => '?').join(',');
+      return this.db.prepare(`
+        SELECT c.id, c.name, c.grp AS "group", e.score
+          FROM event_pairs e JOIN channels c ON c.id = e.channel_id
+         WHERE e.pair_key IN (${params})
+         ORDER BY e.score DESC, e.channel_id
+      `).all(...keys).filter(row => matchesFixture(row.name, match));
+    } catch (error) {
+      console.warn(`[TrexCatalogStore] event lookup failed: ${errorKind(error)}`);
+      return [];
     }
   }
 

@@ -172,4 +172,70 @@ describe('MatchAggregator Kafka catalog coverage', () => {
       warn.mockRestore();
     }
   });
+
+  describe('event-first eligibility and search stats', () => {
+    const prevFlag = process.env.KAFKA_EVENT_FIRST_ENABLED;
+    beforeEach(() => { process.env.KAFKA_EVENT_FIRST_ENABLED = 'true'; });
+    afterEach(() => {
+      if (prevFlag === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED;
+      else process.env.KAFKA_EVENT_FIRST_ENABLED = prevFlag;
+    });
+
+    test('enriches an eligible live overtime fixture past 14 hours and records search totals', async () => {
+      const now = Date.now();
+      const overtimeMatch = new MatchEntity({
+        id: 'overtime-fixture',
+        title: 'Denver Nuggets vs Dallas Mavericks',
+        category: 'basketball',
+        date: String(now - 15 * 3600 * 1000),
+        status: 'live',
+        team1: { name: 'Denver Nuggets' },
+        team2: { name: 'Dallas Mavericks' },
+        sources: [{ source: 'daddylive', id: '1', channelName: 'NBA TV' }]
+      });
+      const kafkaProvider = coverageProvider({
+        isEventFixtureEligible: jest.fn(() => true),
+        eventSearch: { stats: { requests: 3, sweepRequests: 2, shared: 1 } }
+      });
+      const providerHealthService = { ...healthService(), recordKafkaSearchStats: jest.fn() };
+      const aggregator = new MatchAggregator({
+        daddyLiveProvider: { name: 'DummyLive', sourceName: 'daddylive', getMatches: jest.fn().mockResolvedValue([overtimeMatch]) },
+        kafkaProvider,
+        cacheService: cacheService(),
+        providerHealthService
+      });
+
+      const results = await aggregator.syncMatches();
+      const enriched = results.find((row) => row.id === 'overtime-fixture');
+      expect(enriched.sources.some((s) => s.source === 'kafka' && s.matchMode === 'event')).toBe(true);
+      expect(providerHealthService.recordKafkaSearchStats).toHaveBeenCalledWith({ requests: 3, sweepRequests: 2, shared: 1 });
+    });
+
+    test('enriches a zero-source eligible fixture directly in _enrichMatchesWithKafka even without coverage DB', () => {
+      const kafkaProvider = coverageProvider({
+        isCoverageReady: jest.fn(() => false),
+        isEventFixtureEligible: jest.fn(() => true),
+        createSourcesForFixture: jest.fn(() => [
+          { source: 'kafka', id: 'fx:ev', channelName: 'Live | Mavericks vs. Nuggets', catalogId: 'flix-live-tv-v2-trex', matchMode: 'event' }
+        ])
+      });
+      const aggregator = new MatchAggregator({
+        kafkaProvider,
+        cacheService: cacheService()
+      });
+      const zeroSources = new MatchEntity({
+        id: 'zero-src-fixture',
+        title: 'Denver Nuggets vs Dallas Mavericks',
+        category: 'basketball',
+        date: String(Date.now() - 57 * 60000),
+        team1: { name: 'Denver Nuggets' },
+        team2: { name: 'Dallas Mavericks' },
+        sources: []
+      });
+
+      aggregator._enrichMatchesWithKafka([zeroSources]);
+      expect(zeroSources.sources).toHaveLength(1);
+      expect(zeroSources.sources[0]).toMatchObject({ source: 'kafka', id: 'fx:ev', matchMode: 'event' });
+    });
+  });
 });

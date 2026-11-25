@@ -7,6 +7,7 @@ const StreamEntity = require('../domain/StreamEntity');
 const { isBlockedStream } = require('../services/StreamPolicy');
 const { resolutionFromTag } = require('../services/StreamBitrateProbe');
 const { getRequestBaseUrl } = require('../config');
+const { isFixtureSearchable } = require('../services/TrexEventSearch');
 
 const GENERIC_CATALOG_ID = 'flix-live-tv-v2-trex';
 const DEFAULT_CATALOG_TIMEOUT_MS = 15000;
@@ -40,6 +41,8 @@ class KafkaProvider extends BaseProvider {
 
     this.catalogStore = (opts && opts.catalogStore) || null;
     this.eventSearch = (opts && opts.eventSearch) || null;
+    this._activeEventProbes = 0;
+    this._eventProbeWaiters = new Set();
   }
 
   get configured() {
@@ -373,6 +376,96 @@ class KafkaProvider extends BaseProvider {
     return process.env.KAFKA_EVENT_SEARCH_ENABLED !== 'false';
   }
 
+  isEventFixtureEligible(match, now = Date.now()) {
+    return process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' && this.configured &&
+      this._eventSearchEnabled() && Boolean(match?.id) && this.teamNamesOf(match).length === 2 &&
+      isFixtureSearchable(match, now);
+  }
+
+  upstreamMinLocal() {
+    const raw = process.env.KAFKA_EVENT_UPSTREAM_MIN_LOCAL;
+    if (raw === undefined || raw === '') return 6;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 6;
+  }
+
+  // SQLite and already-cached event searches are cheap enough for the sync path.
+  _localEventCandidates(match, stats = null) {
+    const sqliteRows = this.catalogStore?.findEvents?.(match) || [];
+    const cachedRows = this.eventSearch?.cachedFor?.(match) || [];
+    if (stats && typeof stats === 'object') {
+      stats.sqliteHits = sqliteRows.length;
+      stats.cachedHits = cachedRows.length;
+    }
+    return [...sqliteRows, ...cachedRows];
+  }
+
+  _rankEvents(candidates) {
+    const seen = new Set();
+    // Preserve the catalog's ranking inside each availability tier.
+    const tier = (hit) => /^live\s*\|/i.test(hit.name) ? 0 : /^next\s*\|/i.test(hit.name) ? 2 : 1;
+    return candidates.filter(hit => hit?.id)
+      .sort((a, b) => tier(a) - tier(b))
+      .filter(hit => {
+        if (seen.has(hit.id)) return false;
+        seen.add(hit.id);
+        return true;
+      });
+  }
+
+  async eventCandidates(match, { upstream = false, signal, now = Date.now(), stats = null } = {}) {
+    if (!this.isEventFixtureEligible(match, now) || signal?.aborted) return [];
+    const candidates = this._localEventCandidates(match, !upstream ? stats : null);
+    if (upstream && this.eventSearch) {
+      const before = this.eventSearch.stats
+        ? { requests: this.eventSearch.stats.requests || 0, shared: this.eventSearch.stats.shared || 0 }
+        : null;
+      const extra = await this.eventSearch.findForFixture(match, { signal });
+      const after = this.eventSearch.stats
+        ? { requests: this.eventSearch.stats.requests || 0, shared: this.eventSearch.stats.shared || 0 }
+        : null;
+      if (stats && typeof stats === 'object' && before && after) {
+        stats.upstreamSearches = (stats.upstreamSearches || 0) + Math.max(0, after.requests - before.requests);
+        stats.sharedSearches = (stats.sharedSearches || 0) + Math.max(0, after.shared - before.shared);
+      }
+      candidates.push(...extra);
+    }
+    return this._rankEvents(candidates);
+  }
+
+  /** Transfers an occupied slot directly to the next live waiter. */
+  async withEventProbe(probe, signal) {
+    signal?.throwIfAborted();
+    if (this._activeEventProbes < 2) {
+      this._activeEventProbes++;
+    } else {
+      await new Promise((resolve, reject) => {
+        const abort = () => {
+          this._eventProbeWaiters.delete(start);
+          reject(signal.reason);
+        };
+        const start = () => {
+          signal?.removeEventListener('abort', abort);
+          resolve();
+        };
+        this._eventProbeWaiters.add(start);
+        signal?.addEventListener('abort', abort, { once: true });
+      });
+    }
+    try {
+      signal?.throwIfAborted();
+      return await probe();
+    } finally {
+      const next = this._eventProbeWaiters.values().next().value;
+      if (next) {
+        this._eventProbeWaiters.delete(next);
+        next();
+      } else {
+        this._activeEventProbes--;
+      }
+    }
+  }
+
   /** Team names of a fixture, from objects with a name or from plain strings. */
   teamNamesOf(match) {
     if (!match) return [];
@@ -393,7 +486,10 @@ class KafkaProvider extends BaseProvider {
    * label that matches nothing adds nothing.
    */
   createSourcesForFixture(match, { now = Date.now() } = {}) {
-    if (!match || !this.isCoverageReady()) return [];
+    if (!match) return [];
+    const coverageReady = this.isCoverageReady();
+    const eventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true';
+    if (!coverageReady && !eventFirst) return [];
     const out = [];
     const seen = new Set();
     const add = (candidate, matchMode) => {
@@ -431,13 +527,18 @@ class KafkaProvider extends BaseProvider {
       });
     };
 
-    if (this.eventSearch && this._eventSearchEnabled()) {
+    if (eventFirst) {
+      if (this.isEventFixtureEligible(match, now)) {
+        for (const candidate of this._rankEvents(this._localEventCandidates(match))) add(candidate, 'event');
+      }
+    } else if (this.eventSearch && this._eventSearchEnabled()) {
       const kickoff = Number(match.date);
       if (Number.isFinite(kickoff) && this.eventSearch.isInWindow(kickoff, now)) {
         for (const candidate of this.eventSearch.cachedFor(match.id) || []) add(candidate, 'event');
       }
     }
 
+    if (!coverageReady) return out;
     const isChannel = Boolean(
       match.category === 'networks' ||
       match.rawCategory === '24/7 TV Channels' ||
@@ -481,7 +582,11 @@ class KafkaProvider extends BaseProvider {
   async sweepEvents(matches, { maxSearches } = {}) {
     if (!this.eventSearch || !this._eventSearchEnabled() || !Array.isArray(matches) || matches.length === 0) return 0;
     try {
-      const results = await this.eventSearch.sweep(matches, maxSearches === undefined ? {} : { maxSearches });
+      const pending = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true'
+        ? matches.filter(match => this.isEventFixtureEligible(match) && this._rankEvents(this._localEventCandidates(match)).length < 2)
+        : matches;
+      if (!pending.length) return 0;
+      const results = await this.eventSearch.sweep(pending, maxSearches === undefined ? {} : { maxSearches });
       let gained = 0;
       if (results && typeof results.forEach === 'function') {
         results.forEach((candidates) => {
@@ -612,6 +717,12 @@ class KafkaProvider extends BaseProvider {
         });
         // Verified streams that opt in get one cheap header read for a bitrate.
         entity.measureBitrate = true;
+        if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
+          entity._kafkaMatchMode = src?.matchMode || 'label';
+          if (Number.isFinite(src?.eventScore)) {
+            entity._kafkaEventScore = src.eventScore;
+          }
+        }
 
         streams.push(entity);
       }

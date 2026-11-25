@@ -765,13 +765,14 @@ class MatchAggregator {
 
     for (const match of matches) {
       if (!match || !Array.isArray(match.sources)) continue;
+      const eventEligible = this.kafkaProvider.isEventFixtureEligible?.(match, now);
       // Without catalog coverage a fixture needs a broadcaster label to match.
-      if (match.sources.length === 0 && !coverageReady) continue;
+      if (match.sources.length === 0 && !coverageReady && !eventEligible) continue;
       // Do not inject into VOD replays or finished fixtures
       if (match.isReplay || (match.id && (match.id.startsWith('rz_') || match.id.startsWith('bv_') || match.id.startsWith('nfl_') || match.id.startsWith('sf_') || match.id.startsWith('fr_') || match.id.startsWith('hr_')))) continue;
       if (['finished', 'ended'].includes(String(match.status || '').toLowerCase())) continue;
       const kickoff = _parseEventDate(match.date);
-      if (kickoff > 0 && now > kickoff + liveWindowMs) continue;
+      if (kickoff > 0 && now > kickoff + liveWindowMs && !eventEligible) continue;
 
       const candidates = [];
       for (const src of match.sources) {
@@ -789,7 +790,7 @@ class MatchAggregator {
         }
       }
 
-      if (candidates.length === 0 && !coverageReady) continue;
+      if (candidates.length === 0 && !coverageReady && !eventEligible) continue;
 
       const existingKafkaIds = new Set(
         match.sources
@@ -799,9 +800,8 @@ class MatchAggregator {
 
       let injectedForMatch = 0;
 
-      // Catalog coverage: event feed first, then the team channel, then the
-      // broadcaster label. The label loop below stays as the fallback.
-      if (coverageReady) {
+      // An eligible fixture can use cached search results even without a catalog DB.
+      if (coverageReady || eventEligible) {
         const coverageSources = this.kafkaProvider.createSourcesForFixture(match, { now }) || [];
         for (const source of coverageSources) {
           if (!source || !source.id || existingKafkaIds.has(source.id)) continue;
@@ -1865,8 +1865,7 @@ class MatchAggregator {
       this.kafkaProvider &&
       this.kafkaProvider.configured !== false &&
       typeof this.kafkaProvider.sweepEvents === 'function' &&
-      typeof this.kafkaProvider.isCoverageReady === 'function' &&
-      this.kafkaProvider.isCoverageReady()
+      (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' || this.kafkaProvider.isCoverageReady?.())
         ? this.kafkaProvider.sweepEvents(activeMatches, { maxSearches: 20 }).catch(err => {
             const kind = String((err && (err.code || err.name)) || 'Error').replace(/[^a-z0-9_.-]/gi, '').slice(0, 80);
             console.warn('[MatchAggregator] kafkaProvider.sweepEvents failed:', kind);
@@ -2115,6 +2114,9 @@ class MatchAggregator {
       const sweptFixtures = await kafkaSweepPromise;
       if (sweptFixtures > 0) {
         console.log('[MatchAggregator] Event search found feeds for ' + sweptFixtures + ' live fixture(s).');
+      }
+      if (this.kafkaProvider?.eventSearch?.stats && this.providerHealthService && typeof this.providerHealthService.recordKafkaSearchStats === 'function') {
+        this.providerHealthService.recordKafkaSearchStats(this.kafkaProvider.eventSearch.stats);
       }
       this._enrichMatchesWithKafka(activeMatches);
 

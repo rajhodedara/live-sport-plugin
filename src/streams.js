@@ -5,9 +5,9 @@ const { withRetry, isTransientStatus, isTransientError, createAttemptTimeoutErro
 const { mapWithConcurrency } = require('./services/BoundedMap');
 const { probeBitrate } = require('./services/StreamBitrateProbe');
 const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
-  inconclusiveStreamsReason } = require('./services/StreamResolutionOutcome');
+  inconclusiveStreamsReason, markPartialStreams } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
-const { parseLanguagePriority, compareStreams, canonicalLanguage } = require('./services/LanguagePriorityService');
+const { parseLanguagePriority, compareStreams, canonicalLanguage, kafkaPlaybackRank, hasExplicitLanguage } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
@@ -16,6 +16,7 @@ const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream, isBlockedStream, isFrozenMediaPlaylist } = require('./services/StreamPolicy');
 const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
+const { collectEventStreams, subscribeEventProgress } = require('./services/KafkaEventPlayback');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -31,6 +32,61 @@ function isEventStreamSource(src) {
            /\bevent\s*(sd\s*)?stream\b/i.test(name);
   }
   return false;
+}
+
+const CHANNEL_FALLBACK_SOURCES = new Set([
+  'damitv', 'vavoo', 'cdnlive', 'timstreams', 'streamsports99', 'streamsports', 'moviebox_tv'
+]);
+
+function isChannelFallbackSource(src, stream = null) {
+  if (!src || !src.source) return false;
+  const source = String(src.source);
+  if (source === 'kafka') {
+    if (src.kafkaFixtureEvents || src.matchMode === 'event' || stream?._kafkaMatchMode === 'event') return false;
+    return true;
+  }
+  if (source === 'daddylive') return !isEventStreamSource(src);
+  if (source === 'scorezone') return typeof src.id === 'string' && src.id.startsWith('sz_iptv_');
+  return CHANNEL_FALLBACK_SOURCES.has(source);
+}
+
+function isChannelFallbackStream(stream) {
+  if (!stream) return false;
+  if (stream._kafkaMatchMode === 'event') return false;
+  if (typeof stream._isChannelFallback === 'boolean') return stream._isChannelFallback;
+  const source = String(stream._source || stream.source || '');
+  if (!source) return false;
+  if (source === 'kafka' || source === 'daddylive') return true;
+  return CHANNEL_FALLBACK_SOURCES.has(source);
+}
+
+function applyFixtureChannelFallback(streams, match) {
+  if (process.env.KAFKA_EVENT_FIRST_ENABLED !== 'true') return streams;
+  if (!Array.isArray(streams) || streams.length === 0 || !match) return streams;
+  const isTvChannel = Boolean(
+    match.category === 'networks' ||
+    match.isChannel ||
+    String(match.date) === '0' ||
+    match.kickoff === 0 ||
+    String(match.id || '').includes('_ch_')
+  );
+  if (isTvChannel) return streams;
+  try {
+    const { isReplayMatch } = require('./catalog');
+    if (isReplayMatch(match)) return streams;
+  } catch (_) {}
+  const hasVerifiedEvent = streams.some(s =>
+    s &&
+    s._source === 'kafka' &&
+    s._kafkaMatchMode === 'event' &&
+    typeof s.url === 'string' &&
+    s.url.length > 0 &&
+    !s.externalUrl &&
+    !isBlockedStream(s)
+  );
+  if (!hasVerifiedEvent) return streams;
+  const kept = streams.filter(s => !isChannelFallbackStream(s));
+  return kept.length > 0 ? kept : streams;
 }
 
 const SOURCE_PRIORITY = {
@@ -319,7 +375,7 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
     const provider = container.resolve('kafkaProvider');
     const hasDedicatedEventSource = Array.isArray(match?.sources) &&
       match.sources.some(s => s.source === 'kafka' && s.matchMode === 'event');
-    const shouldResolveEvents = typeof provider.resolveEventStreams === 'function' &&
+    const shouldResolveEvents = process.env.KAFKA_EVENT_FIRST_ENABLED !== 'true' && typeof provider.resolveEventStreams === 'function' &&
       src.matchMode !== 'event' && !hasDedicatedEventSource;
 
     if (shouldResolveEvents) {
@@ -387,6 +443,7 @@ async function resolveSource(src, match, config, opts = {}) {
     for (const s of resStreams) {
       s.score = streamScorer.calculateScore(s, sourceName);
       s._source = sourceName;
+      s._isChannelFallback = isChannelFallbackSource(src, s);
     }
   } catch (e) {
     reportInconclusiveResolution(e, opts);
@@ -832,7 +889,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
     }
 
     // We only pre-flight check direct live streams (m3u8 urls). Web player links or direct VODs are kept blindly.
-    if (s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false && s._source !== 'cdnlive')) return s;
+    if (!opts.requireLivePlaylist && (s.url.includes('/watch?') || s.url.includes('.mp4') || s.url.includes('pixeldrain.com') || s.url.includes('okcdn.ru') || s.url.includes('vkuser.net') || s.url.includes('mycdn.me') || s._source === 'hockeyreplays' || (s.behaviorHints && s.behaviorHints.notWebReady === false && s._source !== 'cdnlive'))) return s;
 
     let targetUrl = s.url;
     let referer = '';
@@ -883,8 +940,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // sample used to drop a stream that plays perfectly well, and then
       // negative-cache it. Retry the transient answers, within a budget that
       // keeps the whole verification inside handleStream's soft deadline.
-      if (Date.now() >= probeStartDeadlineAt) { keptUnverified++; return s; }
-      const verifyDeadlineAt = Date.now() + VERIFY_TOTAL_BUDGET_MS;
+      if (Date.now() >= probeStartDeadlineAt) { keptUnverified++; return opts.requireLivePlaylist ? null : s; }
+      const verifyDeadlineAt = Math.min(opts.deadlineAt ?? Infinity, Date.now() + VERIFY_TOTAL_BUDGET_MS);
       try {
         const result = await withRetry(
           () => runVerificationAttempt(targetUrl, reqHeaders, verifyDeadlineAt, opts),
@@ -959,7 +1016,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         // A 403 with no referer available at all is not proof of a dead stream,
         // so keep it and let the client try (failing over costs less than
         // silently discarding a working source).
-        if (res.status === 403 && !referer) {
+        if (!opts.requireLivePlaylist && res.status === 403 && !referer) {
           console.log(`[Filter] Keeping stream despite 403 (no referer available): ${targetUrl}`);
           return s;
         }
@@ -971,6 +1028,8 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
+      if (opts.requireLivePlaylist && (res.status !== 200 || !bodySample.trimStart().startsWith('#EXTM3U') ||
+          !/^(?:#EXTINF:|#EXT-X-STREAM-INF:)/m.test(bodySample) || bodySample.includes('#EXT-X-ENDLIST'))) return null;
       if (lacksPlaylistEvidence({ isMpd, isMp4, bodySample, bodyTruncated })) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
@@ -1105,6 +1164,65 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   } };
   const resolveCache = container.resolve('streamResolveCache');
   const m3u8Parser = container.resolve('m3u8Parser');
+  if (src.kafkaFixtureEvents === true) {
+    const provider = container.resolve('kafkaProvider');
+    const deadlineAt = options.deadlineAt ?? Date.now() + RESOLVE_TOTAL_BUDGET_MS;
+    const timeoutController = new AbortController();
+    const timer = setTimeout(() => timeoutController.abort(createAttemptTimeoutError()), Math.max(1, deadlineAt - Date.now()));
+    const signal = options.signal ? AbortSignal.any([options.signal, timeoutController.signal]) : timeoutController.signal;
+    const probeOpts = {
+      ...options,
+      deadlineAt: undefined,
+      signal: undefined,
+      onInconclusive: undefined,
+      requireLivePlaylist: true,
+      skipSpeedProbe: true
+    };
+    try {
+      const outcome = await collectEventStreams({
+        provider,
+        match,
+        signal,
+        metrics: stats => {
+          try {
+            const health = container.resolve('providerHealthService');
+            health?.recordKafkaPlayback?.(stats);
+          } catch (_) { /* missing metrics cannot prevent playback */ }
+        },
+        onProgress: options.onProgress,
+        probe: async candidate => {
+          const channel = {
+            source: 'kafka',
+            matchMode: 'event',
+            id: candidate.id,
+            channelName: candidate.name || candidate.channelName,
+            country: candidate.country,
+            language: candidate.language
+          };
+          const resolved = await resolveSource(channel, match, config, probeOpts);
+          const direct = (Array.isArray(resolved) ? resolved : []).filter(s => s && s.url && !s.externalUrl);
+          const checked = [];
+          // Verify all distinct direct URLs of one candidate sequentially inside one probe slot.
+          for (const s of direct) {
+            const verified = await verifyStreams([s], null, m3u8Parser, resolveCache, probeOpts);
+            for (const v of verified) checked.push({ ...v, _kafkaMatchMode: 'event', _isChannelFallback: false });
+          }
+          return checked;
+        }
+      });
+      const rows = Array.isArray(outcome) ? outcome : (outcome?.streams || []);
+      const incomplete = Boolean(!Array.isArray(outcome) && outcome?.incomplete);
+      if (!rows.length && (incomplete || inconclusiveReason || signal.aborted)) {
+        return createDeferredResolution(inconclusiveReason || outcome?.reason || 'deadline');
+      }
+      if (rows.length > 0 && incomplete) {
+        return markPartialStreams(rows, 2000);
+      }
+      return rows;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   const minted = await resolveSource(src, match, config, options);
   const providerReason = inconclusiveStreamsReason(minted);
   if (providerReason) options.onInconclusive(providerReason);
@@ -1140,7 +1258,9 @@ function prewarmSkipProvidersSet() {
 }
 
 function resolveKey(src, matchId) {
-  return require('./services/StreamResolveCache').resolveKey(src, matchId);
+  const key = require('./services/StreamResolveCache').resolveKey(src, matchId);
+  return src.source === 'kafka' && process.env.KAFKA_EVENT_FIRST_ENABLED === 'true'
+    ? key + ':v3:' + (src.matchMode || 'label') : key;
 }
 
 // Background prewarming is best-effort work: bound it per worker and drop excess
@@ -1192,7 +1312,8 @@ function schedulePrewarm(task) {
 async function prewarmMatchNow(match, config, topN = Number.MAX_SAFE_INTEGER, opts = { skipSpeedProbe: true }) {
   try {
     if (!match) return;
-    const effectiveSources = Array.isArray(match.sources) ? match.sources : [];
+    const effectiveSources = (Array.isArray(match.sources) ? match.sources : []).filter(src =>
+      !(process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' && src.source === 'kafka' && src.matchMode === 'event'));
     if (effectiveSources.length === 0) return;
     const resolveCache = container.resolve('streamResolveCache');
     const activeSources = selectSources(effectiveSources, config || null, match);
@@ -1381,7 +1502,16 @@ async function handleStream(type, id, config) {
   if (!matchId) return { streams: [] };
   const match = cacheService.findMatch(matchId);
 
-  const effectiveSources = (match && Array.isArray(match.sources)) ? match.sources : [];
+  let effectiveSources = (match && Array.isArray(match.sources)) ? match.sources : [];
+  if (match && process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
+    effectiveSources = effectiveSources.filter(s => !(s?.source === 'kafka' && s.matchMode === 'event'));
+    let provider = null;
+    try { provider = container.resolve('kafkaProvider'); } catch (_) {}
+    if (provider?.isEventFixtureEligible?.(match)) {
+      effectiveSources = [{ source: 'kafka', kafkaFixtureEvents: true,
+        id: 'fixture-events-v3-' + match.id + '-' + String(match.date || '') }, ...effectiveSources];
+    }
+  }
 
   if (!match || effectiveSources.length === 0) {
     return { streams: [] };
@@ -1480,16 +1610,42 @@ async function handleStream(type, id, config) {
   // counted per resolved source key, not per quality/stream variant.
   const PRIORITY1_QUORUM = 3;
   const inFlight = [];
+  const progressUnsubs = [];
+  let kafkaProviderInstance = null;
+  if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
+    try { kafkaProviderInstance = container.resolve('kafkaProvider'); } catch (_) {}
+  }
   for (const src of activeSources) {
     const key = resolveKey(src, match.id);
     const isPriority1 = SOURCE_PRIORITY[src.source] === 1;
     // Local positive cache entries are already verified. On a warm re-click,
     // wait for these cheap reads, not for new scrapes on the missing mirrors.
     const wasWarm = isPriority1 && Boolean(resolveCache.has?.(key));
-    const state = { key, source: src.source, isPriority1, wasWarm, promise: null, settled: false, value: [],
-      inconclusive: Boolean(resolveCache.isDeferred?.(key)) };
+    const state = {
+      key,
+      source: src.source,
+      eventDiscovery: Boolean(src.kafkaFixtureEvents),
+      isChannelSource: isChannelFallbackSource(src),
+      isPriority1,
+      wasWarm,
+      promise: null,
+      settled: false,
+      value: [],
+      eventProgress: [],
+      listeners: new Set(),
+      inconclusive: Boolean(resolveCache.isDeferred?.(key))
+    };
+    const pushProgress = (rows) => {
+      if (!Array.isArray(rows) || state.settled) return;
+      state.eventProgress = rows.map(st => ({ ...st, _cacheKey: key }));
+      for (const fn of state.listeners) fn();
+    };
+    if (state.eventDiscovery && kafkaProviderInstance) {
+      progressUnsubs.push(subscribeEventProgress(kafkaProviderInstance, match, pushProgress));
+    }
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+        ...(src.kafkaFixtureEvents ? { deadlineAt: resolutionStartedAt + HARD_DEADLINE_MS, onProgress: pushProgress } : {}),
         onInconclusive() { state.inconclusive = true; }
       }), timingStream)
       .then((minted) => {
@@ -1504,138 +1660,191 @@ async function handleStream(type, id, config) {
     inFlight.push(state);
   }
 
-  // Inspect the current publication snapshot without changing cached/provider
-  // rows. A web fallback or a result removed by the final policy is not a
-  // working feed for either quorum.
-  const isYoutubeRow = (row) => {
-    if (row.ytId) return true;
-    let external = row.externalUrl;
-    if (typeof external !== 'string') return false;
-    if (external.includes('/watch?')) {
-      const wrapped = external.match(/[?&](?:url|embed)=([^&]+)/);
-      if (wrapped) {
-        try { external = decodeURIComponent(wrapped[1]); } catch (_) {}
-      }
-    }
-    return /youtube\.com|youtu\.be/i.test(external);
-  };
-  const isDirectRow = (row) => isYoutubeRow(row) ||
-    (typeof row.url === 'string' && row.url.length > 0 && !row.externalUrl && row.name !== 'Nuvio Web Player');
-  const publicationRows = () => {
-    const current = inFlight.flatMap(f => f.settled && Array.isArray(f.value) ? f.value : []);
-    const prematch = suppressPreMatchTeamChannels(current, match);
-    const seen = new Set();
-    return prematch.filter(row => {
-      if (!row) return false;
-      const identity = row.ytId ? 'yt:' + row.ytId :
-        (row.url ? 'url:' + row.url : (row.externalUrl ? 'ext:' + row.externalUrl : null));
-      if (!identity || seen.has(identity)) return false;
-      seen.add(identity);
-      if (isBlockedStream(row)) return false;
-      return !config || config.webStreams !== 'disabled' || isDirectRow(row);
-    });
-  };
-  const priority1Keys = new Set(inFlight.filter(f => f.isPriority1).map(f => f.key));
-  const totalPriority1 = inFlight.filter(f => f.isPriority1).length;
-  const targetP1Quorum = Math.min(PRIORITY1_QUORUM, totalPriority1);
-  const priority1ReadyCount = (rows = publicationRows()) => new Set(rows
-    .filter(row => isDirectRow(row) && priority1Keys.has(row._cacheKey))
-    .map(row => row._cacheKey)).size;
-  const remainingBudget = () => Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
-  const observeUntil = (predicate) => {
-    let observing = true;
-    const promise = new Promise(resolve => {
-      const check = () => { if (observing && predicate()) resolve(); };
-      for (const f of inFlight) if (!f.settled) f.promise.then(check, check);
-      check();
-    });
-    return { promise, stop() { observing = false; } };
-  };
-
-  const warmPriority1 = inFlight.filter(f => f.wasWarm);
-  if (targetP1Quorum > 0 && new Set(warmPriority1.map(f => f.key)).size >= targetP1Quorum) {
-    // has() is only a hint: expiry can turn that cheap read into a new mint.
-    // Return when enough actual direct results arrive, bounded even if another
-    // formerly warm key is still being refreshed.
-    const warm = observeUntil(() => priority1ReadyCount() >= targetP1Quorum ||
-      inFlight.every(f => f.settled));
-    await settleBefore(warm.promise, Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
-    warm.stop();
-  } else {
-    // One shared timer rather than a timer per source. Providers remain in
-    // flight after the response cutoff so their successful results warm cache.
-    await settleBefore(Promise.allSettled(inFlight.map(f => f.promise)), Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
-  }
-  for (const f of inFlight) {
-    if (f.settled && Array.isArray(f.value)) streams.push(...f.value);
-  }
-  let lateCount = inFlight.filter(f => !f.settled).length;
-
-  // If no stream is available, or fewer than three distinct Priority-1
-  // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
-  // cannot stall a normal event once a playable Priority-1 quorum is ready.
-  const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
-  const isTvChannel = Boolean(
-    (type === 'tv' || type === 'channel') &&
-    (match ? (
-      match.category === 'networks' ||
-      match.isChannel ||
-      String(match.date) === '0' ||
-      match.kickoff === 0 ||
-      String(match.id || '').includes('_ch_') ||
-      String(id || '').includes('_ch_')
-    ) : (
-      String(id || '').includes('_ch_') ||
-      String(id || '').includes('channel')
-    ))
-  );
-  const readyToRespond = () => {
-    if (inFlight.every(f => f.settled)) return true;
-    const eligible = publicationRows();
-    if (eligible.length === 0) return false;
-    const priority1Pending = inFlight.some(f => f.isPriority1 && !f.settled);
-    if (targetP1Quorum > 0 && priority1Pending && priority1ReadyCount(eligible) < targetP1Quorum) return false;
-    const inFlightSourceByKey = new Map(inFlight.map(f => [f.key, f.source]));
-    const getRowSource = (row) => row.source || row._source || row.sourceName || inFlightSourceByKey.get(row._cacheKey);
-    const hasHigherTierResolved = eligible.some(row => (SOURCE_PRIORITY[getRowSource(row)] || 99) <= 4);
-    const higherTierPending = inFlight.some(f => (SOURCE_PRIORITY[f.source] || 99) <= 4 && !f.settled);
-    const withinSoftDeadline = (Date.now() - resolutionStartedAt) < SOFT_DEADLINE_MS;
-    if (!hasHigherTierResolved && higherTierPending && withinSoftDeadline) return false;
-    return !isTvChannel || eligible.filter(isDirectRow).length >= TV_CHANNEL_QUORUM;
-  };
-  const shouldWait = !readyToRespond() && inFlight.length > 0;
-  let timingWaitOutcome = 'no_wait';
-
-  if (shouldWait) {
-    const remaining = remainingBudget();
-    if (remaining > 0) {
-      // Re-evaluate publication eligibility whenever a source settles. In
-      // particular, finished-but-hidden Priority-1 web rows must not cut off
-      // another provider's pending playable result.
-      const wait = observeUntil(readyToRespond);
-      const waited = await settleBefore(wait.promise, remaining, null);
-      wait.stop();
-      timingWaitOutcome = waited === null ? 'hard_wait_expired' : 'wait_completed';
-    } else timingWaitOutcome = 'budget_exhausted';
-    for (const f of inFlight) {
-      // Snapshot newly settled resolutions without duplicating
-      if (f.settled && Array.isArray(f.value)) {
-        for (const st of f.value) {
-          if (!streams.includes(st)) {
-            streams.push(st);
-          }
+  try {
+    // Inspect the current publication snapshot without changing cached/provider
+    // rows. A web fallback or a result removed by the final policy is not a
+    // working feed for either quorum.
+    const isYoutubeRow = (row) => {
+      if (row.ytId) return true;
+      let external = row.externalUrl;
+      if (typeof external !== 'string') return false;
+      if (external.includes('/watch?')) {
+        const wrapped = external.match(/[?&](?:url|embed)=([^&]+)/);
+        if (wrapped) {
+          try { external = decodeURIComponent(wrapped[1]); } catch (_) {}
         }
       }
+      return /youtube\.com|youtu\.be/i.test(external);
+    };
+    const isDirectRow = (row) => isYoutubeRow(row) ||
+      (typeof row.url === 'string' && row.url.length > 0 && !row.externalUrl && row.name !== 'Nuvio Web Player');
+    const hasVerifiedKafkaEvent = (rows) => process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' &&
+      rows.some(row => row && row._source === 'kafka' && row._kafkaMatchMode === 'event' && isDirectRow(row));
+    const publicationRows = () => {
+      const current = inFlight.flatMap(f => {
+        const rows = f.settled ? f.value : f.eventProgress;
+        return Array.isArray(rows) ? rows : [];
+      });
+      if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' && current.length > 1) {
+        current.sort((a, b) => kafkaPlaybackRank(a) - kafkaPlaybackRank(b));
+      }
+      const prematch = suppressPreMatchTeamChannels(current, match);
+      const seen = new Set();
+      const filtered = prematch.filter(row => {
+        if (!row) return false;
+        const identity = row.ytId ? 'yt:' + row.ytId :
+          (row.url ? 'url:' + row.url : (row.externalUrl ? 'ext:' + row.externalUrl : null));
+        if (!identity || seen.has(identity)) return false;
+        seen.add(identity);
+        if (isBlockedStream(row)) return false;
+        return !config || config.webStreams !== 'disabled' || isDirectRow(row);
+      });
+      return applyFixtureChannelFallback(filtered, match);
+    };
+    const priority1Keys = new Set(inFlight.filter(f => f.isPriority1).map(f => f.key));
+    const totalPriority1 = inFlight.filter(f => f.isPriority1).length;
+    const targetP1Quorum = Math.min(PRIORITY1_QUORUM, totalPriority1);
+    const priority1ReadyCount = (rows = publicationRows()) => new Set(rows
+      .filter(row => isDirectRow(row) && priority1Keys.has(row._cacheKey))
+      .map(row => row._cacheKey)).size;
+    const remainingBudget = () => Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
+    const observeUntil = (predicate) => {
+      let observing = true;
+      let check = null;
+      const promise = new Promise(resolve => {
+        check = () => { if (observing && predicate()) resolve(); };
+        for (const f of inFlight) {
+          if (!f.settled) f.promise.then(check, check);
+          f.listeners?.add(check);
+        }
+        check();
+      });
+      return {
+        promise,
+        stop() {
+          observing = false;
+          if (check) for (const f of inFlight) f.listeners?.delete(check);
+        }
+      };
+    };
+
+    const warmPriority1 = inFlight.filter(f => f.wasWarm);
+    if (targetP1Quorum > 0 && new Set(warmPriority1.map(f => f.key)).size >= targetP1Quorum) {
+      // has() is only a hint: expiry can turn that cheap read into a new mint.
+      // Return when enough actual direct results arrive, bounded even if another
+      // formerly warm key is still being refreshed.
+      const warm = observeUntil(() => {
+        if (inFlight.every(f => f.settled)) return true;
+        const eligible = publicationRows();
+        const hasEventProgress = hasVerifiedKafkaEvent(eligible);
+        if (inFlight.some(f => f.eventDiscovery && !f.settled) && !hasEventProgress) return false;
+        const effectiveP1Keys = hasEventProgress
+          ? new Set(inFlight.filter(f => f.isPriority1 && !f.isChannelSource).map(f => f.key))
+          : priority1Keys;
+        const effectiveTarget = Math.min(PRIORITY1_QUORUM, effectiveP1Keys.size);
+        const ready = new Set(eligible
+          .filter(row => isDirectRow(row) && effectiveP1Keys.has(row._cacheKey))
+          .map(row => row._cacheKey)).size;
+        return ready >= effectiveTarget;
+      });
+      await settleBefore(warm.promise, Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
+      warm.stop();
+    } else {
+      // One shared timer rather than a timer per source. Providers remain in
+      // flight after the response cutoff so their successful results warm cache.
+      await settleBefore(Promise.allSettled(inFlight.map(f => f.promise)), Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
     }
-    lateCount = inFlight.filter(f => !f.settled).length;
-  } else if (lateCount > 0) {
-    console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
-  }
-  if (timingStream) {
-    const unsettled = inFlight.filter(f => !f.settled).length;
-    const reason = timingWaitOutcome === 'hard_wait_expired' || timingWaitOutcome === 'budget_exhausted' ? timingWaitOutcome :
-      unsettled === 0 ? 'all_settled' : timingWaitOutcome === 'wait_completed' ? 'priority_completed' : 'early_return';
-    try { timingRelations.endWindow(timingStream, inFlight.length, unsettled, reason); } catch (_) { /* diagnostic only */ }
+    for (const f of inFlight) {
+      const rows = f.settled ? f.value : f.eventProgress;
+      if (Array.isArray(rows)) streams.push(...rows);
+    }
+    let lateCount = inFlight.filter(f => !f.settled).length;
+
+    // If no stream is available, or fewer than three distinct Priority-1
+    // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
+    // cannot stall a normal event once a playable Priority-1 quorum is ready.
+    const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
+    const isTvChannel = Boolean(
+      (type === 'tv' || type === 'channel') &&
+      (match ? (
+        match.category === 'networks' ||
+        match.isChannel ||
+        String(match.date) === '0' ||
+        match.kickoff === 0 ||
+        String(match.id || '').includes('_ch_') ||
+        String(id || '').includes('_ch_')
+      ) : (
+        String(id || '').includes('_ch_') ||
+        String(id || '').includes('channel')
+      ))
+    );
+    const hasEventDiscovery = inFlight.some(f => f.eventDiscovery);
+    const readyToRespond = () => {
+      if (inFlight.every(f => f.settled)) return true;
+      const eligible = publicationRows();
+      const hasEventProgress = hasVerifiedKafkaEvent(eligible);
+      const withinSoftDeadline = (Date.now() - resolutionStartedAt) < SOFT_DEADLINE_MS;
+      if (inFlight.some(f => f.eventDiscovery && !f.settled)) {
+        if (!hasEventProgress || withinSoftDeadline) return false;
+      }
+      if (eligible.length === 0) return false;
+      const effectiveP1Keys = hasEventProgress
+        ? new Set(inFlight.filter(f => f.isPriority1 && !f.isChannelSource).map(f => f.key))
+        : priority1Keys;
+      const effectiveTargetP1Quorum = Math.min(PRIORITY1_QUORUM, effectiveP1Keys.size);
+      const effectiveP1Ready = hasEventProgress
+        ? new Set(eligible.filter(row => isDirectRow(row) && effectiveP1Keys.has(row._cacheKey)).map(row => row._cacheKey)).size
+        : priority1ReadyCount(eligible);
+      const priority1Pending = inFlight.some(f =>
+        f.isPriority1 && !f.settled && !(hasEventProgress && (f.eventDiscovery || f.isChannelSource)));
+      if (effectiveTargetP1Quorum > 0 && priority1Pending && effectiveP1Ready < effectiveTargetP1Quorum) return false;
+      const inFlightSourceByKey = new Map(inFlight.map(f => [f.key, f.source]));
+      const getRowSource = (row) => row.source || row._source || row.sourceName || inFlightSourceByKey.get(row._cacheKey);
+      const hasHigherTierResolved = eligible.some(row => (SOURCE_PRIORITY[getRowSource(row)] || 99) <= 4);
+      const higherTierPending = inFlight.some(f =>
+        (SOURCE_PRIORITY[f.source] || 99) <= 4 && !f.settled && !(hasEventProgress && (f.eventDiscovery || f.isChannelSource)));
+      if (!hasHigherTierResolved && higherTierPending && withinSoftDeadline) return false;
+      return !isTvChannel || eligible.filter(isDirectRow).length >= TV_CHANNEL_QUORUM;
+    };
+    const shouldWait = !readyToRespond() && inFlight.length > 0;
+    let timingWaitOutcome = 'no_wait';
+
+    if (shouldWait) {
+      let remaining = remainingBudget();
+      if (remaining > 0) {
+        // Re-evaluate publication eligibility whenever a source settles or reports progress.
+        const wait = observeUntil(readyToRespond);
+        const softRemaining = Math.max(0, (resolutionStartedAt + SOFT_DEADLINE_MS) - Date.now());
+        let waited = null;
+        if (hasEventDiscovery && softRemaining > 0 && softRemaining < remaining) {
+          waited = await settleBefore(wait.promise, softRemaining, null);
+          if (waited === null && !readyToRespond()) {
+            remaining = remainingBudget();
+            waited = remaining > 0 ? await settleBefore(wait.promise, remaining, null) : null;
+          }
+        } else {
+          waited = await settleBefore(wait.promise, remaining, null);
+        }
+        wait.stop();
+        timingWaitOutcome = waited === null && !readyToRespond() ? 'hard_wait_expired' : 'wait_completed';
+      } else timingWaitOutcome = 'budget_exhausted';
+      streams.length = 0;
+      for (const f of inFlight) {
+        const rows = f.settled ? f.value : f.eventProgress;
+        if (Array.isArray(rows)) streams.push(...rows);
+      }
+      lateCount = inFlight.filter(f => !f.settled).length;
+    } else if (lateCount > 0) {
+      console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
+    }
+    if (timingStream) {
+      const unsettled = inFlight.filter(f => !f.settled).length;
+      const reason = timingWaitOutcome === 'hard_wait_expired' || timingWaitOutcome === 'budget_exhausted' ? timingWaitOutcome :
+        unsettled === 0 ? 'all_settled' : timingWaitOutcome === 'wait_completed' ? 'priority_completed' : 'early_return';
+      try { timingRelations.endWindow(timingStream, inFlight.length, unsettled, reason); } catch (_) { /* diagnostic only */ }
+    }
+  } finally {
+    for (const unsub of progressUnsubs) unsub();
   }
   // Withhold per-team 24/7 channels until the fixture is actually in its
   // playable window (see suppressPreMatchTeamChannels). Applied to the assembled
@@ -1657,6 +1866,9 @@ async function handleStream(type, id, config) {
   // are re-listed by every clip page). Keyed on the playable identity so real
   // multi-part streams are preserved.
   if (streams.length > 1) {
+    if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
+      streams.sort((a, b) => kafkaPlaybackRank(a) - kafkaPlaybackRank(b));
+    }
     const seenStreamKeys = new Set();
     const dedupedStreams = streams.filter((s) => {
       const key = s.ytId ? 'yt:' + s.ytId : (s.url ? 'url:' + s.url : (s.externalUrl ? 'ext:' + s.externalUrl : null));
@@ -1689,6 +1901,12 @@ async function handleStream(type, id, config) {
     streams.length = 0;
     streams.push(...policyAllowed);
     console.log(`[streams.js] Dropped ${beforeDashPolicy - policyAllowed.length} DASH stream(s) by bandwidth policy for ${matchId}`);
+  }
+
+  const eventFiltered = applyFixtureChannelFallback(streams, match);
+  if (eventFiltered !== streams) {
+    streams.length = 0;
+    streams.push(...eventFiltered);
   }
 
   streams.forEach(s => {
@@ -1994,7 +2212,7 @@ async function handleStream(type, id, config) {
   // LanguagePriorityService for the ranking and the alias handling.
   const languagePriorities = parseLanguagePriority(config);
 
-  streams.sort((a, b) => compareStreams(a, b, languagePriorities));
+  streams.sort((a, b) => compareStreams(a, b, languagePriorities, hasExplicitLanguage(config)));
 
   // Pinned donation link: unshifted to index 0 so it appears at the top of every match
   const donationUrl = process.env.DONATION_URL || '/donate';
@@ -2121,6 +2339,8 @@ module.exports = {
   deduplicateResolutions,
   applyParsedPlaylistQuality,
   formatChannelStreamTitle,
+  isChannelFallbackSource,
+  applyFixtureChannelFallback,
   KNOWN_LIVE_SOURCES,
   KNOWN_REPLAY_SOURCES,
   KNOWN_FALLBACKS,

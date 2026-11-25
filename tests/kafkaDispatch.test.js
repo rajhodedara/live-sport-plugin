@@ -1,7 +1,28 @@
 'use strict';
 
+jest.mock('../src/services/ProviderOutbound', () => ({
+  safeFetch: jest.fn(),
+  streamingFetch: jest.fn()
+}));
+jest.mock('../src/services/StreamedWasmPool', () => ({
+  resolveWasmStream: () => { throw new Error('Unexpected WASM'); }
+}));
+
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const container = require('../src/container');
+const { safeFetch } = require('../src/services/ProviderOutbound');
+const KafkaProvider = require('../src/providers/KafkaProvider');
+const { writeCatalogFile } = require('../src/services/TrexCatalogDb');
+const { TrexCatalogStore } = require('../src/services/TrexCatalogStore');
+const { TrexEventSearch } = require('../src/services/TrexEventSearch');
+const StreamResolveCache = require('../src/services/StreamResolveCache');
+const M3U8ParserService = require('../src/services/M3U8ParserService');
+const StreamScoringService = require('../src/services/StreamScoringService');
+const ProviderHealthService = require('../src/services/ProviderHealthService');
 const {
+  handleStream,
   selectSources,
   resolveSource,
   KNOWN_LIVE_SOURCES,
@@ -180,5 +201,659 @@ describe('Kafka Stream Dispatch and Selection', () => {
     const sorted = [daddyliveStream, kafkaStream].sort((a, b) => compareStreams(a, b, priorities));
     expect(sorted[0]._source).toBe('kafka');
     expect(sorted[1]._source).toBe('daddylive');
+  });
+});
+
+describe('handleStream event-first regression', () => {
+  const KICKOFF = Date.UTC(2026, 10, 25, 3, 0);
+  const NOW = KICKOFF + 57 * 60000;
+  const ENV_KEYS = [
+    'KAFKA_EVENT_FIRST_ENABLED',
+    'KAFKA_ENABLED',
+    'KAFKA_MANIFEST_URL',
+    'KAFKA_EVENT_SEARCH_ENABLED',
+    'KAFKA_LIVENESS_GUARD_ENABLED',
+    'DONATION_URL',
+    'STREAM_SOFT_DEADLINE_MS',
+    'STREAM_HARD_DEADLINE_MS',
+    'RESOLVE_CACHE_SHARED'
+  ];
+  const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:12\n#EXTINF:4,\nhttps://cdn.invalid/seg12.ts\n';
+  const ENDED_SEQ0_PLAYLIST = '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:4,\nseg0.ts\n#EXT-X-ENDLIST\n';
+  const BASE_CHANNELS = [
+    { id: 'trex:ev1', name: 'LIVE | DENVER NUGGETS - DALLAS MAVERICKS | Wed 25 Nov 03:59 CET (SE) | 8K EXCLUSIVE | SE: MAX PPV 1' },
+    { id: 'trex:ev2', name: 'LIVE | DEN - NUGGETS VS DAL - MAVERICKS | Tue 24 Nov 21:00 EST (US) | 8K EXCLUSIVE | US: NBA PASS PPV 3' },
+    { id: 'trex:ev3', name: 'CA (SN+ 010) | Dallas @ Denver (2026-11-24 22:00:00)' },
+    { id: 'trex:label', name: 'US| NBA TV HD' },
+    { id: 'trex:team', name: 'NBA TEAM| DALLAS MAVERICKS' }
+  ];
+
+  let originalResolve;
+  let originalFetch;
+  let savedEnv;
+  let tmpDir;
+  let stores;
+
+  function buildFixture(overrides = {}) {
+    return {
+      id: 'dlv_event_7e46f297c8fce7363bf414f2',
+      title: 'Denver Nuggets vs Dallas Mavericks',
+      category: 'basketball',
+      league: 'NBA',
+      status: 'upcoming',
+      date: String(KICKOFF),
+      team1: { name: 'Denver Nuggets' },
+      team2: { name: 'Dallas Mavericks' },
+      sources: [
+        { source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' },
+        { source: 'kafka', id: 'trex:team', channelName: 'DALLAS MAVERICKS', country: 'USA', matchMode: 'team' },
+        { source: 'daddylive', id: 'dl1', channelName: 'NBA TV', country: 'USA' }
+      ],
+      ...overrides
+    };
+  }
+
+  function setupHarness({
+    channels = BASE_CHANNELS,
+    match = buildFixture(),
+    searchMetas = [],
+    searchFetch,
+    playlistHandler,
+    daddyLiveStreams = [{ name: 'DaddyLive', title: 'NBA TV', url: 'https://cdn.invalid/dl1.m3u8', language: 'English', country: 'USA' }],
+    healthService = new ProviderHealthService(),
+    extraServices = {}
+  } = {}) {
+    const dbPath = path.join(tmpDir, `catalog-${stores.length}.sqlite`);
+    writeCatalogFile(dbPath, channels.map(c => ({ ...c, type: 'tv' })), { generatedAt: '2026-11-25T03:00:00Z', source: 'test' });
+    const catalogStore = new TrexCatalogStore({ dbPath });
+    stores.push(catalogStore);
+
+    const fetchImpl = searchFetch || jest.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ metas: searchMetas })
+    }));
+    const eventSearch = new TrexEventSearch({
+      baseUrl: 'https://trex.invalid',
+      fetchImpl,
+      now: () => Date.now()
+    });
+    const kafkaProvider = new KafkaProvider({ catalogStore, eventSearch });
+    const resolveCache = new StreamResolveCache({
+      sharedResolver: { available: () => false, request: () => { throw new Error('unexpected L2'); } }
+    });
+    const m3u8Parser = new M3U8ParserService();
+    const streamScorer = new StreamScoringService();
+    const daddyLiveProvider = {
+      resolveStream: jest.fn(async () => daddyLiveStreams)
+    };
+
+    const services = {
+      cacheService: { findMatch: (id) => (id === match.id ? match : null) },
+      kafkaProvider,
+      daddyLiveProvider,
+      streamResolveCache: resolveCache,
+      m3u8Parser,
+      streamScorer,
+      ...(healthService !== undefined ? { providerHealthService: healthService } : {}),
+      ...extraServices
+    };
+    container.resolve = jest.fn((name) => services[name]);
+
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            streams: [{
+              name: '▶ Watch Live',
+              title: id,
+              url: `https://cdn.invalid/${id}.m3u8`
+            }]
+          })
+        };
+      }
+      if (playlistHandler) return playlistHandler(target);
+      if (target.includes('trex:ev1')) return { status: 502, text: async () => 'Bad Gateway' };
+      if (target.includes('trex:ev2')) return { status: 200, text: async () => ENDED_SEQ0_PLAYLIST };
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    return { services, kafkaProvider, eventSearch, fetchImpl, resolveCache, daddyLiveProvider, healthService };
+  }
+
+  async function runWithTimers(fn, stepMs = 5000) {
+    let settled = false;
+    let out;
+    let err;
+    const promise = Promise.resolve().then(fn).then(
+      (v) => { settled = true; out = v; },
+      (e) => { settled = true; err = e; }
+    );
+    for (let i = 0; i < 10 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(stepMs);
+    }
+    await promise;
+    if (err) throw err;
+    return out;
+  }
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+    originalResolve = container.resolve;
+    originalFetch = global.fetch;
+    global.fetch = jest.fn(async () => ({ ok: false, status: 502, headers: { get: () => null }, body: { cancel: async () => {} } }));
+    savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    process.env.KAFKA_ENABLED = 'true';
+    process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+    process.env.KAFKA_EVENT_SEARCH_ENABLED = 'true';
+    process.env.KAFKA_LIVENESS_GUARD_ENABLED = 'true';
+    process.env.DONATION_URL = 'disabled';
+    process.env.STREAM_SOFT_DEADLINE_MS = '6000';
+    process.env.STREAM_HARD_DEADLINE_MS = '15000';
+    process.env.RESOLVE_CACHE_SHARED = 'false';
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kafka-dispatch-'));
+    stores = [];
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    for (const store of stores) store.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    container.resolve = originalResolve;
+    global.fetch = originalFetch;
+    safeFetch.mockReset();
+    jest.restoreAllMocks();
+    jest.useRealTimers();
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  test('Dallas-Denver +57m: drops 502 and ended seq-0, suppresses channel fallbacks once event verifies on cold and warm requests', async () => {
+    const match = buildFixture();
+    const { healthService, fetchImpl } = setupHarness({ match });
+
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(cold.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:event'
+    ]);
+    expect(cold.streams[0].url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+    expect(cold.streams[0].title).toContain('Dallas @ Denver');
+
+    const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
+    expect(kafkaHealth.eventPlayback).toMatchObject({
+      mints: 1,
+      discovered: 3,
+      localHits: 3,
+      sqliteHits: 3,
+      attempts: 3,
+      verified: 1,
+      stops: { complete: 1 }
+    });
+
+    safeFetch.mockClear();
+    fetchImpl.mockClear();
+
+    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(warm.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:event'
+    ]);
+    expect(warm.streams[0].url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+    expect(safeFetch).not.toHaveBeenCalled();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('dedupes duplicate playback URLs while keeping strongest match mode and suppressing channel copies', async () => {
+    const match = buildFixture();
+    const channels = [
+      { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | 8K | US: PPV 1' },
+      { id: 'trex:ev2', name: 'Live | Mavericks vs. Nuggets | 8K | CA: PPV 2' },
+      { id: 'trex:ev3', name: 'Live | Mavericks vs. Nuggets | 8K | UK: PPV 3' },
+      { id: 'trex:label', name: 'US| NBA TV HD' },
+      { id: 'trex:team', name: 'NBA TEAM| DALLAS MAVERICKS' }
+    ];
+    setupHarness({
+      match,
+      channels,
+      playlistHandler: async () => ({ status: 200, text: async () => LIVE_PLAYLIST })
+    });
+
+    // Make ev1, ev2, label, and team all share the identical playback URL, while ev3 is distinct.
+    const prevImpl = safeFetch.getMockImplementation();
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        const mediaUrl = id === 'trex:ev3'
+          ? 'https://cdn.invalid/distinct-ev3.m3u8'
+          : 'https://cdn.invalid/shared-mirror.m3u8';
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: mediaUrl }] })
+        };
+      }
+      return prevImpl(url);
+    });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    const sharedMatches = res.streams.filter((s) => s.url.includes(encodeURIComponent('https://cdn.invalid/shared-mirror.m3u8')));
+    expect(sharedMatches).toHaveLength(1);
+    expect(sharedMatches[0]._kafkaMatchMode).toBe('event');
+
+    const eventUrls = res.streams.filter((s) => s._kafkaMatchMode === 'event').map((s) => s.url);
+    expect(eventUrls).toHaveLength(2);
+    expect(eventUrls.some((u) => u.includes('distinct-ev3.m3u8'))).toBe(true);
+    expect(res.streams.every((s) => s._source === 'kafka' && s._kafkaMatchMode === 'event')).toBe(true);
+  });
+
+  test('discovers event feeds via bounded upstream search when match has zero pre-attached Kafka sources', async () => {
+    const match = buildFixture({
+      sources: [{ source: 'daddylive', id: 'dl1', channelName: 'NBA TV', country: 'USA' }]
+    });
+    const { fetchImpl, healthService } = setupHarness({
+      match,
+      channels: [],
+      searchMetas: [
+        { id: 'trex:ev4', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: SOCCER PPV 93' },
+        { id: 'trex:ev3', name: 'CA (SN+ 010) | Dallas @ Denver (2026-11-24 22:00:00)' }
+      ]
+    });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(fetchImpl).toHaveBeenCalledTimes(2); // nicknames 'nuggets' (<6 hits) then 'denver nuggets'
+    expect(res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:event',
+      'kafka:event'
+    ]);
+
+    const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
+    expect(kafkaHealth.eventPlayback).toMatchObject({
+      mints: 1,
+      discovered: 2,
+      sqliteHits: 0,
+      upstreamSearches: 2,
+      sharedSearches: 0,
+      attempts: 2,
+      verified: 2,
+      stops: { complete: 1 },
+      searchTotals: { requests: 2, sweepRequests: 0, shared: 0 }
+    });
+  });
+
+  test('suppresses channel rows even with explicit language preferences while preserving non-channel matchup feeds', async () => {
+    const match = buildFixture({
+      sources: [
+        { source: 'kafka', id: 'trex:label', channelName: 'NBA TV ES', country: 'Spain', language: 'Spanish', matchMode: 'label' },
+        { source: 'daddylive', id: 'dl1', channelName: 'Movistar Deportes', country: 'Spain', language: 'Spanish' },
+        { source: 'ppvst', id: 'p1', channelName: 'HD | NBA Pass ES', language: 'Spanish', country: 'Spain' }
+      ]
+    });
+    const channels = [
+      { id: 'trex:ev3', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | SE: SOCCER PPV 31' },
+      { id: 'trex:label', name: 'ES| MOVISTAR DEPORTES HD' }
+    ];
+    setupHarness({
+      match,
+      channels,
+      daddyLiveStreams: [{ name: 'DaddyLive', title: 'Movistar Deportes', url: 'https://cdn.invalid/dl-es.m3u8', language: 'Spanish', country: 'Spain' }],
+      extraServices: {
+        ppvStProvider: {
+          resolveStream: jest.fn(async () => [{
+            name: 'PPV.st', title: 'Mavericks vs Nuggets', url: 'https://cdn.invalid/ppv-es.m3u8', language: 'Spanish', country: 'Spain'
+          }])
+        }
+      }
+    });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, { languages: 'Spanish' }));
+    expect(res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}:${s.language || 'none'}`)).toEqual([
+      'ppvst:none:Spanish',
+      'kafka:event:none'
+    ]);
+  });
+
+  test('performs zero Kafka requests when Kafka is disabled', async () => {
+    process.env.KAFKA_ENABLED = 'false';
+    const match = buildFixture();
+    const { fetchImpl } = setupHarness({ match });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(safeFetch.mock.calls.some(([url]) => String(url).includes('/stream/tv/'))).toBe(false);
+    expect(res.streams.map((s) => s._source)).toEqual(['daddylive']);
+  });
+
+  test('returns available fallback streams when event discovery exceeds the hard deadline', async () => {
+    process.env.STREAM_SOFT_DEADLINE_MS = '100';
+    process.env.STREAM_HARD_DEADLINE_MS = '200';
+    const match = buildFixture();
+    const { healthService } = setupHarness({
+      match,
+      channels: [
+        { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV 1' },
+        { id: 'trex:label', name: 'US| NBA TV HD' },
+        { id: 'trex:team', name: 'NBA TEAM| DALLAS MAVERICKS' }
+      ],
+      playlistHandler: async (target) => {
+        if (target.includes('trex:ev1')) {
+          return new Promise(() => {}); // stalls past deadline
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    let response;
+    const req = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((val) => { response = val; });
+    await jest.advanceTimersByTimeAsync(200);
+    await req;
+
+    expect(response).toBeDefined();
+    expect(response.cacheMaxAge).toBe(2);
+    expect(response.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:label',
+      'kafka:team',
+      'daddylive:none'
+    ]);
+    const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
+    expect(kafkaHealth.eventPlayback.stops.deadline).toBe(1);
+    // Allow the background probe's verification retry budget (9000ms) to settle cleanly.
+    await jest.advanceTimersByTimeAsync(10000);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('verifies more than six candidates, keeps multiple URLs per candidate, caps concurrent probes at 2 across 20 viewers, and survives missing metrics', async () => {
+    const match = buildFixture({ sources: [] });
+    const channels = Array.from({ length: 9 }, (_, idx) => ({
+      id: `trex:ev${idx + 1}`,
+      name: `Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV ${idx + 1}`
+    }));
+
+    let activeProbes = 0;
+    let peakProbes = 0;
+    const probedIds = [];
+    setupHarness({
+      match,
+      channels,
+      healthService: undefined // missing providerHealthService in container!
+    });
+
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        probedIds.push(id);
+        activeProbes += 1;
+        peakProbes = Math.max(peakProbes, activeProbes);
+        await new Promise((r) => setTimeout(r, 10));
+        activeProbes -= 1;
+        if (id === 'trex:ev1') {
+          return { ok: false, status: 502, statusText: 'Bad Gateway' };
+        }
+        if (id === 'trex:ev4') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [
+                { name: '▶ Watch Live', title: `${id} mirror A`, url: 'https://cdn.invalid/ev4-a.m3u8' },
+                { name: '▶ Watch Live', title: `${id} mirror B`, url: 'https://cdn.invalid/ev4-b.m3u8' }
+              ]
+            })
+          };
+        }
+        if (id === 'trex:ev5') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/ev4-a.m3u8' }] })
+          };
+        }
+        if (id === 'trex:ev7') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/ev7.mpd', clearkey: { k: 'v' } }] })
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: `https://cdn.invalid/${id}.m3u8` }] })
+        };
+      }
+      if (target.includes('ev2.m3u8')) {
+        return { status: 200, text: async () => ENDED_SEQ0_PLAYLIST };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const responses = await runWithTimers(() =>
+      Promise.all(Array.from({ length: 20 }, () => handleStream('tv', `nuvio_sport_${match.id}`, {})))
+    );
+
+    expect(peakProbes).toBe(2);
+    expect(new Set(probedIds).size).toBe(9);
+    // Surviving distinct verified URLs: ev3, ev4-a, ev4-b, ev6, ev8, ev9 (ev1=502, ev2=seq0, ev5=dup ev4-a, ev7=blocked ClearKey)
+    const urls = responses[0].streams.map((s) => s.url);
+    expect(urls).toHaveLength(6);
+    for (const expected of ['ev3.m3u8', 'ev4-a.m3u8', 'ev4-b.m3u8', 'ev6.m3u8', 'ev8.m3u8', 'ev9.m3u8']) {
+      expect(urls.some((u) => u.includes(expected))).toBe(true);
+    }
+    expect(responses.every((r) => r.streams.length === 6)).toBe(true);
+
+    safeFetch.mockClear();
+    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(warm.streams).toHaveLength(6);
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  test('throwing metrics recorder cannot prevent verified event playback', async () => {
+    const match = buildFixture({ sources: [] });
+    setupHarness({
+      match,
+      healthService: {
+        recordKafkaPlayback: () => { throw new Error('metrics store full'); }
+      }
+    });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(res.streams).toHaveLength(1);
+    expect(res.streams[0]._source).toBe('kafka');
+    expect(res.streams[0]._kafkaMatchMode).toBe('event');
+    expect(res.streams[0].url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+  });
+
+  test('restores legacy behavior when KAFKA_EVENT_FIRST_ENABLED=false', async () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'false';
+    const match = buildFixture();
+    const { kafkaProvider, daddyLiveProvider } = setupHarness({ match });
+    const spyResolveEvents = jest.spyOn(kafkaProvider, 'resolveEventStreams');
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(spyResolveEvents).toHaveBeenCalled();
+    expect(daddyLiveProvider.resolveStream).toHaveBeenCalled();
+    expect(res.streams.some((s) => s._source === 'kafka')).toBe(true);
+    expect(res.streams.every((s) => s._kafkaMatchMode === undefined)).toBe(true);
+  });
+
+  test('resolves live UCL soccer fixture via SQLite x/STAN events and suppresses channel fallbacks while keeping event-only output', async () => {
+    const soccerKickoff = Date.UTC(2026, 10, 25, 19, 45);
+    const soccerNow = soccerKickoff + 57 * 60000;
+    jest.setSystemTime(soccerNow);
+    const baseMatch = buildFixture({
+      id: 'ucl-inter-vfb',
+      title: 'Internazionale vs VfB Stuttgart',
+      category: 'football',
+      league: 'UCL',
+      date: String(soccerKickoff),
+      team1: { name: 'Inter' },
+      team2: { name: 'VfB Stuttgart' },
+      sources: [
+        { source: 'daddylive', id: 'dl1', channelName: 'TNT Sports 1', country: 'UK' },
+        { source: 'scorezone', id: 'sz_iptv_gb-tnt1', canonicalChannel: 'TNT Sports 1', country: 'UK' },
+        { source: 'scorezone', id: 'eyJoIjoiSW50ZXIiLCJhIjoiU3R1dHRnYXJ0In0.sig' },
+        { source: 'ppvst', id: 99, channelName: 'HD | Champions League' }
+      ]
+    });
+
+    const { kafkaProvider } = setupHarness({
+      match: baseMatch,
+      channels: [
+        { id: 'trex:ev1', name: 'AU (STAN 23) | Internazionale v Stuttgart  UEFA Champions League Matchday 5 2026/2027 (2026-11-26 06:55:50)' },
+        { id: 'trex:ev2', name: 'NEXT | INTER DE MILÃO X STUTTGART | Wed 25 Nov 17:45 -02 (BR) | 8K EXCLUSIVE | BR: MAX PPV 9' },
+        { id: 'trex:u19', name: 'Next | Inter U19 vs Stuttgart U19 | UEFA Youth League | 2026-11-25 | 13:00 (GMT)' },
+        { id: 'trex:tv-inter', name: 'UA| INTER' },
+        { id: 'trex:team', name: 'SERIE A| INTER MILAN' },
+        { id: 'trex:label', name: 'UK| TNT SPORTS 1 FHD' }
+      ],
+      playlistHandler: async (target) => (
+        target.includes('trex:ev1')
+          ? { status: 502, text: async () => 'Bad Gateway' }
+          : { status: 200, text: async () => LIVE_PLAYLIST }
+      ),
+      extraServices: {
+        scorezoneProvider: {
+          resolveStream: jest.fn(async (id) => ([{
+            name: 'ScoreZone',
+            title: id.startsWith('sz_iptv_') ? 'TNT Sports 1' : 'Inter vs Stuttgart',
+            canonicalChannel: id.startsWith('sz_iptv_') ? 'TNT Sports 1' : undefined,
+            url: `https://cdn.invalid/${id}.m3u8`
+          }]))
+        },
+        ppvStProvider: {
+          resolveStream: jest.fn(async () => ([{
+            name: 'PPV.st', title: 'HD | Champions League', url: 'https://cdn.invalid/ppv-ucl.m3u8'
+          }]))
+        }
+      }
+    });
+
+    const syncedKafkaSources = kafkaProvider.createSourcesForFixture(baseMatch, { now: soccerNow });
+    expect(syncedKafkaSources.map((s) => `${s.id}:${s.matchMode}`)).toEqual([
+      'trex:ev1:event',
+      'trex:ev2:event',
+      'trex:label:label',
+      'trex:team:team'
+    ]);
+    baseMatch.sources.push(...syncedKafkaSources);
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${baseMatch.id}`, {}));
+    const keys = res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`);
+    expect(keys).toContain('kafka:event');
+    expect(keys).toContain('ppvst:none');
+    expect(keys).toContain('scorezone:none');
+    expect(keys).not.toContain('kafka:label');
+    expect(keys).not.toContain('kafka:team');
+    expect(keys).not.toContain('daddylive:none');
+    expect(res.streams.some((s) => s.url.includes('sz_iptv_gb-tnt1'))).toBe(false);
+    expect(res.streams.some((s) => s.url.includes('eyJoIjoiSW50ZXIiLCJhIjoiU3R1dHRnYXJ0In0.sig'))).toBe(true);
+    expect(res.streams.some((s) => s.url.includes('trex:u19'))).toBe(false);
+    expect(res.streams.some((s) => s.url.includes('trex:tv-inter'))).toBe(false);
+  });
+
+  test('keeps channel fallbacks when all event feeds fail/block, Kafka is excluded, or card is replay/24-7', async () => {
+    const blockedMatch = buildFixture({ id: 'blocked-ev' });
+    setupHarness({
+      match: blockedMatch,
+      channels: [
+        { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | 8K | US: PPV 1' },
+        { id: 'trex:label', name: 'US| NBA TV HD' }
+      ]
+    });
+    const prevImpl = safeFetch.getMockImplementation();
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/trex%3Aev1')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/ev1.mpd', clearkey: { k: 'v' } }] })
+        };
+      }
+      return prevImpl(url);
+    });
+    const blockedRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${blockedMatch.id}`, {}));
+    expect(blockedRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual(['kafka:label', 'kafka:team', 'daddylive:none']);
+
+    // User excluded Kafka -> daddylive channel stays
+    const noKafka = await runWithTimers(() => handleStream('tv', `nuvio_sport_${blockedMatch.id}`, { liveSources: 'daddylive' }));
+    expect(noKafka.streams.map((s) => s._source)).toEqual(['daddylive']);
+
+    // Standalone 24/7 TV channel card keeps channel feeds
+    const chCard = buildFixture({
+      id: 'dlv_ch_123_nbatv',
+      title: 'NBA TV',
+      category: 'networks',
+      date: '0',
+      team1: null,
+      team2: null,
+      sources: [{ source: 'daddylive', id: 'dl1', channelName: 'NBA TV' }]
+    });
+    setupHarness({ match: chCard, channels: [{ id: 'trex:label', name: 'US| NBA TV HD' }] });
+    const chRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${chCard.id}`, {}));
+    expect(chRes.streams.map((s) => s._source)).toEqual(['daddylive']);
+  });
+
+  test('publishes fast verified event at soft deadline without waiting for hard deadline while slow probe completes in background', async () => {
+    process.env.STREAM_SOFT_DEADLINE_MS = '100';
+    process.env.STREAM_HARD_DEADLINE_MS = '5000';
+    const match = buildFixture({ id: 'slow-bg-ev' });
+    let resolveSlowProbe;
+    const slowProbe = new Promise((r) => { resolveSlowProbe = r; });
+
+    setupHarness({
+      match,
+      channels: [
+        { id: 'trex:fast', name: 'Live | Mavericks vs. Nuggets | 8K | US: PPV 1' },
+        { id: 'trex:slow', name: 'Live | Mavericks vs. Nuggets | 8K | US: PPV 2' },
+        { id: 'trex:label', name: 'US| NBA TV HD' }
+      ]
+    });
+
+    const baseSafeFetch = safeFetch.getMockImplementation();
+    const resolveCalls = [];
+    safeFetch.mockImplementation(async (url, ...rest) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) resolveCalls.push(target);
+      if (target.includes('/stream/tv/trex%3Aslow')) {
+        await slowProbe;
+      }
+      return baseSafeFetch(url, ...rest);
+    });
+
+    let firstRes;
+    const firstPromise = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((v) => { firstRes = v; });
+    await jest.advanceTimersByTimeAsync(110);
+    await firstPromise;
+
+    expect(firstRes).toBeDefined();
+    expect(firstRes.cacheMaxAge).toBe(2);
+    expect(firstRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual(['kafka:event']);
+    expect(firstRes.streams[0].url).toContain('trex%3Afast');
+
+    // Complete slow probe after initial response and advance past partial TTL.
+    resolveSlowProbe();
+    await jest.advanceTimersByTimeAsync(2100);
+
+    const secondRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(secondRes.cacheMaxAge).toBe(30);
+    expect(secondRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:event',
+      'kafka:event'
+    ]);
+    expect(secondRes.streams.some((s) => s.url.includes('trex%3Afast'))).toBe(true);
+    expect(secondRes.streams.some((s) => s.url.includes('trex%3Aslow'))).toBe(true);
+    expect(resolveCalls.filter((u) => u.includes('trex%3Afast'))).toHaveLength(1);
+    expect(jest.getTimerCount()).toBe(0);
   });
 });

@@ -71,6 +71,15 @@ class StreamEntity {
     if (data._streamSource !== undefined) {
       this._streamSource = data._streamSource;
     }
+    if (data._kafkaMatchMode !== undefined) {
+      this._kafkaMatchMode = data._kafkaMatchMode;
+    }
+    if (data._kafkaEventScore !== undefined) {
+      this._kafkaEventScore = data._kafkaEventScore;
+    }
+    if (data._isChannelFallback !== undefined) {
+      this._isChannelFallback = data._isChannelFallback;
+    }
   }
 }
 

@@ -10,6 +10,7 @@ const CAPACITY_CODE = /^ERR_NATIVE_(POOL|SLOT)_(BUSY|CAPACITY)$/;
 // Array identity keeps partial provider evidence separate from provider JSON.
 // No URLs, errors or additional control objects are retained here.
 const inconclusiveStreams = new WeakMap();
+const partialStreams = new WeakMap();
 const DIRECT_RETRY_HINT = '_nuvioDirectRetry';
 
 function createDeferredResolution(reason, retryAfterMs = 2000) {
@@ -80,7 +81,19 @@ function inconclusiveStreamsReason(streams) {
   return Array.isArray(streams) ? inconclusiveStreams.get(streams) || null : null;
 }
 
+function markPartialStreams(streams, retryAfterMs = 2000) {
+  if (!Array.isArray(streams)) return streams;
+  const ms = Number.isSafeInteger(retryAfterMs) ? Math.max(500, Math.min(5000, retryAfterMs)) : 2000;
+  partialStreams.set(streams, ms);
+  return streams;
+}
+
+function partialStreamsTtlMs(streams) {
+  return Array.isArray(streams) ? partialStreams.get(streams) || 0 : 0;
+}
+
 module.exports = {
   createDeferredResolution, isDeferredResolution, isInconclusiveResolutionError,
-  inconclusiveErrorReason, markInconclusiveStreams, inconclusiveStreamsReason, DIRECT_RETRY_HINT
+  inconclusiveErrorReason, markInconclusiveStreams, inconclusiveStreamsReason,
+  markPartialStreams, partialStreamsTtlMs, DIRECT_RETRY_HINT
 };

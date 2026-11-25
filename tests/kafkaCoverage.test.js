@@ -294,4 +294,85 @@ describe('KafkaProvider coverage sources', () => {
       warn.mockRestore();
     }
   });
+
+  describe('event-first rollout', () => {
+    beforeEach(() => {
+      process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+      process.env.KAFKA_ENABLED = 'true';
+      process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+    });
+
+    test('discovers local candidates for a mid-game fixture with no attached sources, then supplements on demand', async () => {
+      const game = fixture({ date: new Date(Date.now() - 57 * 60000).toISOString(), sources: [] });
+      const eventSearch = fakeEventSearch({ cachedFor: jest.fn(() => []) });
+      const local = { id: 'trex:local', name: 'Live | Bulls vs Cavaliers' };
+      const provider = new KafkaProvider({ eventSearch, catalogStore: fakeStore({ findEvents: jest.fn(() => [local]) }) });
+      expect(provider.isEventFixtureEligible(game)).toBe(true);
+      expect(await provider.eventCandidates(game)).toEqual([local]);
+      expect(eventSearch.findForFixture).not.toHaveBeenCalled();
+      eventSearch.findForFixture.mockResolvedValue([local, { id: 'trex:extra', name: 'Bulls vs Cavaliers' }]);
+      expect((await provider.eventCandidates(game, { upstream: true })).map(hit => hit.id)).toEqual(['trex:local', 'trex:extra']);
+      expect(provider.createSourcesForFixture(game)[0]).toMatchObject({ id: 'trex:local', matchMode: 'event' });
+    });
+
+    test('merges more than six SQLite and upstream candidates without truncation and deduplicates shared IDs', async () => {
+      const game = fixture({ date: new Date(Date.now() - 20 * 60000).toISOString(), sources: [] });
+      const localRows = Array.from({ length: 7 }, (_, i) => ({
+        id: `trex:ev-${i + 1}`,
+        name: `Live | Bulls vs. Cavaliers | Feed ${i + 1}`
+      }));
+      const upstreamRows = [
+        localRows[2],
+        { id: 'trex:ev-8', name: 'Next | Cavaliers vs. Bulls | Feed 8' },
+        { id: 'trex:ev-9', name: 'Next | Bulls vs. Cavaliers | Feed 9' }
+      ];
+      const eventSearch = fakeEventSearch({
+        cachedFor: jest.fn(() => []),
+        findForFixture: jest.fn(async () => upstreamRows)
+      });
+      const provider = new KafkaProvider({
+        eventSearch,
+        catalogStore: fakeStore({ findEvents: jest.fn(() => localRows) })
+      });
+
+      const merged = await provider.eventCandidates(game, { upstream: true });
+      expect(merged.map((hit) => hit.id)).toEqual([
+        'trex:ev-1', 'trex:ev-2', 'trex:ev-3', 'trex:ev-4', 'trex:ev-5',
+        'trex:ev-6', 'trex:ev-7', 'trex:ev-8', 'trex:ev-9'
+      ]);
+    });
+
+    test('spends sweep budget only on fixtures short of event candidates', async () => {
+      const game = fixture({ date: Date.now() });
+      const eventSearch = fakeEventSearch({ cachedFor: jest.fn(() => []) });
+      const store = fakeStore({ findEvents: jest.fn(m => m.id === 'f1' ? [{ id: 'a' }, { id: 'b' }] : []) });
+      const provider = new KafkaProvider({ eventSearch, catalogStore: store });
+      const pending = { ...game, id: 'f2' };
+      await provider.sweepEvents([game, pending], { maxSearches: 20 });
+      expect(eventSearch.sweep).toHaveBeenCalledWith([pending], { maxSearches: 20 });
+      process.env.KAFKA_ENABLED = 'false';
+      await expect(provider.eventCandidates(pending, { upstream: true })).resolves.toEqual([]);
+      expect(eventSearch.findForFixture).not.toHaveBeenCalled();
+    });
+
+    test('shares two probe slots, removes canceled waiters and releases slots on exceptions', async () => {
+      const provider = new KafkaProvider();
+      const release = [];
+      const hold = () => new Promise(done => release.push(done));
+      const first = provider.withEventProbe(hold);
+      const second = provider.withEventProbe(hold);
+      const controller = new AbortController();
+      const unused = jest.fn();
+      const canceled = provider.withEventProbe(unused, controller.signal);
+      const third = provider.withEventProbe(() => { throw new Error('upstream down'); });
+      controller.abort();
+      await expect(canceled).rejects.toMatchObject({ name: 'AbortError' });
+      expect(unused).not.toHaveBeenCalled();
+      release[0]();
+      await expect(third).rejects.toThrow('upstream down');
+      expect(await provider.withEventProbe(() => 'available')).toBe('available');
+      release[1]();
+      await Promise.all([first, second]);
+    });
+  });
 });

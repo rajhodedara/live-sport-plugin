@@ -324,14 +324,33 @@ function getVavooClusterRank(stream) {
  *   8. CDN tier: clean direct CDN before cloaked/worker streams
  *   9. rankScore = score*0.8 + speedScore*0.2
  */
-function compareStreams(a, b, priorities) {
+function kafkaPlaybackRank(row) {
+  if (row?._source !== 'kafka' && row?.sourceName !== 'kafka') return 3;
+  if (row._kafkaMatchMode === 'event') return 0;
+  return row._kafkaMatchMode === 'team' ? 2 : 1;
+}
+
+function hasExplicitLanguage(config) {
+  if (parseLanguagePriority(config).length > 0) return true;
+  const raw = typeof config === 'string'
+    ? config
+    : (config && typeof config === 'object' ? config.languages : null);
+  const tokens = Array.isArray(raw) ? raw : (typeof raw === 'string' ? raw.split(',') : []);
+  return tokens.some(token => isEnglish(token));
+}
+
+function compareStreams(a, b, priorities, explicitLanguage = Boolean(priorities?.length)) {
   try {
     const aIsDirect = a && a.name === DIRECT_STREAM_NAME ? 1 : 0;
     const bIsDirect = b && b.name === DIRECT_STREAM_NAME ? 1 : 0;
     if (aIsDirect !== bIsDirect) return bIsDirect - aIsDirect;
 
+    const eventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true';
+    const kafkaDelta = eventFirst ? kafkaPlaybackRank(a) - kafkaPlaybackRank(b) : 0;
+    if (!explicitLanguage && kafkaDelta) return kafkaDelta;
     const rankDelta = languageRank(a && a.language, priorities) - languageRank(b && b.language, priorities);
     if (rankDelta) return rankDelta;
+    if (kafkaDelta) return kafkaDelta;
 
     // Within each language: Kafka (Priority 1) streams are placed at the top of the list
     const aIsKafka = Boolean(a && (a._source === 'kafka' || a.sourceName === 'kafka')) ? 1 : 0;
@@ -381,6 +400,12 @@ function compareStreams(a, b, priorities) {
     const bIsTikTok = (b && (b.isTikTok || b._isTikTok) && b._source !== 'pitsport' && b._source !== 'timstreams') ? 1 : 0;
     if (aIsTikTok !== bIsTikTok) return aIsTikTok - bIsTikTok;
 
+    if (a?._kafkaMatchMode === 'event' && b?._kafkaMatchMode === 'event' &&
+        Number.isFinite(a._kafkaEventScore) && Number.isFinite(b._kafkaEventScore) &&
+        b._kafkaEventScore !== a._kafkaEventScore) {
+      return b._kafkaEventScore - a._kafkaEventScore;
+    }
+
     return streamRankScore(b) - streamRankScore(a);
   } catch (_) {
     // A comparator that throws leaves the array in an undefined order (V8 may
@@ -401,6 +426,8 @@ module.exports = {
   streamFormatTier,
   getResolutionRank,
   getVavooClusterRank,
+  kafkaPlaybackRank,
+  hasExplicitLanguage,
   compareStreams,
   // Exported for tests: the fold is the single place the matching semantics of
   // every alias lookup are defined.

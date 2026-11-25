@@ -146,6 +146,79 @@ describe('compareStreams', () => {
   });
 });
 
+describe('Kafka event-first stream ordering', () => {
+  const prevFlag = process.env.KAFKA_EVENT_FIRST_ENABLED;
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED;
+    else process.env.KAFKA_EVENT_FIRST_ENABLED = prevFlag;
+  });
+
+  const { hasExplicitLanguage } = require('../src/services/LanguagePriorityService');
+
+  it('orders verified Kafka event, broadcaster, team, then other sources by default', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const streams = [
+      direct({ _source: 'daddylive', language: 'English', score: 100 }),
+      direct({ _source: 'kafka', _kafkaMatchMode: 'team', language: 'English', score: 90 }),
+      direct({ _source: 'kafka', language: 'English', score: 50 }), // pre-change cached row without mode -> broadcaster tier
+      direct({ _source: 'kafka', _kafkaMatchMode: 'event', language: 'Swedish', score: 10 })
+    ];
+
+    const sorted = [...streams].sort((a, b) => compareStreams(a, b, [], hasExplicitLanguage({})));
+    expect(sorted.map((s) => `${s._source}:${s._kafkaMatchMode || 'legacy'}`)).toEqual([
+      'kafka:event',
+      'kafka:legacy',
+      'kafka:team',
+      'daddylive:legacy'
+    ]);
+  });
+
+  it('preserves explicit language preferences and ranks Kafka modes inside a language', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const config = { languages: 'Spanish' };
+    const priorities = parseLanguagePriority(config);
+    const streams = [
+      direct({ _source: 'kafka', _kafkaMatchMode: 'event', language: 'Swedish', score: 95 }),
+      direct({ _source: 'daddylive', language: 'Spanish', score: 90 }),
+      direct({ _source: 'kafka', _kafkaMatchMode: 'team', language: 'Spanish', score: 40 }),
+      direct({ _source: 'kafka', _kafkaMatchMode: 'label', language: 'Spanish', score: 30 }),
+      direct({ _source: 'kafka', _kafkaMatchMode: 'event', language: 'Spanish', score: 20 })
+    ];
+
+    const sorted = [...streams].sort((a, b) => compareStreams(a, b, priorities, hasExplicitLanguage(config)));
+    expect(sorted.map((s) => `${s.language}:${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'Spanish:kafka:event',
+      'Spanish:kafka:label',
+      'Spanish:kafka:team',
+      'Spanish:daddylive:none',
+      'Swedish:kafka:event'
+    ]);
+  });
+
+  it('ignores unknown language typos for event-first mode while honoring explicit English', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    expect(hasExplicitLanguage({ languages: 'Klingon' })).toBe(false);
+    expect(hasExplicitLanguage({ languages: 'English' })).toBe(true);
+    expect(hasExplicitLanguage({ languages: '   ' })).toBe(false);
+  });
+
+  it('restores legacy order when KAFKA_EVENT_FIRST_ENABLED=false', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'false';
+    const streams = [
+      direct({ _source: 'kafka', _kafkaMatchMode: 'event', language: 'Swedish', score: 90 }),
+      direct({ _source: 'daddylive', language: 'English', score: 80 }),
+      direct({ _source: 'kafka', _kafkaMatchMode: 'team', language: 'English', score: 70 })
+    ];
+
+    const sorted = [...streams].sort((a, b) => compareStreams(a, b, [], false));
+    expect(sorted.map((s) => `${s.language}:${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'English:kafka:team',
+      'English:daddylive:none',
+      'Swedish:kafka:event'
+    ]);
+  });
+});
+
 describe('helpers', () => {
   it('canonicalLanguage folds names, codes and accents', () => {
     expect(canonicalLanguage('HI')).toBe('hindi');

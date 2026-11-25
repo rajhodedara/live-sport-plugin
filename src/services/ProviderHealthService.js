@@ -161,11 +161,96 @@ class ProviderHealthService {
     this._syncStartedMs = null;
   }
 
+  recordKafkaPlayback({
+    discovered,
+    localHits = 0,
+    sqliteHits,
+    upstreamSearches = 0,
+    sharedSearches = 0,
+    attempts = 0,
+    verified = 0,
+    reason = 'unknown',
+    searchStats = null
+  } = {}) {
+    this.registerProviders([{ name: 'Kafka' }]);
+    const record = this.providers.get('kafka');
+    const toCount = (value) => (Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : 0);
+    const stopReason = typeof reason === 'string' && reason.trim() ? reason.trim() : 'unknown';
+    const previous = record.eventPlayback || {
+      mints: 0,
+      discovered: 0,
+      localHits: 0,
+      sqliteHits: 0,
+      upstreamSearches: 0,
+      sharedSearches: 0,
+      attempts: 0,
+      verified: 0,
+      stops: {}
+    };
+    const next = {
+      mints: previous.mints + 1,
+      discovered: (previous.discovered || 0) + toCount(discovered ?? localHits),
+      localHits: previous.localHits + toCount(localHits),
+      sqliteHits: previous.sqliteHits + toCount(sqliteHits ?? localHits),
+      upstreamSearches: previous.upstreamSearches + toCount(upstreamSearches),
+      sharedSearches: previous.sharedSearches + toCount(sharedSearches),
+      attempts: previous.attempts + toCount(attempts),
+      verified: previous.verified + toCount(verified),
+      stops: { ...previous.stops, [stopReason]: (previous.stops[stopReason] || 0) + 1 }
+    };
+    if (searchStats && typeof searchStats === 'object') {
+      next.searchTotals = {
+        requests: toCount(searchStats.requests),
+        sweepRequests: toCount(searchStats.sweepRequests),
+        shared: toCount(searchStats.shared)
+      };
+    } else if (previous.searchTotals) {
+      next.searchTotals = { ...previous.searchTotals };
+    }
+    record.eventPlayback = next;
+  }
+
+  recordKafkaSearchStats(searchStats = {}) {
+    if (!searchStats || typeof searchStats !== 'object') return;
+    this.registerProviders([{ name: 'Kafka' }]);
+    const record = this.providers.get('kafka');
+    const toCount = (value) => (Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : 0);
+    const previous = record.eventPlayback || {
+      mints: 0,
+      discovered: 0,
+      localHits: 0,
+      sqliteHits: 0,
+      upstreamSearches: 0,
+      sharedSearches: 0,
+      attempts: 0,
+      verified: 0,
+      stops: {}
+    };
+    record.eventPlayback = {
+      ...previous,
+      stops: { ...previous.stops },
+      searchTotals: {
+        requests: toCount(searchStats.requests),
+        sweepRequests: toCount(searchStats.sweepRequests),
+        shared: toCount(searchStats.shared)
+      }
+    };
+  }
+
   snapshot() {
     return {
       sync: { ...this.sync },
       providers: [...this.providers.values()]
-        .map((record) => ({ ...record }))
+        .map((record) => ({
+          ...record,
+          ...(record.eventPlayback ? {
+            eventPlayback: {
+              ...record.eventPlayback,
+              stops: { ...record.eventPlayback.stops },
+              ...(record.eventPlayback.searchTotals ? { searchTotals: { ...record.eventPlayback.searchTotals } } : {})
+            }
+          } : {})
+        }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     };
   }

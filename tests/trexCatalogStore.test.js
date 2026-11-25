@@ -84,6 +84,44 @@ describe('TrexCatalogStore', () => {
     expect(store.stats()).toMatchObject({ rows: 4, teams: 1, channels: 3, generatedAt: '2026-11-24T00:00:00.000Z' });
   });
 
+  test('finds event rows across kinds, aliases and home/away order', () => {
+    const names = [
+      'Live | Mavericks vs. Nuggets | all',
+      'CA (SN+ 010) | Dallas @ Denver (2026-11-24 22:00:00)',
+      'Live | DENVER NUGGETS - DALLAS MAVERICKS | NBA',
+      'LIVE | DEN - NUGGETS VS DAL - MAVERICKS | US: NBA PASS PPV 3',
+      'US (Peacock 006) | Celtics vs. Wizards (2026-11-24 19:00:10)',
+      'NHL | 01 - 8pm Golden Knights @ Oilers',
+      'LIVE | NHL EDMONTON - VEGAS | Wed 25 Nov 03:00 EET (FI) | 8K EXCLUSIVE | FI: VIAPLAY PPV 27',
+      'Live | Nuggets vs. Suns',
+      'Live | Mavericks vs. Suns • Bulls vs. Nuggets',
+      'Denver Nuggets vs Dallas Mavericks @ Nov 17 10:00 PM :NBA  03',
+      'Live | Dallas Stars vs Denver Nuggets',
+      'NBA | Dallas vs Los Angeles',
+      'Hockey: Dallas @ Denver (2026-11-24 22:00:00)'
+    ];
+    writeCatalogFile(dbPath, names.map((name, i) => ({ id: String(i), name })));
+    const store = openStore({ dbPath });
+    const query = (team1, team2, category = 'basketball', date = '2026-11-25T03:00:00Z') => store.findEvents({
+      team1: {name: team1}, team2, category, date
+    }).map(r => r.id).sort();
+    expect(query('Dallas Mavericks', 'Denver Nuggets')).toEqual(['0', '1', '2', '3']);
+    expect(query('Boston Celtics', 'Washington Wizards')).toEqual(['4']);
+    expect(query('Vegas Golden Knights', 'Edmonton Oilers', 'hockey', '2026-11-25T01:00:00Z')).toEqual(['5', '6']);
+    expect(query('Dallas Mavericks', 'Los Angeles Lakers')).toEqual([]);
+
+    const db = openDatabase(dbPath);
+    try {
+      const plan = db.prepare('EXPLAIN QUERY PLAN SELECT channel_id FROM event_pairs WHERE pair_key = ?').all('x');
+      expect(plan.map(x => x.detail).join(' ')).toMatch(/SEARCH event_pairs USING/i);
+      expect(() => require('../src/services/TrexCatalogDb').replaceCatalog(db, [{id:'x',name:'Jazz vs. Suns'}, null])).toThrow();
+      expect(query('Vegas Golden Knights', 'Edmonton Oilers', 'hockey', '2026-11-25T01:00:00Z')).toEqual(['5', '6']);
+      db.exec('DROP TABLE event_pairs');
+      expect(query('Dallas Mavericks', 'Denver Nuggets')).toEqual([]);
+      expect(store.isReady()).toBe(true);
+    } finally { db.close(); }
+  });
+
   test('a reader keeps the previous catalog while a refresh transaction is open', () => {
     const store = openStore({ dbPath });
     expect(store.isReady()).toBe(true);
@@ -102,5 +140,58 @@ describe('TrexCatalogStore', () => {
     writer.close();
 
     expect(store.findTeam('Chicago Bulls')[0].id).toBe('trex:nba-bulls-4k');
+  });
+
+  test('matches soccer events and team channels while blocking squad and same-city leaks', () => {
+    const soccerMetas = [
+      { id: 'tv:inter', name: 'UA| INTER' },
+      { id: 'team:inter', name: 'SERIE A| INTER MILAN' },
+      { id: 'team:ac-milan', name: 'SERIE A| AC MILAN' },
+      { id: 'team:bolton', name: 'CHAMP | Bolton Wanderers' },
+      { id: 'ev:x-br', name: 'NEXT | INTER DE MILÃO X STUTTGART | Wed 25 Nov 17:45 -02 (BR) | 8K EXCLUSIVE | BR: MAX PPV 9' },
+      { id: 'ev:x-pt', name: 'Next | Sabah x Barcelona | UEFA Champions League | 2026-11-25 | 17:45 (GMT) | 8K EXCLUSIVE | PT: DAZN PPV 27' },
+      { id: 'tv:hunter-x', name: 'PRIME| HUNTER X HUNTER ᴿᴬᵂ' },
+      { id: 'ev:stan-bullet', name: 'AU (STAN 52) |  • Everton v Liverpool  Premier League Matchweek 12 2026/2027 (2026-11-29 22:50:50)' },
+      { id: 'ev:goal-rush', name: 'AU (STAN 57) | Goal Rush: Sunderland v Tottenham Hotspur • 30 Nov  Premier League 2026/2027 (2026-11-30 00:55:50)' },
+      { id: 'ev:stan-sunderland', name: 'AU (STAN 61) | Sunderland v Tottenham Hotspur  Premier League Matchweek 12 2026/2027 (2026-11-30 00:55:50)' },
+      { id: 'ev:viaplay', name: 'NEXT | CHAMPIONSHIP BOLTON - WEST BROM | Wed 25 Nov 20:35 CET (DK) | 8K EXCLUSIVE | DK: VIAPLAY PPV 57' },
+      { id: 'ev:psf', name: 'PSF04 | 15:00 Arsenal vs Manchester City' },
+      { id: 'ev:bodo', name: 'AU (STAN 02) | Bodø / Glimt v LASK  UEFA Champions League Matchday 5 2026/2027 (2026-11-25 04:40:50)' },
+      { id: 'ev:mls', name: '(Apple) (MLS) 027 |  Portland vs. Dallas  (2026-11-28 22:10:00)' },
+      { id: 'ev:u19', name: 'Football: Arsenal U19 vs Dortmund U19 @ Nov 24 13:55 :Tv2Play NO  02' },
+      { id: 'ev:senior-ars', name: 'US (Paramount 004) | Arsenal vs. Dortmund (2026-11-24 15:00:05)' },
+      { id: 'ev:lafc', name: 'End | St. Louis CITY SC vs. Los Angeles Football Club | all | 24-11-2026 | 00:00 (GMT) | 8K EXCLUSIVE | CA: SOCCER PPV 2' },
+      { id: 'ev:nba-ppv', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: SOCCER PPV 93' }
+    ];
+    writeCatalogFile(dbPath, soccerMetas);
+    const store = openStore({ dbPath });
+
+    // findTeam ignores non-team TV channels (`UA| INTER`) and finds `SERIE A| INTER MILAN`.
+    expect(store.findTeam('Inter').map(r => r.id)).toEqual(['team:inter']);
+    expect(store.findTeam('Internazionale').map(r => r.id)).toEqual(['team:inter']);
+    expect(store.findTeam('AC Milan').map(r => r.id)).toEqual(['team:ac-milan']);
+    expect(store.findTeam('Bolton').map(r => r.id)).toEqual(['team:bolton']);
+
+    const idsFor = (team1, team2, league, date) =>
+      store.findEvents({ team1, team2, category: 'football', league, date }).map(r => r.id).sort();
+
+    expect(idsFor('Internazionale', 'VfB Stuttgart', 'UCL', '2026-11-25T19:45:00Z')).toEqual(['ev:x-br']);
+    expect(idsFor('Sabah FK', 'Barcelona', 'UCL', '2026-11-25T17:45:00Z')).toEqual(['ev:x-pt']);
+    expect(idsFor('Everton', 'Liverpool', 'EPL', '2026-11-29T13:30:00Z')).toEqual(['ev:stan-bullet']);
+    expect(idsFor('Sunderland', 'Tottenham Hotspur', 'EPL', '2026-11-29T14:00:00Z')).toEqual(['ev:stan-sunderland']);
+    expect(idsFor('Bolton Wanderers', 'West Bromwich Albion', 'Championship', '2026-11-25T19:45:00Z')).toEqual(['ev:viaplay']);
+    expect(idsFor('Arsenal', 'Manchester City', 'EPL', '2026-11-29T15:00:00Z')).toEqual(['ev:psf']);
+    expect(idsFor('Bodoe/Glimt', 'LASK Linz', 'UCL', '2026-11-24T17:45:00Z')).toEqual(['ev:bodo']);
+    expect(idsFor('Portland Timbers', 'FC Dallas', 'MLS', '2026-11-29T00:10:00Z')).toEqual(['ev:mls']);
+
+    // Guard against U19 <-> senior leaks, same-city collisions, and NBA mislabeled into SOCCER PPV.
+    expect(idsFor('Arsenal U19', 'Borussia Dortmund U19', 'UEFA Youth League', '2026-11-24T13:00:00Z')).toEqual(['ev:u19']);
+    expect(idsFor('Arsenal', 'Borussia Dortmund', 'UEFA Champions League', '2026-11-24T20:00:00Z')).toEqual(['ev:senior-ars']);
+    expect(idsFor('Manchester United', 'Manchester City', 'EPL', '2026-11-29T15:00:00Z')).toEqual([]);
+    expect(idsFor('St. Louis City', 'LA Galaxy', 'MLS', '2026-11-24T20:00:00Z')).toEqual([]);
+    expect(idsFor('Hunter', 'Hunter', 'Other', null)).toEqual([]);
+    expect(store.findEvents({
+      team1: 'Dallas Mavericks', team2: 'Denver Nuggets', category: 'basketball', league: 'NBA', date: '2026-11-25T03:00:00Z'
+    }).map(r => r.id)).toEqual(['ev:nba-ppv']);
   });
 });

@@ -1,31 +1,22 @@
-# Session Checkpoint: Stream Click Resolution Latency Optimization
-**Date**: 2026-11-24
-**Status**: Completed, Merged to `stable`, and Deployed Live (`1455680`)
+# Session Checkpoint: Kafka Event-Only Playback
+**Date**: 2026-11-25
+**Status**: Completed (local implementation & verification; rollout/flag activation deferred)
 
 ### What Was Completed
-1. **Root Cause Analysis of Stream Click Latency**:
-   - Identified that promoting Kafka to Priority-1 (`SOURCE_PRIORITY.kafka = 1`) created a quorum mismatch: `PRIORITY1_QUORUM` was hardcoded to 3, but most fixtures only have 1 or 2 Priority-1 sources, preventing `readyToRespond` from certifying quorum.
-   - Identified that `dispatchToProvider('kafka')` ran `resolveEventStreams` sequentially on the click path and even when a dedicated event source was already present on the fixture, duplicating live searches.
-
-2. **Code Fixes (`src/streams.js`, `tests/vavooProvider.test.js`)**:
-   - Scaled Priority-1 quorum target dynamically: `targetP1Quorum = Math.min(PRIORITY1_QUORUM, inFlight.filter(f => f.isPriority1).length)` in both warm cache check and `readyToRespond`.
-   - Optimized Kafka dispatch: skipped redundant `resolveEventStreams` when a dedicated Kafka event source already exists on the match fixture, and ran `provider.resolveStream` + `provider.resolveEventStreams` concurrently with `Promise.all`.
-   - Reverted deadline defaults per user request: `STREAM_SOFT_DEADLINE_MS` restored to default 6000ms; `STREAM_HARD_DEADLINE_MS` restored to default 15000ms.
-   - Updated `tests/vavooProvider.test.js` to assert `VAVOO_BASE_SITES.length` across base sites.
-
-3. **Commits and Deployment**:
-   - Commit `3f09bce`: `fix(streams): speed up stream resolution and fix priority quorum scaling`
-   - Commit `123e270`: `perf(streams): tighten default resolution deadlines to 2s soft and 7s hard`
-   - Commit `1455680`: `revert(streams): restore 6000ms soft and 15000ms hard deadline defaults`
-   - Deployed live to VPS via `scripts/deploy.sh --no-pull`. PM2 cluster (workers 34, 35) online and healthy.
-
-4. **Live Verification on VPS**:
-   - Live match warm re-click: **0.002s – 0.003s** (2–3 ms).
-   - Priority-1 quorum scaling resolves early when the match's in-flight priority-1 sources arrive without waiting out full deadlines.
+- Implemented [docs/superpowers/plans/2026-11-25-kafka-event-only-playback.md](file:///C:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/superpowers/plans/2026-11-25-kafka-event-only-playback.md) while keeping `KAFKA_EVENT_FIRST_ENABLED=false` rollback default intact:
+  - `src/services/TrexEventSearch.js`: Removed the 6-candidate truncation and early stop in `_searchEventFirst`, ran both alias queries within the bounded upstream budget, and returned `{ rows, partial }` so single-alias failures preserve available hits without poisoning negative cache.
+  - `src/providers/KafkaProvider.js`: Added `upstreamMinLocal()` (`KAFKA_EVENT_UPSTREAM_MIN_LOCAL`, default `6`) and preserved `_kafkaEventScore` onto `StreamEntity` in `resolveStream` when `KAFKA_EVENT_FIRST_ENABLED=true`.
+  - `src/domain/StreamEntity.js`: Preserved `_kafkaEventScore`, `_isChannelFallback`, and `_kafkaMatchMode` across entity creation and cache cloning.
+  - `src/services/StreamResolutionOutcome.js` & `src/services/StreamResolveCache.js`: Added WeakMap-backed `markPartialStreams` / `partialStreamsTtlMs` (`2000ms` short freshness, `partial: true`, `isDeferred` support, no L2 premature publish, `noteSuccess` guard) so HTTP requests settle at their deadline without holding 60s L2 claims.
+  - `src/services/KafkaEventPlayback.js`: Rebuilt around a per-worker fixture coordinator (`fixtureJobKey(match)`), removing 2-stream and 6-candidate caps, merging deduplicated SQLite + upstream candidates, probing with 2 concurrent workers inside a 60s work deadline (zero timers), keeping every distinct playable URL per candidate, exposing live progress (`subscribeEventProgress`), and resuming pending candidates across clicks without re-probing completed IDs.
+  - `src/services/LanguagePriorityService.js`: Added `_kafkaEventScore` ordering before `streamRankScore` among verified Kafka `'event'` feeds.
+  - `src/services/ProviderHealthService.js`: Added `discovered` counter in `recordKafkaPlayback` / `recordKafkaSearchStats`.
+  - `src/streams.js`: Bumped `:v3:` / `fixture-events-v3-` keys, removed `.slice(0, 1)` in `mintVerifiedSources` (verifying multiple URLs per candidate sequentially within one probe slot), decoupled probe `signal` from HTTP abort, surfaced live progress and released `readyToRespond()` past soft deadline when verified event progress exists, added `isChannelFallbackSource` / `applyFixtureChannelFallback` to hide broadcaster/team/linear channel fallbacks across providers (`kafka` non-event, `damitv`, `vavoo`, `cdnlive`, `timstreams`, `streamsports99`, `streamsports`, `moviebox_tv`, `daddylive` non-`Event Stream`, `scorezone` `sz_iptv_*`) once a verified playable Kafka event exists while preserving non-channel matchup feeds (`ppvst`, `sportsbite`, `moviebox_sports`, `roxiestreams`, `ak47live`, `sktech`, `sportzx`, `scorezone` fixture tokens), replays, 24/7 TV cards, and channel fallbacks on failure/timeout/policy block.
+- Updated and verified tests in `tests/trexEventSearch.test.js`, `tests/kafkaCoverage.test.js`, `tests/kafkaDispatch.test.js`, `tests/providerHealth.test.js`, `tests/streamHardDeadline.test.js`, `tests/streamPartialRecovery.test.js`, plus focused regression suites and disposable v2 catalog replay.
 
 ### Current Blockers / Open Questions
-- None. All stream unit and integration tests passing.
+- None locally. Production deployment, v2 SQLite catalog rebuild on VPS (`scripts/refresh_trex_catalog.js`), and `KAFKA_EVENT_FIRST_ENABLED=true` canary rollout are separate steps.
 
 ### Immediate Next Steps for Next Chat
-1. Monitor live Stremio user clicks and server logs (`pm2 logs nuvio-sports`).
-2. Optional: If Vavoo upstream 500 errors persist, investigate circuit breaker or fail-fast mirror rotation for Vavoo.
+1. Deploy updated `src/` + build on VPS, refresh the v2 Trex SQLite catalog (`scripts/refresh_trex_catalog.js`), and enable `KAFKA_EVENT_FIRST_ENABLED=true` on a canary worker first to monitor coverage, p95 latency, deadline fallback rate, and RSS before full activation.
+2. User directive: DO NOT run match sync (`scripts/sync-matches.js`) on VPS updates unless explicitly requested by the user.

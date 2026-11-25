@@ -23,7 +23,8 @@ const {
   entryScore
 } = require('./TrexCatalogKeys');
 
-const SCHEMA_VERSION = '1';
+const { parsePair, pairKey, eventScore } = require('./TrexFixtureMatch');
+const SCHEMA_VERSION = '2';
 
 /** Leading `GROUP|` token of a catalog name, or '' when the name has none. */
 function groupOf(name) {
@@ -76,6 +77,12 @@ function ensureSchema(db) {
       PRIMARY KEY (norm_key, channel_id)
     );
     CREATE INDEX IF NOT EXISTS idx_channel_keys_norm ON channel_keys(norm_key);
+    CREATE TABLE IF NOT EXISTS event_pairs (
+      pair_key TEXT NOT NULL,
+      channel_id TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      PRIMARY KEY (pair_key, channel_id)
+    ) WITHOUT ROWID;
     CREATE TABLE IF NOT EXISTS channel_health (
       channel_id TEXT PRIMARY KEY,
       status TEXT,
@@ -109,10 +116,12 @@ function replaceCatalog(db, metas, { generatedAt, source } = {}) {
   );
   const keyExists = db.prepare('SELECT 1 AS present FROM channel_keys WHERE norm_key = ? LIMIT 1');
   const setMeta = db.prepare('INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)');
+  const insertEvent = db.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)');
 
   db.exec('BEGIN IMMEDIATE');
   try {
     db.exec('DELETE FROM channel_keys');
+    db.exec('DELETE FROM event_pairs');
     db.exec('DELETE FROM channels');
 
     const seen = new Set();
@@ -148,6 +157,8 @@ function replaceCatalog(db, metas, { generatedAt, source } = {}) {
       }
 
       insertChannel.run(id, name, group, kind, league);
+      const pair = parsePair(name);
+      if (pair) insertEvent.run(pairKey(pair.a, pair.b), id, eventScore(name, group));
       for (const key of new Set(keys)) {
         insertKey.run(key, id, score);
         counts.keys += 1;

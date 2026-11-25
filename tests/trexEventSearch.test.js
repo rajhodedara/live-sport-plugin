@@ -36,6 +36,143 @@ function ids(candidates) {
   return candidates.map((candidate) => candidate.id);
 }
 
+describe('event-first discovery', () => {
+  const flag = process.env.KAFKA_EVENT_FIRST_ENABLED;
+  beforeEach(() => { process.env.KAFKA_EVENT_FIRST_ENABLED = 'true'; });
+  afterEach(() => {
+    if (flag === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED;
+    else process.env.KAFKA_EVENT_FIRST_ENABLED = flag;
+  });
+  const game = { id: 'bos-was', date: NOW - 57 * 60000, category: 'basketball', league: 'NBA',
+    team1: 'Boston Celtics', team2: 'Washington Wizards' };
+
+  test('keeps live overtime and enforces the clock boundaries and terminal states', () => {
+    const s = new TrexEventSearch({ now: () => NOW });
+    expect(s.isFixtureSearchable(game)).toBe(true);
+    expect(s.isFixtureSearchable({ ...game, date: new Date(NOW + 15 * 60000).toISOString() })).toBe(true);
+    expect(s.isFixtureSearchable({ ...game, date: NOW + 15 * 60000 + 1 })).toBe(false);
+    expect(s.isFixtureSearchable({ ...game, date: NOW - 4 * 3600000 })).toBe(true);
+    expect(s.isFixtureSearchable({ ...game, date: NOW - 4 * 3600000 - 1 })).toBe(false);
+    expect(s.isFixtureSearchable({ ...game, date: NOW - 5 * 3600000, status: 'live' })).toBe(true);
+    expect(s.isFixtureSearchable({ ...game, status: 'finished' })).toBe(false);
+    expect(s.isFixtureSearchable({ ...game, status: 'live', isReplay: true })).toBe(false);
+    expect(s.isFixtureSearchable({ ...game, date: null })).toBe(false);
+  });
+
+  test('20 viewers and a sweep share both alias requests, one abort leaves the other viewers attached', async () => {
+    const metas = Array.from({ length: 6 }, (_, i) => ({ id: String(i), name: 'Live | Celtics vs. Wizards | NBA | Feed ' + i }));
+    let finish;
+    const fetchImpl = jest.fn()
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValue(jsonResponse([]));
+    const s = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+    const abort = new AbortController();
+    const canceled = s.findForFixture(game, { signal: abort.signal });
+    const viewers = Array.from({ length: 19 }, () => s.findForFixture(game));
+    const sweep = s.sweep([game]);
+    abort.abort();
+    await expect(canceled).resolves.toEqual([]);
+    expect(decode(fetchImpl.mock.calls[0][0])).toContain('/search=celtics.json');
+    finish(jsonResponse(metas));
+    expect((await Promise.all(viewers)).every(rows => rows.length === 6)).toBe(true);
+    expect((await sweep).get(game.id)).toHaveLength(6);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(s.stats).toEqual({ requests: 2, shared: 20, sweepRequests: 0 });
+    expect(s.cachedFor(game)).toHaveLength(6);
+    expect(s.cachedFor({ ...game, date: game.date + 86400000 })).toEqual([]);
+  });
+
+  test('never exceeds two upstream searches across fixtures and counts retries within a sweep', async () => {
+    let active = 0;
+    let peak = 0;
+    const fetchImpl = jest.fn(async () => {
+      peak = Math.max(++active, peak);
+      await new Promise(resolve => setImmediate(resolve));
+      active--;
+      return jsonResponse([]);
+    });
+    const s = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+    const fixtures = Array.from({ length: 30 }, (_, i) => ({ ...game, id: String(i) }));
+    await Promise.all([s.sweep(fixtures, { maxSearches: 20 }), s.findForFixture(game)]);
+    expect(peak).toBe(2);
+    expect(s.stats.sweepRequests).toBe(20);
+    expect(fetchImpl.mock.calls.length).toBeGreaterThanOrEqual(20);
+    expect(fetchImpl.mock.calls.length).toBeLessThanOrEqual(22);
+  });
+
+  test('a failed fetch can retry; nickname and full-name queries merge, validate both opponents and dedupe', async () => {
+    const aliasHit = { id: 'a', name: 'Live | Celtics vs. Wizards' };
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce({ ok: false, status: 502 })
+      .mockResolvedValueOnce(jsonResponse([aliasHit, { id: 'x', name: 'Live | Celtics vs. Nuggets' }]))
+      .mockResolvedValueOnce(jsonResponse([aliasHit, { id: 'b', name: 'Next | Washington Wizards vs. Boston Celtics' }]));
+    const s = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+    await expect(s.findForFixture(game)).resolves.toEqual([]);
+    expect(ids(await s.findForFixture(game))).toEqual(['a', 'b']);
+    expect(fetchImpl.mock.calls.map(([url]) => decode(url).split('search=')[1]))
+      .toEqual(['celtics.json', 'celtics.json', 'boston celtics.json']);
+  });
+
+  test('searches localized short aliases and bare cities for soccer fixtures', async () => {
+    const fetchImpl = jest.fn(async (url) => {
+      const q = decode(url).split('search=')[1];
+      if (q === 'bayern.json') return jsonResponse([{ id: 's1', name: 'Next | Lille x Bayern | UEFA Champions League | 2026-11-23 | 20:00 (GMT)' }]);
+      if (q === 'portland.json') return jsonResponse([{ id: 's2', name: '(Apple) (MLS) 027 |  Portland vs. Dallas  (2026-11-23 20:10:00)' }]);
+      return jsonResponse([]);
+    });
+    const s = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+
+    const bayern = await s.findForFixture({
+      id: 'ucl-bayern', date: NOW + 600_000, category: 'football', league: 'UCL',
+      team1: 'FC Bayern Munich', team2: 'LOSC Lille'
+    });
+    expect(ids(bayern)).toEqual(['s1']);
+
+    const portland = await s.findForFixture({
+      id: 'mls-por', date: NOW + 600_000, category: 'football', league: 'MLS',
+      team1: 'Portland Timbers', team2: 'FC Dallas'
+    });
+    expect(ids(portland)).toEqual(['s2']);
+    expect(fetchImpl.mock.calls.map(([u]) => decode(u).split('search=')[1]))
+      .toEqual(['bayern munich.json', 'bayern.json', 'portland timbers.json', 'portland.json']);
+  });
+
+  test('keeps more than six distinct matches across both alias queries and retries after partial upstream failure', async () => {
+    const aliasOneMetas = Array.from({ length: 7 }, (_, i) => ({
+      id: `trex:a1-${i + 1}`,
+      name: `Live | Celtics vs. Wizards | Feed ${i + 1}`
+    }));
+    aliasOneMetas.push({ id: 'trex:wrong', name: 'Live | Celtics vs. Heat' });
+    const aliasTwoMetas = [
+      aliasOneMetas[0],
+      { id: 'trex:a2-1', name: 'Next | Washington Wizards vs. Boston Celtics | Feed 8' },
+      { id: 'trex:a2-2', name: 'Next | Boston Celtics vs. Washington Wizards | Feed 9' }
+    ];
+
+    const fetchImpl = jest.fn()
+      .mockResolvedValueOnce(jsonResponse(aliasOneMetas))
+      .mockResolvedValueOnce({ ok: false, status: 502 })
+      .mockResolvedValueOnce(jsonResponse(aliasOneMetas))
+      .mockResolvedValueOnce(jsonResponse(aliasTwoMetas));
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const s = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => NOW });
+      const partial = await s.findForFixture(game);
+      expect(ids(partial)).toHaveLength(7);
+      expect(ids(partial)).not.toContain('trex:wrong');
+
+      const complete = await s.findForFixture(game);
+      expect(ids(complete)).toHaveLength(9);
+      expect(ids(complete)).toContain('trex:a2-1');
+      expect(ids(complete)).toContain('trex:a2-2');
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 describe('TrexEventSearch', () => {
   test('accepts kickoffs from 15 minutes before to 4 hours after now', () => {
     const search = new TrexEventSearch({ baseUrl: BASE, now: () => NOW, fetchImpl: jest.fn() });

@@ -17,6 +17,9 @@ describe('TrexCatalogKeys', () => {
   describe('normalizeName', () => {
     test('strips diacritics, lowercases and drops everything that is not a-z0-9', () => {
       expect(normalizeName('Atlético de Madrid ᴿᴬᵂ')).toBe('atletico de madrid');
+      expect(normalizeName('Bodø / Glimt')).toBe('bodo glimt');
+      expect(normalizeName('Jagiellonia Białystok')).toBe('jagiellonia bialystok');
+      expect(normalizeName('Fenerbahçe')).toBe('fenerbahce');
     });
   });
 
@@ -69,6 +72,19 @@ describe('TrexCatalogKeys', () => {
 
     test('drops club fillers', () => {
       expect(teamChannelKeys('LA LIGA| AC MILAN').keys).toEqual(['milan']);
+      expect(teamChannelKeys('SERIE A| AS ROMA').keys).toEqual(['roma']);
+      expect(teamChannelKeys('CHAMP | Bolton Wanderers')).toEqual({
+        league: 'efl championship',
+        keys: ['bolton wanderers', 'wanderers bolton']
+      });
+      expect(teamChannelKeys('L1 | Luton Town')).toEqual({
+        league: 'efl league one',
+        keys: ['luton town', 'town luton']
+      });
+      expect(teamChannelKeys('L2 | Barnet')).toEqual({
+        league: 'efl league two',
+        keys: ['barnet']
+      });
     });
 
     test('recognizes MLB clubs that carry no team group', () => {
@@ -87,6 +103,11 @@ describe('TrexCatalogKeys', () => {
     test('drops club fillers from fixture names', () => {
       expect(teamQueryKeys('Atlético de Madrid')).toContain('atletico madrid');
       expect(teamQueryKeys('Valencia CF')).toEqual(['valencia']);
+      expect(teamQueryKeys('AS Roma')).toEqual(['roma']);
+      expect(teamQueryKeys('Inter')).toEqual(['inter', 'inter milan']);
+      expect(teamQueryKeys('Villarreal')).toEqual(['villarreal', 'villareal']);
+      expect(teamQueryKeys('Athletic Club')).toEqual(['athletic', 'athletic bilbao']);
+      expect(teamQueryKeys('Deportivo Alavés')).toContain('alaves');
     });
 
     test('emits a multi-token fixture name in both orders', () => {

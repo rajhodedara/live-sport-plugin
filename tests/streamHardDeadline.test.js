@@ -211,4 +211,55 @@ describe('handleStream hard response deadline', () => {
       else process.env.RESOLVE_CACHE_SHARED = shared;
     }
   });
+
+  test('waits past soft deadline to hard deadline while event discovery is pending with no verified event yet', async () => {
+    const prevEventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED;
+    const prevEnabled = process.env.KAFKA_ENABLED;
+    const prevManifest = process.env.KAFKA_MANIFEST_URL;
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    process.env.KAFKA_ENABLED = 'true';
+    process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+
+    try {
+      const eventMatch = {
+        id: 'ev-soft',
+        title: 'Team A vs Team B',
+        category: 'football',
+        date: Date.now(),
+        team1: 'Team A',
+        team2: 'Team B',
+        sources: [{ source: 'daddylive', id: 'dl1', channelName: 'TNT Sports 1' }]
+      };
+      const eventDeferred = deferred();
+      const daddyliveDeferred = deferred();
+      const kp = {
+        configured: true,
+        isEventFixtureEligible: () => true
+      };
+      const services = {
+        cacheService: { findMatch: () => eventMatch },
+        streamResolveCache: {
+          getOrCreate: jest.fn(key => (key.includes('fixture-events-') ? eventDeferred.promise : daddyliveDeferred.promise))
+        },
+        streamScorer: { calculateScore: () => 1 },
+        kafkaProvider: kp
+      };
+      container.resolve.mockImplementation(name => services[name]);
+
+      let response;
+      handleStream('tv', 'nuvio_sport_ev-soft').then(value => { response = value; });
+      daddyliveDeferred.resolve([{ url: 'https://cdn.example/dl.m3u8', _source: 'daddylive', channelName: 'TNT Sports 1' }]);
+      await jest.advanceTimersByTimeAsync(110);
+      expect(response).toBeUndefined();
+
+      await jest.advanceTimersByTimeAsync(90);
+      expect(response).toBeDefined();
+      expect(response.streams.map(s => s.url)).toEqual(['https://cdn.example/dl.m3u8']);
+      expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 1, 'hard_wait_expired');
+    } finally {
+      if (prevEventFirst === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = prevEventFirst;
+      if (prevEnabled === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = prevEnabled;
+      if (prevManifest === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = prevManifest;
+    }
+  });
 });

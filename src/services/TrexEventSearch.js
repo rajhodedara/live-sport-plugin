@@ -21,6 +21,7 @@
  */
 
 const { eventQueryTokens, normalizeName, entryScore } = require('./TrexCatalogKeys');
+const { matchesFixture, eventSearchAliases, eventScore } = require('./TrexFixtureMatch');
 
 const CATALOG_ID = 'flix-live-tv-v2-trex';
 const DEFAULT_TTL_MS = 10 * 60 * 1000;
@@ -65,9 +66,42 @@ function teamName(team) {
 function kickoffMs(match) {
   const value = match && match.date;
   const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  if (Number.isFinite(numeric)) return numeric > 0 ? numeric : NaN;
   const parsed = Date.parse(String(value == null ? '' : value));
   return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function eventFirstEnabled() {
+  return process.env.KAFKA_EVENT_FIRST_ENABLED === 'true';
+}
+
+function isFixtureSearchable(match, now = Date.now()) {
+  if (!match || !Number.isFinite(now)) return false;
+  const kickoff = kickoffMs(match);
+  if (!eventFirstEnabled()) return kickoff >= now - WINDOW_BEFORE_MS && kickoff <= now + WINDOW_AFTER_MS;
+  const status = String(match.status || '').trim().toLowerCase();
+  if (match.isReplay || match.isChannel || match.category === 'networks' ||
+      /^(rz|bv|nfl|sf|fr|hr)_/.test(match.id || '') ||
+      /^(?:finished|ended|final|ft|postponed|cancelled|canceled|replay)$/.test(status)) return false;
+  if (status === 'live' && (!Number.isFinite(kickoff) || kickoff <= now)) return true;
+  return kickoff >= now - WINDOW_AFTER_MS && kickoff <= now + WINDOW_BEFORE_MS;
+}
+
+function fixtureKey(match) {
+  if (!match || match.id == null) return '';
+  return eventFirstEnabled() ? JSON.stringify([match.id, kickoffMs(match)]) : String(match.id);
+}
+
+// Cancellation detaches this waiter. Other viewers and the background sweep
+// still share the upstream promise and its bounded fetch timeout.
+function waitForSearch(promise, signal) {
+  if (!signal) return promise;
+  return new Promise((resolve, reject) => {
+    const canceled = () => resolve([]);
+    if (signal.aborted) return canceled();
+    signal.addEventListener('abort', canceled, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', canceled));
+  });
 }
 
 /** The `GROUP|` prefix of a catalog name unless the meta carries a group field. */
@@ -140,6 +174,7 @@ class TrexEventSearch {
     concurrency = DEFAULT_CONCURRENCY,
     now = () => Date.now()
   } = {}) {
+    this._explicitBaseUrl = baseUrl != null;
     this.baseUrl = String(baseUrl == null ? baseFromEnv() : baseUrl)
       .replace(/\/manifest\.json$/, '')
       .replace(/\/+$/, '');
@@ -149,6 +184,10 @@ class TrexEventSearch {
     this.concurrency = Math.max(1, Math.min(8, toCount(concurrency, DEFAULT_CONCURRENCY) || 1));
     this.now = typeof now === 'function' ? now : () => Date.now();
     this.cache = new Map();
+    this.stats = { requests: 0, sweepRequests: 0, shared: 0 };
+    this.pending = new Map();
+    this.activeRequests = 0;
+    this.waiting = new Set();
   }
 
   /** True when a kickoff falls in the +/- window searched for live events. */
@@ -157,6 +196,10 @@ class TrexEventSearch {
     const reference = Number(nowMs);
     if (!Number.isFinite(kickoffAt) || !Number.isFinite(reference)) return false;
     return kickoffAt >= reference - WINDOW_BEFORE_MS && kickoffAt <= reference + WINDOW_AFTER_MS;
+  }
+
+  isFixtureSearchable(match, now = this.now()) {
+    return isFixtureSearchable(match, now);
   }
 
   /** Fresh cache entry for a fixture, or null. Never touches the network. */
@@ -173,7 +216,7 @@ class TrexEventSearch {
 
   /** Cached candidates for a fixture id; `[]` when absent or expired. */
   cachedFor(fixtureId) {
-    const entry = this._fresh(fixtureId);
+    const entry = this._fresh(typeof fixtureId === 'object' ? fixtureKey(fixtureId) : fixtureId);
     return entry ? entry.candidates.slice() : [];
   }
 
@@ -217,7 +260,8 @@ class TrexEventSearch {
       }
       budget.remaining -= 1;
     }
-    if (!this.baseUrl) {
+    const baseUrl = this._explicitBaseUrl ? this.baseUrl : (baseFromEnv() || this.baseUrl);
+    if (!baseUrl) {
       const error = new Error('missing upstream base URL');
       error.code = 'NO_BASE_URL';
       throw error;
@@ -228,10 +272,12 @@ class TrexEventSearch {
       throw error;
     }
     const query = encodeURIComponent(tokens.join(' '));
-    const url = `${this.baseUrl}/catalog/tv/${CATALOG_ID}/search=${query}.json`;
+    const url = `${baseUrl}/catalog/tv/${CATALOG_ID}/search=${query}.json`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     try {
+      this.stats.requests++;
+      if (budget) this.stats.sweepRequests++;
       const response = await this.fetchImpl(url, {
         headers: { 'User-Agent': USER_AGENT },
         signal: controller.signal
@@ -247,6 +293,52 @@ class TrexEventSearch {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  async _boundedRequest(tokens, budget) {
+    if (this.activeRequests < Math.min(DEFAULT_CONCURRENCY, this.concurrency)) {
+      this.activeRequests++;
+    } else {
+      // Queue wait is bounded independently of the fetch timeout.
+      await new Promise((resolve, reject) => {
+        const start = () => { clearTimeout(timer); resolve(); };
+        const timer = setTimeout(() => {
+          this.waiting.delete(start);
+          reject(Object.assign(new Error('search queue busy'), { code: 'QUEUE_TIMEOUT' }));
+        }, SEARCH_TIMEOUT_MS);
+        this.waiting.add(start);
+      });
+    }
+    try {
+      return await this._request(tokens, budget);
+    } finally {
+      const next = this.waiting.values().next().value;
+      if (next) { this.waiting.delete(next); next(); }
+      else this.activeRequests--;
+    }
+  }
+
+  async _searchEventFirst(match, budget) {
+    const aliases = eventSearchAliases(teamName(match.team1), match);
+    if (!teamName(match.team2)) return { rows: [], partial: false };
+    const found = new Map();
+    let partial = false;
+    for (const alias of aliases.slice(0, 2)) {
+      try {
+        const metas = await this._boundedRequest(alias.split(' '), budget);
+        for (const meta of metas) {
+          if (!meta?.id || !matchesFixture(meta.name, match)) continue;
+          const group = metaGroup(meta);
+          found.set(String(meta.id), { id: String(meta.id), name: meta.name, group, score: eventScore(meta.name, group) });
+        }
+      } catch (error) {
+        if (error.code !== BUDGET_EXHAUSTED) console.warn(`[TrexEventSearch] search failed: ${errorKind(error)}`);
+        if (!found.size) return { rows: null, partial: true };
+        partial = true;
+        break;
+      }
+    }
+    return { rows: [...found.values()].sort((a, b) => b.score - a.score), partial };
   }
 
   /** Candidates for one token list, or null when the request failed. */
@@ -289,8 +381,9 @@ class TrexEventSearch {
    * `force` skips the cache read. Failures are not cached, so the next call
    * retries upstream; a settled empty result is cached like any other.
    */
-  async findForFixture(match, { force = false } = {}) {
-    return this._resolve(match, { force });
+  async findForFixture(match, { force = false, signal } = {}) {
+    if (signal?.aborted || (eventFirstEnabled() && !this.isFixtureSearchable(match))) return [];
+    return waitForSearch(this._resolve(match, { force }), signal);
   }
 
   /**
@@ -298,11 +391,25 @@ class TrexEventSearch {
    * requests the search may spend, trim-and-retry included.
    */
   async _resolve(match, { force = false, budget = null } = {}) {
-    const fixtureId = match && match.id != null ? String(match.id) : '';
+    const fixtureId = fixtureKey(match);
     if (!fixtureId) return [];
     if (!force) {
       const entry = this._fresh(fixtureId);
       if (entry) return entry.candidates.slice();
+    }
+    if (eventFirstEnabled()) {
+      const existing = this.pending.get(fixtureId);
+      if (existing) {
+        this.stats.shared++;
+        return existing;
+      }
+      const search = this._searchEventFirst(match, budget).then(result => {
+        const rows = result?.rows;
+        if (rows !== null && !result?.partial) this._remember(fixtureId, rows);
+        return rows || [];
+      }).finally(() => this.pending.delete(fixtureId));
+      this.pending.set(fixtureId, search);
+      return search;
     }
     const candidates = await this._search(match, budget);
     if (candidates === null) return [];
@@ -323,13 +430,13 @@ class TrexEventSearch {
       const id = match && match.id != null ? String(match.id) : '';
       if (!id) continue;
       const kickoff = kickoffMs(match);
-      if (!Number.isFinite(kickoff) || !this.isInWindow(kickoff, nowMs)) continue;
-      live.push({ id, match, distance: Math.abs(kickoff - nowMs) });
+      if (!this.isFixtureSearchable(match, nowMs)) continue;
+      live.push({ id, match, distance: Number.isFinite(kickoff) ? Math.abs(kickoff - nowMs) : Infinity });
     }
     live.sort((a, b) => a.distance - b.distance);
 
-    const results = new Map(live.map((item) => [item.id, this.cachedFor(item.id)]));
-    const pending = live.filter((item) => !this._fresh(item.id));
+    const results = new Map(live.map((item) => [item.id, this.cachedFor(item.match)]));
+    const pending = live.filter((item) => !this._fresh(fixtureKey(item.match)));
     const budget = { remaining: toCount(maxSearches, DEFAULT_MAX_SEARCHES) };
 
     let cursor = 0;
@@ -345,4 +452,4 @@ class TrexEventSearch {
   }
 }
 
-module.exports = { TrexEventSearch };
+module.exports = { TrexEventSearch, isFixtureSearchable };
