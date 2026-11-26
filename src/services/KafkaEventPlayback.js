@@ -100,6 +100,66 @@ function fixtureJobKey(match) {
   return JSON.stringify([String(match?.id || ''), String(match?.date || '')]);
 }
 
+function normalizeKickoffMs(dateValue) {
+  if (typeof dateValue === 'number' && Number.isFinite(dateValue) && dateValue > 0) {
+    return String(Math.floor(dateValue));
+  }
+  if (typeof dateValue === 'string') {
+    const trimmed = dateValue.trim();
+    if (!trimmed) return '0';
+    if (/^\d+$/.test(trimmed)) return trimmed;
+    const parsed = Date.parse(trimmed);
+    if (Number.isFinite(parsed) && parsed > 0) return String(Math.floor(parsed));
+  }
+  if (dateValue instanceof Date && Number.isFinite(dateValue.getTime()) && dateValue.getTime() > 0) {
+    return String(Math.floor(dateValue.getTime()));
+  }
+  return '0';
+}
+
+function kafkaEventCandidateKey(match, candidateId) {
+  return `kafka:${String(match?.id || '')}:${String(candidateId || '')}:event-v4:${normalizeKickoffMs(match?.date)}`;
+}
+
+function parseKafkaEventCandidateKey(key) {
+  if (typeof key !== 'string' || !key.startsWith('kafka:')) return null;
+  const marker = ':event-v4:';
+  const markerIdx = key.lastIndexOf(marker);
+  if (markerIdx <= 'kafka:'.length) return null;
+  const kickoffMs = key.slice(markerIdx + marker.length);
+  if (!/^\d+$/.test(kickoffMs)) return null;
+  const rest = key.slice('kafka:'.length, markerIdx);
+  const firstColon = rest.indexOf(':');
+  if (firstColon <= 0 || firstColon >= rest.length - 1) return null;
+  const fixtureId = rest.slice(0, firstColon);
+  const candidateId = rest.slice(firstColon + 1);
+  if (!fixtureId || !candidateId) return null;
+  return { fixtureId, candidateId, kickoffMs, version: 'event-v4', rest };
+}
+
+function _cloneHintsTree(v) {
+  if (Array.isArray(v)) {
+    const out = new Array(v.length);
+    for (let i = 0; i < v.length; i += 1) out[i] = _cloneHintsTree(v[i]);
+    return out;
+  }
+  if (v !== null && typeof v === 'object') {
+    const out = {};
+    for (const k in v) out[k] = _cloneHintsTree(v[k]);
+    return out;
+  }
+  return v;
+}
+
+function cloneCandidateStream(stream) {
+  if (!stream || typeof stream !== 'object') return stream;
+  const copy = { ...stream };
+  if (stream.behaviorHints && typeof stream.behaviorHints === 'object') {
+    copy.behaviorHints = _cloneHintsTree(stream.behaviorHints);
+  }
+  return copy;
+}
+
 function emitCandidateOutcome(job, { candidateId, stage, reason, attempt }) {
   if (!job || !job.outcomeListeners || job.outcomeListeners.size === 0) return;
   const event = {
@@ -181,12 +241,29 @@ function buildMetrics(job, reason, provider) {
 }
 
 function emitProgress(provider, job) {
+  pruneInvalidVerified(job);
   const listeners = listenerStoreFor(provider).get(job.id);
   if (!listeners || listeners.size === 0) return;
-  const snapshot = [...job.verifiedByUrl.values()];
+  const snapshot = [...job.verifiedByUrl.values()].map(cloneCandidateStream);
   for (const listener of listeners) {
     try { listener(snapshot); } catch (_) {}
   }
+}
+
+function pruneInvalidVerified(job, overrideValidator = null) {
+  const isValid = typeof overrideValidator === 'function' ? overrideValidator : job?.isStreamValid;
+  if (!job || typeof isValid !== 'function' || job.verifiedByUrl.size === 0) return 0;
+  let evicted = 0;
+  for (const [url, stream] of job.verifiedByUrl.entries()) {
+    let ok = false;
+    try { ok = Boolean(isValid(stream)); } catch (_) { ok = false; }
+    if (!ok) {
+      job.verifiedByUrl.delete(url);
+      evicted += 1;
+    }
+  }
+  if (evicted > 0 && job.done) job.consumedComplete = true;
+  return evicted;
 }
 
 function wakeWaiters(job) {
@@ -211,20 +288,21 @@ function runWithProbeSlot(provider, fn, signal) {
 
 function normalizeProbeOutcome(rawOutcome) {
   if (Array.isArray(rawOutcome)) {
-    return { streams: rawOutcome, retryableReason: null, rejectReason: null };
+    return { streams: rawOutcome, retryableReason: null, rejectReason: null, cacheHit: false };
   }
   if (rawOutcome && typeof rawOutcome === 'object') {
     return {
       streams: Array.isArray(rawOutcome.streams) ? rawOutcome.streams : [],
       retryableReason: rawOutcome.retryableReason || null,
       rejectReason: rawOutcome.rejectReason || null,
-      cancelledBeforeStart: Boolean(rawOutcome.cancelledBeforeStart)
+      cancelledBeforeStart: Boolean(rawOutcome.cancelledBeforeStart),
+      cacheHit: Boolean(rawOutcome.cacheHit)
     };
   }
-  return { streams: [], retryableReason: null, rejectReason: null };
+  return { streams: [], retryableReason: null, rejectReason: null, cacheHit: false };
 }
 
-async function pumpFixtureJob(job, { provider, match, probe }) {
+async function pumpFixtureJob(job, { provider, match, probe, probeOwnsSlot = false }) {
   if (job.running || job.done) return;
   job.running = true;
   const maxCandidates = getMaxCandidates();
@@ -328,18 +406,29 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
         const id = String(candidate.id);
         job.inFlightProbes += 1;
         try {
-          const rawOutcome = await runWithProbeSlot(provider, async () => {
+          const invokeProbe = async () => {
             if (job.controller.signal.aborted || Date.now() >= job.workDeadlineAt) {
               return { streams: [], retryableReason: null, rejectReason: 'deadline_expired', cancelledBeforeStart: true };
             }
-            emitCandidateOutcome(job, {
-              candidateId: id,
-              stage: 'probe_started',
-              reason: attempt > 1 ? (retryReason || 'retry') : 'initial',
-              attempt
+            const onProbeStarted = () => {
+              emitCandidateOutcome(job, {
+                candidateId: id,
+                stage: 'probe_started',
+                reason: attempt > 1 ? (retryReason || 'retry') : 'initial',
+                attempt
+              });
+            };
+            if (!probeOwnsSlot) onProbeStarted();
+            return probe(candidate, job.controller.signal, {
+              attempt,
+              retryReason,
+              workDeadlineAt: job.workDeadlineAt,
+              onProbeStarted
             });
-            return probe(candidate, job.controller.signal);
-          }, job.controller.signal);
+          };
+          const rawOutcome = probeOwnsSlot
+            ? await invokeProbe()
+            : await runWithProbeSlot(provider, invokeProbe, job.controller.signal);
 
           const outcome = normalizeProbeOutcome(rawOutcome);
           if (outcome.cancelledBeforeStart) {
@@ -354,22 +443,38 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
 
           let added = false;
           let hadAnyUrl = false;
+          let rejectedInvalidated = false;
           for (const stream of outcome.streams) {
             if (!stream?.url) continue;
+            const candidateStream = cloneCandidateStream({ ...stream, _kafkaCandidateId: id });
+            if (typeof job.isStreamValid === 'function' && !job.isStreamValid(candidateStream)) {
+              rejectedInvalidated = true;
+              continue;
+            }
             hadAnyUrl = true;
-            if (job.verifiedByUrl.has(stream.url)) continue;
-            job.verifiedByUrl.set(stream.url, { ...stream, _kafkaCandidateId: id });
+            if (job.verifiedByUrl.has(candidateStream.url)) continue;
+            job.verifiedByUrl.set(candidateStream.url, candidateStream);
             added = true;
           }
 
           if (added) {
             emitCandidateOutcome(job, {
               candidateId: id,
-              stage: 'verified',
-              reason: 'verified',
-              attempt
+              stage: outcome.cacheHit ? 'cache_hit' : 'verified',
+              reason: outcome.cacheHit ? 'shared_cache_hit' : 'verified',
+              attempt: outcome.cacheHit ? 0 : attempt
             });
             emitProgress(provider, job);
+            continue;
+          }
+
+          if (rejectedInvalidated && !hadAnyUrl) {
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'rejected',
+              reason: 'definitive_rejection',
+              attempt
+            });
             continue;
           }
 
@@ -492,10 +597,18 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
   }
 }
 
-function getOrCreateJob(provider, match) {
+function getOrCreateJob(provider, match, isStreamValid = null) {
   const store = jobStoreFor(provider);
   const key = fixtureJobKey(match);
   let job = store.get(key);
+  if (job && !job.running) {
+    const evicted = pruneInvalidVerified(job, isStreamValid);
+    if (evicted > 0 && job.done) {
+      job.consumedComplete = true;
+    }
+  } else if (job) {
+    pruneInvalidVerified(job, isStreamValid);
+  }
   if (!job || (job.done && job.consumedComplete) || (!job.running && Date.now() >= job.workDeadlineAt)) {
     const startedAt = Date.now();
     job = {
@@ -522,10 +635,13 @@ function getOrCreateJob(provider, match) {
       waiters: new Set(),
       queueWaiters: new Set(),
       outcomeListeners: new Set(),
+      isStreamValid,
       controller: new AbortController(),
       workDeadlineAt: startedAt + getJobTimeoutMs()
     };
     store.set(key, job);
+  } else if (typeof isStreamValid === 'function') {
+    job.isStreamValid = isStreamValid;
   }
   return job;
 }
@@ -534,11 +650,13 @@ function getOrCreateJob(provider, match) {
 // exposes verified rows immediately at HTTP deadlines, and resumes pending items
 // cleanly on later clicks without re-probing completed candidates or extending
 // the original job window.
-async function collectEventStreams({ provider, match, probe, signal, metrics, onProgress, onCandidateOutcome }) {
-  const job = getOrCreateJob(provider, match);
+async function collectEventStreams({ provider, match, probe, signal, metrics, onProgress, onCandidateOutcome, isStreamValid, probeOwnsSlot = false }) {
+  const job = getOrCreateJob(provider, match, isStreamValid);
   const removeProgress = typeof onProgress === 'function' ? addKeyListener(provider, job.id, onProgress) : null;
   const hasOutcomeListener = typeof onCandidateOutcome === 'function';
   if (hasOutcomeListener) job.outcomeListeners.add(onCandidateOutcome);
+
+  pruneInvalidVerified(job, isStreamValid);
 
   if (hasOutcomeListener && job.verifiedByUrl.size > 0) {
     const seenCandidates = new Set();
@@ -556,13 +674,13 @@ async function collectEventStreams({ provider, match, probe, signal, metrics, on
   }
 
   if (removeProgress && job.verifiedByUrl.size > 0) {
-    try { onProgress([...job.verifiedByUrl.values()]); } catch (_) {}
+    try { onProgress([...job.verifiedByUrl.values()].map(cloneCandidateStream)); } catch (_) {}
   }
 
   let finishedCleanly = false;
   try {
     if (!job.done && !signal?.aborted) {
-      const pumpPromise = job.running ? null : pumpFixtureJob(job, { provider, match, probe });
+      const pumpPromise = job.running ? null : pumpFixtureJob(job, { provider, match, probe, probeOwnsSlot });
       if (!job.done) {
         await new Promise((resolve) => {
           let settled = false;
@@ -592,6 +710,7 @@ async function collectEventStreams({ provider, match, probe, signal, metrics, on
   } finally {
     if (removeProgress) removeProgress();
     if (hasOutcomeListener && job.done) job.outcomeListeners.delete(onCandidateOutcome);
+    pruneInvalidVerified(job, isStreamValid);
     const reason = job.done ? job.lastStopReason : (signal?.aborted ? 'deadline' : job.lastStopReason);
     if (job.done) job.consumedComplete = true;
     try {
@@ -601,7 +720,8 @@ async function collectEventStreams({ provider, match, probe, signal, metrics, on
     }
   }
 
-  const streams = [...job.verifiedByUrl.values()];
+  pruneInvalidVerified(job, isStreamValid);
+  const streams = [...job.verifiedByUrl.values()].map(cloneCandidateStream);
   return {
     streams,
     incomplete: !job.done,
@@ -609,15 +729,24 @@ async function collectEventStreams({ provider, match, probe, signal, metrics, on
   };
 }
 
-function subscribeEventProgress(provider, match, listener) {
+function subscribeEventProgress(provider, match, listener, isStreamValid = null) {
   if (typeof listener !== 'function') return () => {};
   const key = fixtureJobKey(match);
   const remove = addKeyListener(provider, key, listener);
   const job = jobStoreFor(provider).get(key);
-  if (job && job.verifiedByUrl.size > 0) {
-    try { listener([...job.verifiedByUrl.values()]); } catch (_) {}
+  if (job) {
+    pruneInvalidVerified(job, isStreamValid);
+    if (job.verifiedByUrl.size > 0) {
+      try { listener([...job.verifiedByUrl.values()].map(cloneCandidateStream)); } catch (_) {}
+    }
   }
   return remove;
 }
 
-module.exports = { collectEventStreams, subscribeEventProgress };
+module.exports = {
+  collectEventStreams,
+  subscribeEventProgress,
+  normalizeKickoffMs,
+  kafkaEventCandidateKey,
+  parseKafkaEventCandidateKey
+};

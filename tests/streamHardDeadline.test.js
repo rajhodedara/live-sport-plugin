@@ -234,7 +234,10 @@ describe('handleStream hard response deadline', () => {
       const daddyliveDeferred = deferred();
       const kp = {
         configured: true,
-        isEventFixtureEligible: () => true
+        isEventFixtureEligible: () => true,
+        getEventProbeConcurrency: () => 2,
+        withEventProbe: (fn, sig) => fn(sig),
+        eventCandidates: jest.fn(() => eventDeferred.promise)
       };
       const services = {
         cacheService: { findMatch: () => eventMatch },
@@ -285,7 +288,10 @@ describe('handleStream hard response deadline', () => {
       const channelDeferred = deferred();
       const kp = {
         configured: true,
-        isEventFixtureEligible: () => true
+        isEventFixtureEligible: () => true,
+        getEventProbeConcurrency: () => 2,
+        withEventProbe: (fn, sig) => fn(sig),
+        eventCandidates: jest.fn(() => eventDeferred.promise)
       };
       const services = {
         cacheService: { findMatch: () => eventMatch },

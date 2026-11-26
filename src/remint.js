@@ -6,6 +6,7 @@
  */
 const container = require('./container');
 const { sourceOfRck } = require('./services/ManifestDiag');
+const { normalizeKickoffMs, parseKafkaEventCandidateKey } = require('./services/KafkaEventPlayback');
 
 // ─── Silent upstream-token re-mint ──────────────────────────────────
 // Proxied stream URLs embed a time-limited upstream token. When it expires the
@@ -210,37 +211,83 @@ async function attemptRemint(rck, heldUrl = '') {
 async function attemptRemintInner(rck, heldUrl, startedAt) {
   try {
     if (!rck || typeof rck !== 'string') return null;
-    const candidates = rckCandidates(rck);
-    if (candidates.length === 0) return null;
 
     // Read-only lookup (find by id, no mutation, no sort): the defensive
     // clone inside getMatches() is unnecessary churn on this hot path.
     const _cs = container.resolve('cacheService');
-    const matches = _cs.getMatchesReadOnly ? _cs.getMatchesReadOnly() : _cs.getMatches();
+    const matches = _cs.getMatchesReadOnly
+      ? _cs.getMatchesReadOnly()
+      : (_cs.getMatches ? _cs.getMatches() : []);
     let resolved = null;
-    for (const c of candidates) {
-      const match = matches.find(m => m && m.id === c.matchId);
-      if (!match) continue;
-      const src = (match.sources || []).find(s => {
-        if (!s) return false;
-        const sId = String(s.id);
-        const cId = String(c.srcId);
-        if (sId === cId) return true;
-        if (cId.startsWith(sId + ':')) return true;
-        if (s.streamId && String(s.streamId) === cId) return true;
-        return false;
-      });
-      if (!src) continue;
-      let remintSrcCandidate = { ...src };
-      const sId = String(src.id);
-      const cId = String(c.srcId);
-      if (cId.startsWith(sId + ':')) {
-        const subParts = cId.slice(sId.length + 1).split(':');
-        if (subParts[0]) remintSrcCandidate.streamSource = subParts[0];
-        if (subParts[1]) remintSrcCandidate.streamId = subParts[1];
+
+    const eventKey = parseKafkaEventCandidateKey(rck);
+    if (!eventKey && rck.includes(':event-v4:')) return null;
+
+    if (eventKey) {
+      const match = matches.find(m => m && String(m.id) === eventKey.fixtureId) ||
+        (_cs.findMatch ? _cs.findMatch(eventKey.fixtureId) : null);
+      if (!match) return null;
+      if (normalizeKickoffMs(match.date) !== eventKey.kickoffMs) return null;
+
+      const attached = (match.sources || []).find(s =>
+        s && s.source === 'kafka' && String(s.id) === eventKey.candidateId);
+      if (attached) {
+        resolved = { match, src: { ...attached } };
+      } else {
+        let kafkaProvider = null;
+        try { kafkaProvider = container.resolve('kafkaProvider'); } catch (_) {}
+        if (!kafkaProvider) return null;
+        const catalogHits = (typeof kafkaProvider.catalogStore?.findEvents === 'function'
+          ? kafkaProvider.catalogStore.findEvents(match)
+          : []) || [];
+        const cachedHits = (typeof kafkaProvider.eventSearch?.cachedFor === 'function'
+          ? kafkaProvider.eventSearch.cachedFor(match)
+          : []) || [];
+        let localCandidates = [...catalogHits, ...cachedHits];
+        if (localCandidates.length === 0 && typeof kafkaProvider.eventCandidates === 'function') {
+          localCandidates = (await kafkaProvider.eventCandidates(match, { upstream: false })) || [];
+        }
+        const matched = localCandidates.find(c => c && String(c.id) === eventKey.candidateId);
+        if (!matched) return null;
+        resolved = {
+          match,
+          src: {
+            source: 'kafka',
+            id: String(matched.id),
+            channelName: matched.name || matched.channelName || eventKey.candidateId,
+            matchMode: 'event',
+            ...(matched.country ? { country: matched.country } : {}),
+            ...(matched.language ? { language: matched.language } : {})
+          }
+        };
       }
-      resolved = { match, src: remintSrcCandidate };
-      break;
+    } else {
+      const candidates = rckCandidates(rck);
+      if (candidates.length === 0) return null;
+      for (const c of candidates) {
+        const match = matches.find(m => m && m.id === c.matchId);
+        if (!match) continue;
+        const src = (match.sources || []).find(s => {
+          if (!s) return false;
+          const sId = String(s.id);
+          const cId = String(c.srcId);
+          if (sId === cId) return true;
+          if (cId.startsWith(sId + ':')) return true;
+          if (s.streamId && String(s.streamId) === cId) return true;
+          return false;
+        });
+        if (!src) continue;
+        let remintSrcCandidate = { ...src };
+        const sId = String(src.id);
+        const cId = String(c.srcId);
+        if (cId.startsWith(sId + ':')) {
+          const subParts = cId.slice(sId.length + 1).split(':');
+          if (subParts[0]) remintSrcCandidate.streamSource = subParts[0];
+          if (subParts[1]) remintSrcCandidate.streamId = subParts[1];
+        }
+        resolved = { match, src: remintSrcCandidate };
+        break;
+      }
     }
     if (!resolved) return null;
 

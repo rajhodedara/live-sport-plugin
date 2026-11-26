@@ -407,7 +407,7 @@ describe('handleStream event-first regression', () => {
     const match = buildFixture();
     const { healthService, fetchImpl } = setupHarness({ match });
 
-    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 200);
     expect(cold.streams.map(s => s._kafkaMatchMode).filter(Boolean)).toEqual(
       expect.arrayContaining(['event', 'label', 'team'])
     );
@@ -1119,7 +1119,7 @@ describe('handleStream event-first regression', () => {
       }
     });
 
-    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 200);
     expect(cold.streams.map((s) => `${s._kafkaMatchMode}:${s.title.split('\n')[0].includes('Kafka · Event') ? 'Event' : 'Channel'}`)).toEqual([
       'label:Channel',
       'event:Event',
@@ -1171,7 +1171,7 @@ describe('handleStream event-first regression', () => {
       };
     });
 
-    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 200);
     expect(cold.streams.map(s => s._kafkaMatchMode)).toEqual(['label', 'event']);
     expect(cold.streams[0].title).toContain('Kafka · Channel');
     expect(cold.streams[0].title).toContain('1080p · 4.5 Mbps');
@@ -1464,5 +1464,222 @@ describe('handleStream event-first regression', () => {
     expect(probedIds).not.toContain('trex:c3');
     expect(probedIds.filter((id) => id === 'trex:c1')).toHaveLength(2);
     expect(probedIds.filter((id) => id === 'trex:c2')).toHaveLength(1);
+  });
+
+  test('shares candidate entries across workers outside semaphore while keeping shared waits within deadlines, isolating progress rows, and fencing invalidated URLs', async () => {
+    process.env.RESOLVE_CACHE_SHARED = 'true';
+    process.env.KAFKA_EVENT_PROBE_CONCURRENCY = '4';
+    process.env.STREAM_SOFT_DEADLINE_MS = '100';
+    process.env.STREAM_HARD_DEADLINE_MS = '200';
+
+    const match = buildFixture({
+      id: 'shared-cand-fx',
+      title: 'Utah Mammoth vs Minnesota Wild',
+      category: 'hockey',
+      league: 'NHL',
+      team1: { name: 'Utah Mammoth' },
+      team2: { name: 'Minnesota Wild' },
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NHL Network', country: 'USA', matchMode: 'label' }]
+    });
+    const channels = [
+      { id: 'trex:836411', name: 'Live | Utah Mammoth vs Minnesota Wild | US: NHL 11', score: 9500 },
+      { id: 'trex:label', name: 'US| NHL NETWORK HD' }
+    ];
+
+    const l2Table = new Map();
+    const sharedResolver = {
+      available: () => true,
+      request: async (raw, options = {}) => {
+        const url = new URL(raw);
+        const key = decodeURIComponent(url.pathname.slice('/api/cache/'.length));
+        if (url.searchParams.get('claim') === '1') {
+          const cur = l2Table.get(key);
+          if (cur && cur.expiresAt > Date.now() && (cur.status === 'ok' || cur.status === 'failed' || cur.status === 'minting')) {
+            return { ok: true, json: async () => ({ ok: false, reason: 'already-claimed' }) };
+          }
+          const ownerToken = `tok-${Date.now()}-${Math.random()}`;
+          l2Table.set(key, { status: 'minting', ownerToken, expiresAt: Date.now() + 30000 });
+          return { ok: true, json: async () => ({ ok: true, ownerToken, supportsVacantClaim: true }) };
+        }
+        if (options.method === 'POST') {
+          const body = JSON.parse(options.body);
+          const cur = l2Table.get(key);
+          if (!cur || cur.ownerToken !== body.ownerToken) {
+            return { ok: true, json: async () => ({ ok: false, reason: 'stale-owner' }) };
+          }
+          const revision = `rev-${Date.now()}-${Math.random().toString(16).slice(2, 10)}-0000-0000-000000000000`.slice(0, 36);
+          const revUuid = '12345678-1234-4123-8123-1234567890ab';
+          l2Table.set(key, {
+            status: body.status,
+            streams: body.streams,
+            expiresAt: Date.now() + body.ttlMs,
+            revision: cur.revision ? `aaaaaaaa-aaaa-4aaa-8aaa-${String(l2Table.size).padStart(12, '0')}` : revUuid
+          });
+          return { ok: true, json: async () => ({ ok: true, revision: l2Table.get(key).revision }) };
+        }
+        if (options.method === 'PATCH') {
+          const cur = l2Table.get(key);
+          if (cur && cur.revision === url.searchParams.get('revision')) l2Table.delete(key);
+          return { ok: true, json: async () => ({ ok: true }) };
+        }
+        if (options.method === 'DELETE') {
+          const cur = l2Table.get(key);
+          if (cur && cur.ownerToken === url.searchParams.get('ownerToken')) l2Table.delete(key);
+          return { ok: true, json: async () => ({ ok: true }) };
+        }
+        const cur = l2Table.get(key);
+        if (!cur || cur.expiresAt <= Date.now()) {
+          if (cur) l2Table.delete(key);
+          return { ok: true, json: async () => ({ status: 'miss' }) };
+        }
+        return { ok: true, json: async () => cur };
+      }
+    };
+
+    const dbPath = path.join(tmpDir, 'shared-catalog.sqlite');
+    writeCatalogFile(dbPath, channels.map(c => ({ ...c, type: 'tv' })), { generatedAt: '2026-11-25T03:00:00Z', source: 'test' });
+    const storeA = new TrexCatalogStore({ dbPath });
+    const storeB = new TrexCatalogStore({ dbPath });
+    stores.push(storeA, storeB);
+
+    const makeProvider = (store) => new KafkaProvider({
+      catalogStore: store,
+      eventSearch: new TrexEventSearch({
+        baseUrl: 'https://trex.invalid',
+        fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ metas: [] }) }),
+        now: () => Date.now()
+      })
+    });
+    const providerA = makeProvider(storeA);
+    const providerB = makeProvider(storeB);
+    const cacheA = new StreamResolveCache({ sharedResolver });
+    const cacheB = new StreamResolveCache({ sharedResolver });
+    const m3u8Parser = new M3U8ParserService();
+    const streamScorer = new StreamScoringService();
+
+    let nhl11Count = 0;
+    let releaseNhl11;
+    let currentNhlToken = 'token-1';
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        if (id === 'trex:836411') {
+          nhl11Count += 1;
+          if (nhl11Count === 1) await new Promise((r) => { releaseNhl11 = r; });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [{
+                name: '▶ Watch Live',
+                title: id,
+                url: `https://cdn.invalid/nhl11-${currentNhlToken}.m3u8`,
+                behaviorHints: { proxyHeaders: { request: { Referer: 'https://ref.invalid/' } } }
+              }]
+            })
+          };
+        }
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: `https://cdn.invalid/${id}.m3u8` }] }) };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+    streamingFetch.mockImplementation(async () => ({
+      ok: true,
+      status: 206,
+      headers: { get: () => 'video/mp2t' },
+      body: { getReader: () => { let sent = false; return { read: async () => (sent ? { done: true } : (sent = true, { done: false, value: new Uint8Array(64) })), cancel: async () => {}, releaseLock: () => {} }; } }
+    }));
+
+    const servicesA = { cacheService: { findMatch: () => match }, kafkaProvider: providerA, streamResolveCache: cacheA, m3u8Parser, streamScorer };
+    const servicesB = { cacheService: { findMatch: () => match }, kafkaProvider: providerB, streamResolveCache: cacheB, m3u8Parser, streamScorer };
+
+    container.resolve = (n) => servicesA[n];
+    let firstA;
+    const pA = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((v) => { firstA = v; });
+    await jest.advanceTimersByTimeAsync(110);
+    await pA;
+    expect(firstA.streams.map(s => s._kafkaMatchMode)).toEqual(['label']);
+    expect(firstA.cacheMaxAge).toBe(2);
+
+    releaseNhl11();
+    await jest.advanceTimersByTimeAsync(200);
+
+    // Hold all 4 semaphore slots on Worker B: L2 read for trex:836411 MUST still succeed outside semaphore!
+    const releaseHolders = [];
+    for (let i = 0; i < 4; i += 1) {
+      providerB.withEventProbe(() => new Promise((r) => { releaseHolders.push(r); }));
+    }
+    container.resolve = (n) => servicesB[n];
+    const coldB = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 100);
+    expect(coldB.streams.some(s => s.url.includes('nhl11-token-1'))).toBe(true);
+    expect(nhl11Count).toBe(1);
+    for (const r of releaseHolders) r();
+    await jest.advanceTimersByTimeAsync(50);
+
+    // Token expires -> invalidate via candidate key -> A and B must re-mint token-2 instead of stale token-1.
+    const candKey = `kafka:${match.id}:trex:836411:event-v4:${KICKOFF}`;
+    expect(coldB.streams.find(s => s.url.includes('nhl11-token-1')).url).toContain(encodeURIComponent(candKey));
+    currentNhlToken = 'token-2';
+    cacheA.noteFailure(candKey);
+    await jest.advanceTimersByTimeAsync(20);
+    container.resolve = (n) => servicesA[n];
+    const afterExpireA = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 100);
+    expect(afterExpireA.streams.some(s => s.url.includes('nhl11-token-2'))).toBe(true);
+    expect(afterExpireA.streams.some(s => s.url.includes('nhl11-token-1'))).toBe(false);
+  });
+
+  test('remints normalized SQLite event candidate via event-v4 key, rejects forged/mismatched kickoff keys, and preserves legacy channel remint', async () => {
+    const { attemptRemint } = require('../src/remint');
+    const NHL_KICKOFF = Date.UTC(2026, 10, 26, 0, 30);
+    jest.setSystemTime(NHL_KICKOFF);
+    const match = buildFixture({
+      id: 'utah-wild-fx',
+      title: 'Utah Mammoth vs Minnesota Wild',
+      category: 'hockey',
+      league: 'NHL',
+      date: String(NHL_KICKOFF),
+      team1: { name: 'Utah Mammoth' },
+      team2: { name: 'Minnesota Wild' },
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NHL Network', country: 'USA', matchMode: 'label' }]
+    });
+    const channels = [
+      { id: 'flixlivetvtest:trex:1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)', grp: 'US (ESPN+ 149)' },
+      { id: 'trex:label', name: 'US| NHL NETWORK HD' }
+    ];
+    const { services } = setupHarness({ match, channels });
+    services.cacheService.getMatchesReadOnly = () => [match];
+
+    let upstreamIds = [];
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        upstreamIds.push(id);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ streams: [{ name: '▶ Watch Live', url: `https://cdn.invalid/reminted/${encodeURIComponent(id)}.m3u8?token=fresh` }] })
+        };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const validKey = `kafka:${match.id}:flixlivetvtest:trex:1949763:event-v4:${NHL_KICKOFF}`;
+    const forgedKey = `kafka:${match.id}:trex:forged-999:event-v4:${NHL_KICKOFF}`;
+    const staleDateKey = `kafka:${match.id}:flixlivetvtest:trex:1949763:event-v4:${NHL_KICKOFF + 86400000}`;
+    const legacyKey = `kafka:${match.id}:trex:label`;
+
+    expect(await attemptRemint(forgedKey, 'https://cdn.invalid/old.m3u8')).toBeNull();
+    expect(await attemptRemint(staleDateKey, 'https://cdn.invalid/old.m3u8')).toBeNull();
+    expect(upstreamIds).toEqual([]);
+
+    const freshEvent = await attemptRemint(validKey, 'https://cdn.invalid/reminted/old.m3u8?token=dead');
+    expect(freshEvent).toContain('fresh');
+    expect(upstreamIds).toEqual(['flixlivetvtest:trex:1949763']);
+
+    const freshLegacy = await attemptRemint(legacyKey, 'https://cdn.invalid/reminted/old.m3u8?token=dead');
+    expect(freshLegacy).toContain('fresh');
+    expect(upstreamIds).toEqual(['flixlivetvtest:trex:1949763', 'trex:label']);
   });
 });

@@ -16,7 +16,11 @@ const { manifestUserAgent } = require('./services/ManifestUserAgent');
 const { relations: timingRelations } = require('./services/TimingRuntime');
 const { isBlockedDashStream, isBlockedStream, isFrozenMediaPlaylist } = require('./services/StreamPolicy');
 const { isLowPpvSourceMetadata } = require('./services/PpvQualityPolicy');
-const { collectEventStreams, subscribeEventProgress } = require('./services/KafkaEventPlayback');
+const {
+  collectEventStreams,
+  subscribeEventProgress,
+  kafkaEventCandidateKey
+} = require('./services/KafkaEventPlayback');
 
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
@@ -1456,15 +1460,49 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
       signal: undefined,
       onInconclusive: undefined,
       onCandidateOutcome: undefined,
+      timingStream: undefined,
       requireLivePlaylist: true,
       skipSpeedProbe: true,
       verifyEventSegment: true
+    };
+    const isStreamValid = (stream) => {
+      if (!stream?._cacheKey || typeof resolveCache?.has !== 'function') return true;
+      return Boolean(resolveCache.has(stream._cacheKey) && !resolveCache.isDeferred?.(stream._cacheKey));
+    };
+    const raceWithAbort = (promise, sig) => {
+      if (!sig) return promise.then((value) => ({ aborted: false, value }));
+      if (sig.aborted) return Promise.resolve({ aborted: true, value: null });
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const onAbort = () => {
+          if (settled) return;
+          settled = true;
+          resolve({ aborted: true, value: null });
+        };
+        sig.addEventListener('abort', onAbort, { once: true });
+        promise.then(
+          (value) => {
+            if (settled) return;
+            settled = true;
+            sig.removeEventListener('abort', onAbort);
+            resolve({ aborted: false, value });
+          },
+          (err) => {
+            if (settled) return;
+            settled = true;
+            sig.removeEventListener('abort', onAbort);
+            reject(err);
+          }
+        );
+      });
     };
     try {
       const outcome = await collectEventStreams({
         provider,
         match,
         signal,
+        isStreamValid,
+        probeOwnsSlot: true,
         onCandidateOutcome: options.onCandidateOutcome,
         metrics: stats => {
           try {
@@ -1473,81 +1511,174 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
           } catch (_) { /* missing metrics cannot prevent playback */ }
         },
         onProgress: options.onProgress,
-        probe: async (candidate, jobSignal) => {
-          let resolveReason = null;
-          let resolveRetryable = false;
-          let resolveOutcome = null;
-          let verifyReason = null;
-          let verifyRetryable = false;
+        probe: async (candidate, jobSignal, probeMeta = {}) => {
+          const candidateId = String(candidate.id);
+          const candidateKey = kafkaEventCandidateKey(match, candidateId);
+          const jobDeadlineAt = Number.isFinite(probeMeta.workDeadlineAt) ? probeMeta.workDeadlineAt : (Date.now() + 60000);
+          let mintedInThisCall = false;
+          let mintOutcome = null;
 
-          const probeOpts = {
-            ...baseProbeOpts,
-            signal: jobSignal,
-            preserveFailure: true,
-            onResolveOutcome: (r) => { resolveOutcome = r; },
-            onResolveFailure: (err) => {
-              const classified = classifyKafkaFailureReason(err, null, 'resolve');
-              resolveReason = classified.reason;
-              resolveRetryable = classified.retryable;
-            },
-            onVerifyFailure: (reason, retryable) => {
-              verifyReason = reason;
-              verifyRetryable = Boolean(retryable);
+          const mintCandidate = async () => {
+            if (jobSignal?.aborted || Date.now() >= jobDeadlineAt) {
+              mintOutcome = { streams: [], retryableReason: null, rejectReason: 'deadline_expired', cancelledBeforeStart: true };
+              return createDeferredResolution('deadline_expired', 0);
+            }
+            const runSlot = async () => {
+              if (jobSignal?.aborted || Date.now() >= jobDeadlineAt) {
+                mintOutcome = { streams: [], retryableReason: null, rejectReason: 'deadline_expired', cancelledBeforeStart: true };
+                return createDeferredResolution('deadline_expired', 0);
+              }
+              mintedInThisCall = true;
+              try { probeMeta.onProbeStarted?.(); } catch (_) {}
+
+              let resolveReason = null;
+              let resolveRetryable = false;
+              let resolveOutcome = null;
+              let verifyReason = null;
+              let verifyRetryable = false;
+
+              const probeOpts = {
+                ...baseProbeOpts,
+                signal: jobSignal,
+                preserveFailure: true,
+                onResolveOutcome: (r) => { resolveOutcome = r; },
+                onResolveFailure: (err) => {
+                  const classified = classifyKafkaFailureReason(err, null, 'resolve');
+                  resolveReason = classified.reason;
+                  resolveRetryable = classified.retryable;
+                },
+                onVerifyFailure: (reason, retryable) => {
+                  verifyReason = reason;
+                  verifyRetryable = Boolean(retryable);
+                }
+              };
+              const channel = {
+                source: 'kafka',
+                matchMode: 'event',
+                id: candidate.id,
+                channelName: candidate.name || candidate.channelName,
+                country: candidate.country,
+                language: candidate.language
+              };
+              const resolved = await resolveSource(channel, match, config, probeOpts);
+              const direct = (Array.isArray(resolved) ? resolved : []).filter(s => s && s.url && !s.externalUrl);
+              const checked = [];
+              // Verify all distinct direct URLs of one candidate sequentially inside one probe slot.
+              for (const s of direct) {
+                if (jobSignal?.aborted || Date.now() >= jobDeadlineAt) {
+                  verifyReason = 'deadline_expired';
+                  verifyRetryable = false;
+                  break;
+                }
+                const verified = await verifyStreams([s], null, m3u8Parser, resolveCache, probeOpts);
+                for (const v of verified) {
+                  checked.push({
+                    ...v,
+                    _kafkaMatchMode: 'event',
+                    _isChannelFallback: false,
+                    _kafkaCandidateId: candidateId,
+                    _cacheKey: candidateKey
+                  });
+                }
+              }
+              if (checked.length > 0 && !jobSignal?.aborted && Date.now() < jobDeadlineAt) {
+                mintOutcome = { streams: checked, retryableReason: null };
+                return checked;
+              }
+              if (jobSignal?.aborted || Date.now() >= jobDeadlineAt) {
+                mintOutcome = { streams: [], retryableReason: null, rejectReason: 'deadline_expired' };
+                return createDeferredResolution('deadline_expired', 0);
+              }
+              const retryableReason = verifyReason
+                ? (verifyRetryable ? verifyReason : null)
+                : (resolveReason && resolveRetryable ? resolveReason : null);
+              if (retryableReason) {
+                mintOutcome = { streams: [], retryableReason, rejectReason: null };
+                const retryAfterMs = (Number(probeMeta.attempt) || 1) < 2 ? 0 : 2000;
+                return createDeferredResolution(retryableReason, retryAfterMs);
+              }
+              const rejectReason = verifyReason || resolveReason || resolveOutcome ||
+                (direct.length === 0 ? 'empty_streams' : 'definitive_rejection');
+              mintOutcome = { streams: [], retryableReason: null, rejectReason };
+              return [];
+            };
+
+            try {
+              return typeof provider?.withEventProbe === 'function'
+                ? await provider.withEventProbe(runSlot, jobSignal)
+                : await runSlot();
+            } catch (err) {
+              if (err?.name === 'AbortError' || jobSignal?.aborted || Date.now() >= jobDeadlineAt) {
+                mintOutcome = { streams: [], retryableReason: null, rejectReason: 'deadline_expired', cancelledBeforeStart: true };
+                return createDeferredResolution('deadline_expired', 0);
+              }
+              throw err;
             }
           };
-          const channel = {
-            source: 'kafka',
-            matchMode: 'event',
-            id: candidate.id,
-            channelName: candidate.name || candidate.channelName,
-            country: candidate.country,
-            language: candidate.language
-          };
-          const resolved = await resolveSource(channel, match, config, probeOpts);
-          const direct = (Array.isArray(resolved) ? resolved : []).filter(s => s && s.url && !s.externalUrl);
-          const checked = [];
-          // Verify all distinct direct URLs of one candidate sequentially inside one probe slot.
-          for (const s of direct) {
-            if (jobSignal?.aborted) {
-              verifyReason = 'deadline_expired';
-              verifyRetryable = false;
-              break;
-            }
-            const verified = await verifyStreams([s], null, m3u8Parser, resolveCache, probeOpts);
-            for (const v of verified) {
-              checked.push({ ...v, _kafkaMatchMode: 'event', _isChannelFallback: false, _kafkaCandidateId: String(candidate.id) });
-            }
+
+          const hasSharedCache = typeof resolveCache?.getOrCreate === 'function';
+          const settled = hasSharedCache
+            ? await raceWithAbort(resolveCache.getOrCreate(candidateKey, mintCandidate, options.timingStream), jobSignal)
+            : { aborted: false, value: await mintCandidate() };
+
+          if (settled.aborted || jobSignal?.aborted) {
+            return { streams: [], retryableReason: null, rejectReason: 'deadline_expired' };
           }
-          if (checked.length > 0) {
-            return { streams: checked, retryableReason: null };
+          if (mintOutcome?.cancelledBeforeStart) {
+            return mintOutcome;
           }
-          if (verifyReason) {
+          if (mintedInThisCall && mintOutcome) {
+            if (mintOutcome.retryableReason && (Number(probeMeta.attempt) || 1) < 2) {
+              resolveCache?.entries?.delete?.(candidateKey);
+            }
+            if (mintOutcome.streams.length > 0 && hasSharedCache) {
+              const cachedAlive = Array.isArray(settled.value) ? settled.value : [];
+              if (cachedAlive.length === 0) {
+                return { streams: [], retryableReason: null, rejectReason: 'definitive_rejection' };
+              }
+              return {
+                streams: cachedAlive.map((s) => ({
+                  ...s,
+                  _kafkaMatchMode: 'event',
+                  _isChannelFallback: false,
+                  _kafkaCandidateId: candidateId,
+                  _cacheKey: candidateKey
+                })),
+                retryableReason: null
+              };
+            }
+            return mintOutcome;
+          }
+
+          const cachedRows = Array.isArray(settled.value) ? settled.value : [];
+          if (cachedRows.length > 0) {
             return {
-              streams: [],
-              retryableReason: verifyRetryable ? verifyReason : null,
-              rejectReason: verifyRetryable ? null : verifyReason
+              streams: cachedRows.map((s) => ({
+                ...s,
+                _kafkaMatchMode: 'event',
+                _isChannelFallback: false,
+                _kafkaCandidateId: candidateId,
+                _cacheKey: candidateKey
+              })),
+              retryableReason: null,
+              cacheHit: true
             };
           }
-          if (resolveReason) {
-            return {
-              streams: [],
-              retryableReason: resolveRetryable ? resolveReason : null,
-              rejectReason: resolveRetryable ? null : resolveReason
-            };
+          if (typeof resolveCache?.isDeferred === 'function' && resolveCache.isDeferred(candidateKey)) {
+            return { streams: [], retryableReason: 'unavailable', rejectReason: null };
           }
-          return {
-            streams: [],
-            retryableReason: null,
-            rejectReason: resolveOutcome || (direct.length === 0 ? 'empty_streams' : 'definitive_rejection')
-          };
+          return { streams: [], retryableReason: null, rejectReason: 'cached_rejection' };
         }
       });
       const rows = Array.isArray(outcome) ? outcome : (outcome?.streams || []);
       const incomplete = Boolean(!Array.isArray(outcome) && outcome?.incomplete);
       if (!rows.length && (incomplete || inconclusiveReason || signal.aborted)) {
-        return createDeferredResolution(inconclusiveReason || outcome?.reason || 'deadline');
+        const reason = inconclusiveReason || outcome?.reason || 'deadline';
+        options.onInconclusive(reason);
+        return createDeferredResolution(reason);
       }
       if (rows.length > 0 && incomplete) {
+        options.onInconclusive(outcome?.reason || 'partial');
         return markPartialStreams(rows, 2000);
       }
       return rows;
@@ -2007,12 +2138,38 @@ async function handleStream(type, id, config) {
   if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
     try { kafkaProviderInstance = container.resolve('kafkaProvider'); } catch (_) {}
   }
+  const eventStreamValid = (stream) => {
+    if (!stream?._cacheKey || typeof resolveCache?.has !== 'function') return true;
+    return Boolean(resolveCache.has(stream._cacheKey) && !resolveCache.isDeferred?.(stream._cacheKey));
+  };
+  const cloneProgressStream = (st, key) => {
+    const copy = {
+      ...st,
+      _sourceKey: key,
+      _cacheKey: st?._cacheKey || key
+    };
+    if (st?.behaviorHints && typeof st.behaviorHints === 'object') {
+      const reqHeaders = st.behaviorHints.proxyHeaders?.request;
+      const respHeaders = st.behaviorHints.proxyHeaders?.response;
+      copy.behaviorHints = {
+        ...st.behaviorHints,
+        ...(st.behaviorHints.proxyHeaders ? {
+          proxyHeaders: {
+            ...st.behaviorHints.proxyHeaders,
+            ...(reqHeaders ? { request: { ...reqHeaders } } : {}),
+            ...(respHeaders ? { response: { ...respHeaders } } : {})
+          }
+        } : {})
+      };
+    }
+    return copy;
+  };
   for (const src of activeSources) {
     const key = resolveKey(src, match.id);
     const isPriority1 = SOURCE_PRIORITY[src.source] === 1;
     // Local positive cache entries are already verified. On a warm re-click,
     // wait for these cheap reads, not for new scrapes on the missing mirrors.
-    const wasWarm = isPriority1 && Boolean(resolveCache.has?.(key));
+    const wasWarm = !src.kafkaFixtureEvents && isPriority1 && Boolean(resolveCache.has?.(key));
     const state = {
       key,
       source: src.source,
@@ -2025,33 +2182,34 @@ async function handleStream(type, id, config) {
       value: [],
       eventProgress: [],
       listeners: new Set(),
-      inconclusive: Boolean(resolveCache.isDeferred?.(key))
+      inconclusive: !src.kafkaFixtureEvents && Boolean(resolveCache.isDeferred?.(key))
     };
     const pushProgress = (rows) => {
       if (!Array.isArray(rows) || state.settled) return;
-      state.eventProgress = rows.map(st => ({
-        ...st,
-        ...(st?.behaviorHints && typeof st.behaviorHints === 'object' ? { behaviorHints: { ...st.behaviorHints } } : {}),
-        _cacheKey: key
-      }));
+      state.eventProgress = rows.map(st => cloneProgressStream(st, key));
       for (const fn of state.listeners) fn();
     };
     if (state.eventDiscovery && kafkaProviderInstance) {
-      progressUnsubs.push(subscribeEventProgress(kafkaProviderInstance, match, pushProgress));
+      progressUnsubs.push(subscribeEventProgress(kafkaProviderInstance, match, pushProgress, eventStreamValid));
     }
-    const promise = resolveCache
-      .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
-        ...(src.kafkaFixtureEvents ? {
+    const promise = (src.kafkaFixtureEvents
+      ? mintVerifiedSources(src, match, config, null, {
           deadlineAt: resolutionStartedAt + HARD_DEADLINE_MS,
           onProgress: pushProgress,
-          ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {})
-        } : {}),
-        onInconclusive() { state.inconclusive = true; }
-      }), timingStream)
+          timingStream,
+          ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {}),
+          onInconclusive() { state.inconclusive = true; }
+        })
+      : resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+          onInconclusive() { state.inconclusive = true; }
+        }), timingStream))
       .then((minted) => {
-        const hasResults = Array.isArray(minted) && minted.length > 0;
-        state.inconclusive = Boolean(resolveCache.isDeferred?.(key)) || (!hasResults && state.inconclusive);
-        state.value = Array.isArray(minted) ? minted.map((st) => ({ ...st, _cacheKey: key })) : [];
+        const rows = Array.isArray(minted) ? minted : [];
+        const hasResults = rows.length > 0;
+        state.inconclusive = state.inconclusive ||
+          (!src.kafkaFixtureEvents && Boolean(resolveCache.isDeferred?.(key))) ||
+          (!hasResults && state.inconclusive);
+        state.value = rows.map((st) => cloneProgressStream(st, key));
         state.settled = true;
         return state.value;
       })
@@ -2102,8 +2260,8 @@ async function handleStream(type, id, config) {
     const totalPriority1 = inFlight.filter(f => f.isPriority1).length;
     const targetP1Quorum = Math.min(PRIORITY1_QUORUM, totalPriority1);
     const priority1ReadyCount = (rows = publicationRows()) => new Set(rows
-      .filter(row => isDirectRow(row) && priority1Keys.has(row._cacheKey))
-      .map(row => row._cacheKey)).size;
+      .filter(row => isDirectRow(row) && priority1Keys.has(row._sourceKey || row._cacheKey))
+      .map(row => row._sourceKey || row._cacheKey)).size;
     const remainingBudget = () => Math.max(0, HARD_DEADLINE_MS - (Date.now() - resolutionStartedAt));
     const observeUntil = (predicate) => {
       let observing = true;
@@ -2144,8 +2302,8 @@ async function handleStream(type, id, config) {
           : priority1Keys;
         const effectiveTarget = Math.min(PRIORITY1_QUORUM, effectiveP1Keys.size);
         const ready = new Set(eligible
-          .filter(row => isDirectRow(row) && effectiveP1Keys.has(row._cacheKey))
-          .map(row => row._cacheKey)).size;
+          .filter(row => isDirectRow(row) && effectiveP1Keys.has(row._sourceKey || row._cacheKey))
+          .map(row => row._sourceKey || row._cacheKey)).size;
         return ready >= effectiveTarget;
       });
       await settleBefore(warm.promise, Math.min(SOFT_DEADLINE_MS, remainingBudget()), null);
@@ -2195,7 +2353,7 @@ async function handleStream(type, id, config) {
         : priority1Keys;
       const effectiveTargetP1Quorum = Math.min(PRIORITY1_QUORUM, effectiveP1Keys.size);
       const effectiveP1Ready = hasEventProgress
-        ? new Set(eligible.filter(row => isDirectRow(row) && effectiveP1Keys.has(row._cacheKey)).map(row => row._cacheKey)).size
+        ? new Set(eligible.filter(row => isDirectRow(row) && effectiveP1Keys.has(row._sourceKey || row._cacheKey)).map(row => row._sourceKey || row._cacheKey)).size
         : priority1ReadyCount(eligible);
       const priority1Pending = inFlight.some(f =>
         f.isPriority1 && !f.settled && !(hasEventProgress && (f.eventDiscovery || f.isChannelSource)));
@@ -2228,19 +2386,23 @@ async function handleStream(type, id, config) {
           waited = await settleBefore(wait.promise, remaining, null);
         }
         wait.stop();
-        timingWaitOutcome = waited === null && !readyToRespond() ? 'hard_wait_expired' : 'wait_completed';
+        const eventStillIncomplete = inFlight.some(f => f.eventDiscovery && f.inconclusive);
+        timingWaitOutcome = (waited === null && !readyToRespond()) ||
+          (eventStillIncomplete && (Date.now() - resolutionStartedAt) >= HARD_DEADLINE_MS)
+          ? 'hard_wait_expired'
+          : 'wait_completed';
       } else timingWaitOutcome = 'budget_exhausted';
       streams.length = 0;
       for (const f of inFlight) {
         const rows = f.settled ? f.value : f.eventProgress;
         if (Array.isArray(rows)) streams.push(...rows);
       }
-      lateCount = inFlight.filter(f => !f.settled).length;
+      lateCount = inFlight.filter(f => !f.settled || (f.eventDiscovery && f.inconclusive)).length;
     } else if (lateCount > 0) {
       console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
     }
     if (timingStream) {
-      const unsettled = inFlight.filter(f => !f.settled).length;
+      const unsettled = inFlight.filter(f => !f.settled || (f.eventDiscovery && f.inconclusive)).length;
       const reason = timingWaitOutcome === 'hard_wait_expired' || timingWaitOutcome === 'budget_exhausted' ? timingWaitOutcome :
         unsettled === 0 ? 'all_settled' : timingWaitOutcome === 'wait_completed' ? 'priority_completed' : 'early_return';
       try { timingRelations.endWindow(timingStream, inFlight.length, unsettled, reason); } catch (_) { /* diagnostic only */ }
