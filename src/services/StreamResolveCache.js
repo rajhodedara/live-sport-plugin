@@ -146,6 +146,7 @@ class StreamResolveCache {
     this.entries = new Map();   // key -> { streams, matchId, status, resolvedAt, expiresAt, lastAccess }
     this.inFlight = new Map();  // key -> Promise (mint in progress)
     this.pendingOperations = new Map(); // key -> locally prunable operation
+    this.activeDeliveries = new Map();  // key -> Set<operation> awaiting consumer delivery
     this.ttl = new Map();       // sourceName -> learned TTL ms
     this.statsCounters = { hits: 0, misses: 0, negativeHits: 0, deferredHits: 0, deferrals: 0, evictions: 0 };
   }
@@ -286,7 +287,7 @@ class StreamResolveCache {
    * and resolve to [] until the negative window passes.
    */
   // Adopt a shared-cache payload into the local Map (L2 → L1).
-  _adoptRemote(key, remote) {
+  _adoptRemote(key, remote, operation = null) {
     // The payload can expire between the resolver's lookup and receipt here.
     // Missing/invalid expiry must not manufacture a new lifetime for old URLs.
     const expiresAt = Number(remote.expiresAt);
@@ -295,7 +296,7 @@ class StreamResolveCache {
     const streams = Array.isArray(remote.streams) ? remote.streams : [];
     const retryReason = remote.status === 'ok' ? webRetryReason(streams) : null;
     this.entries.delete(key);
-    this.entries.set(key, {
+    const entry = {
       streams: streams.map(cloneStream),
       matchId,
       status: remote.status === 'ok' ? 'ok' : 'failed',
@@ -303,7 +304,11 @@ class StreamResolveCache {
       lastAccess: Date.now(),
       sharedRevision: sharedRevision(remote.revision),
       ...(retryReason ? { retryReason } : {}),
-    });
+    };
+    this.entries.set(key, entry);
+    if (operation && entry.status === 'ok' && !entry.retryReason && entry.streams.some(s => s && s.url)) {
+      operation.deliveryEntry = entry;
+    }
     this._evictIfNeeded();
     return true;
   }
@@ -365,14 +370,26 @@ class StreamResolveCache {
 
     const pending = this.inFlight.get(key);
     if (pending) {
-      this._linkTiming(timingStream, this.pendingOperations.get(key)?.timingWork);
-      await pending.catch(() => {});
-      return this.get(key) || [];
+      const operation = this.pendingOperations.get(key);
+      this._linkTiming(timingStream, operation?.timingWork);
+      if (operation) operation.consumers += 1;
+      try {
+        await pending.catch(() => {});
+        return operation ? this._deliverOperationResult(key, operation) : (this.get(key) || []);
+      } finally {
+        if (operation) this._releaseOperationConsumer(key, operation);
+      }
     }
 
     this.statsCounters.misses++;
-    const operation = { matchId: key.split(':')[1] || '', pruned: false };
+    const operation = {
+      matchId: key.split(':')[1] || '',
+      pruned: false,
+      consumers: 1,
+      deliveryEntry: null
+    };
     this.pendingOperations.set(key, operation);
+    this._trackActiveDelivery(key, operation);
 
     // Reserve this key before any shared-cache I/O. Otherwise concurrent
     // callers can all pass the pending check while the first awaits L2.
@@ -394,8 +411,47 @@ class StreamResolveCache {
       try { operation.timingWork = this.timingRelations.work(key.split(':', 1)[0]); } catch (_) { /* diagnostic only */ }
       this._linkTiming(timingStream, operation.timingWork);
     }
-    await p.catch(() => {});
-    return this.get(key) || [];
+    try {
+      await p.catch(() => {});
+      return this._deliverOperationResult(key, operation);
+    } finally {
+      this._releaseOperationConsumer(key, operation);
+    }
+  }
+
+  _trackActiveDelivery(key, operation) {
+    let set = this.activeDeliveries.get(key);
+    if (!set) {
+      set = new Set();
+      this.activeDeliveries.set(key, set);
+    }
+    set.add(operation);
+  }
+
+  _releaseOperationConsumer(key, operation) {
+    operation.consumers = Math.max(0, operation.consumers - 1);
+    if (operation.consumers > 0) return;
+    operation.deliveryEntry = null;
+    const set = this.activeDeliveries.get(key);
+    if (set) {
+      set.delete(operation);
+      if (set.size === 0) this.activeDeliveries.delete(key);
+    }
+  }
+
+  _deliverOperationResult(key, operation) {
+    if (operation.pruned) return [];
+    const current = this.entries.get(key);
+    if (current) {
+      if (current.expiresAt <= Date.now()) {
+        this.entries.delete(key);
+        return [];
+      }
+      return this.get(key) || [];
+    }
+    const delivery = operation.deliveryEntry;
+    if (!delivery || delivery.invalidated || delivery.expiresAt <= Date.now()) return [];
+    return delivery.streams.map(clonePublicStream);
   }
 
   _linkTiming(stream, work) {
@@ -429,7 +485,7 @@ class StreamResolveCache {
       if (remote && remote.status === 'minting') remote = await this._sharedWaitMinting(key);
       if (operation.pruned) return;
       if (remote && (remote.status === 'ok' || remote.status === 'failed')) {
-        if (this._adoptRemote(key, remote)) {
+        if (this._adoptRemote(key, remote, operation)) {
           if (remote.status === 'ok') {
             this.statsCounters.hits++;
             return;
@@ -447,7 +503,7 @@ class StreamResolveCache {
           remote = await this._sharedWaitMinting(key);
           if (operation.pruned) return;
           if (remote && (remote.status === 'ok' || remote.status === 'failed')) {
-            if (this._adoptRemote(key, remote)) {
+            if (this._adoptRemote(key, remote, operation)) {
               if (remote.status === 'ok') {
                 this.statsCounters.hits++;
                 return;
@@ -535,6 +591,9 @@ class StreamResolveCache {
           }
           localEntry = this._set(key, sourceName, matchId, storedStreams, 'ok', ttl);
           if (partialTtlMs > 0) localEntry.partial = true;
+          if (!localEntry.retryReason && localEntry.streams.some(s => s && s.url)) {
+            operation.deliveryEntry = localEntry;
+          }
         } else {
           localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
         }
@@ -672,8 +731,23 @@ class StreamResolveCache {
     if (entry) entry.invalidated = true;
     const publicationEntry = this.pendingOperations.get(key)?.publicationEntry;
     if (publicationEntry) publicationEntry.invalidated = true;
+    let deliveryRevision = null;
+    const activeOps = this.activeDeliveries.get(key);
+    if (activeOps) {
+      for (const op of activeOps) {
+        if (op.deliveryEntry) {
+          op.deliveryEntry.invalidated = true;
+          if (!deliveryRevision && op.deliveryEntry.sharedRevision) deliveryRevision = op.deliveryEntry.sharedRevision;
+          op.deliveryEntry = null;
+        }
+        if (op.publicationEntry) {
+          op.publicationEntry.invalidated = true;
+          if (!deliveryRevision && op.publicationEntry.sharedRevision) deliveryRevision = op.publicationEntry.sharedRevision;
+        }
+      }
+    }
     this.entries.delete(key);
-    this._invalidateShared(key, entry?.sharedRevision || publicationEntry?.sharedRevision).catch(() => {});
+    this._invalidateShared(key, entry?.sharedRevision || publicationEntry?.sharedRevision || deliveryRevision).catch(() => {});
   }
 
   async _invalidateShared(key, revision) {
@@ -690,6 +764,15 @@ class StreamResolveCache {
     for (const operation of this.pendingOperations.values()) {
       if (operation.matchId && operation.matchId !== CHANNEL_MATCH_ID && !ids.has(operation.matchId)) {
         operation.pruned = true;
+        operation.deliveryEntry = null;
+      }
+    }
+    for (const activeOps of this.activeDeliveries.values()) {
+      for (const operation of activeOps) {
+        if (operation.matchId && operation.matchId !== CHANNEL_MATCH_ID && !ids.has(operation.matchId)) {
+          operation.pruned = true;
+          operation.deliveryEntry = null;
+        }
       }
     }
     for (const [key, e] of this.entries) {
