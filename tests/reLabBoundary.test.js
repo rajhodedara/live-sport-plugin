@@ -58,6 +58,12 @@ describe('Reverse-engineering lab repository boundary', () => {
     expect(buf.toString('utf8')).toMatch(/nuvio-re-lab/i);
   });
 
+  test('AGENTS.md mirrors GEMINI.md without drift', () => {
+    const gemini = fs.readFileSync(path.join(REPO_ROOT, 'GEMINI.md'), 'utf8').replace(/\r\n/g, '\n');
+    const agents = fs.readFileSync(path.join(REPO_ROOT, 'AGENTS.md'), 'utf8').replace(/\r\n/g, '\n');
+    expect(agents).toBe(gemini);
+  });
+
   test('.gitignore quarantines reverse-engineering dump patterns and dirs', () => {
     const gitignore = fs.readFileSync(path.join(REPO_ROOT, '.gitignore'), 'utf8');
     const lines = new Set(
