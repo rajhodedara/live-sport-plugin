@@ -1,6 +1,7 @@
 'use strict';
 
 const { normalizeName, entryScore } = require('./TrexCatalogKeys');
+const { parseTimezone } = require('../timezone');
 
 // City and franchise are interchangeable in North American pro fixture labels.
 // Only expand known city prefixes; arbitrary first/last words of team names
@@ -14,11 +15,37 @@ const MARKETS = ('golden state|new york|new jersey|los angeles|la|las vegas|okla
   'san francisco|tennessee|arizona|texas|salt lake|austin').split('|');
 const SHARED_MARKETS = new Set(['new york', 'los angeles', 'la']);
 const MONTHS = 'jan feb mar apr may jun jul aug sep oct nov dec'.split(' ');
+const WEEKDAYS = Object.freeze({
+  sun: 0, sunday: 0, mon: 1, monday: 1, tue: 2, tuesday: 2,
+  wed: 3, wednesday: 3, thu: 4, thursday: 4, fri: 5, friday: 5, sat: 6, saturday: 6
+});
 const DAY = 86_400_000;
 const ZONES = {
   utc: 0, gmt: 0, cet: 1, cest: 2, eet: 2, eest: 3,
   est: -5, edt: -4, cst: -6, cdt: -5, mst: -7, mdt: -6, pst: -8, pdt: -7
 };
+const IANA_ZONES = Object.freeze({
+  et: 'America/New_York',
+  ct: 'America/Chicago',
+  mt: 'America/Denver',
+  pt: 'America/Los_Angeles'
+});
+
+const MONTH_ALT = 'jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec';
+const WEEKDAY_ALT = 'mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?';
+const ZONE_ALT = 'utc|gmt|cest|cet|eest|eet|et|est|edt|ct|cst|cdt|mt|mst|mdt|pt|pst|pdt';
+const VERSUS_SEP_RE = /\s+(?:vs?\.?|versus|at|@)\s+/i;
+const LEADING_SLOT_RE = /^\s*\d+\s*-\s*(?:\d{1,2}(?::\d\d)?\s*[ap]m\s*)?/i;
+const LEADING_SEASON_WEEK_RE = /^\s*(?:(?:[a-z]+\s+){0,2}(?:football|basketball|hockey|baseball|soccer|nfl|nba|nhl|mlb|mls|ncaa)\s+)?(?:20\d\d(?:\/\d{2,4})?\s+)?(?:season\s+)?(?:week|matchweek|matchday|round)\s+\d{1,2}(?:\s*[-:]\s*|\s+)(?=[A-Za-z0-9#])/i;
+const LEADING_WEEKDAY_TIME_RE = new RegExp(`^\\s*(?:${WEEKDAY_ALT})\\b\\.?,?\\s+(?:\\d{1,2}(?::\\d\\d)?\\s*[ap]m|\\d{1,2}:\\d\\d)(?:\\s+(?:${ZONE_ALT}))?(?:\\s*-\\s*|\\s+)(?=[A-Za-z0-9#])`, 'i');
+const TRAILING_DATE_TIME_RE = new RegExp(`\\s+(?:(?:${WEEKDAY_ALT})\\.?,?\\s+)?(?:(?:${MONTH_ALT})\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?|\\d{1,2}(?:st|nd|rd|th)?\\s+(?:${MONTH_ALT})\\.?)(?:,?\\s+|\\s+at\\s+)(?:\\d{1,2}(?::\\d\\d)?\\s*[ap]m|\\d{1,2}:\\d\\d)(?:\\s+(?:${ZONE_ALT}))?\\s*$`, 'i');
+const TRAILING_AMPM_RE = new RegExp(`\\s+\\d{1,2}(?::\\d\\d)?\\s*[ap]m(?:\\s+(?:${ZONE_ALT}))?\\s*$`, 'i');
+const TRAILING_24H_RE = new RegExp(`\\s+\\d{1,2}:\\d\\d(?:\\s*(?:${ZONE_ALT}|[ap]m))?\\s*$`, 'i');
+const TIMED_ZONE_RE = new RegExp(`^[\\s|T,]*(?:(\\d{1,2})(?::(\\d\\d)(?::\\d\\d)?)?\\s*([ap]m)|(\\d{1,2}):(\\d\\d)(?::\\d\\d)?)\\s*\\(?(${ZONE_ALT}|[+-]\\d\\d(?::?\\d\\d)?)\\b`, 'i');
+const WEEKDAY_TIME_RE = new RegExp(`\\b(${WEEKDAY_ALT})\\b\\.?,?\\s+(?:\\d{1,2}(?::\\d\\d)?\\s*[ap]m|\\d{1,2}:\\d\\d)(?:\\s*\\(?(${ZONE_ALT}|[+-]\\d\\d(?::?\\d\\d)?)\\b)?`, 'i');
+const STANDALONE_WEEKDAY_RE = new RegExp(`^\\s*(?:\\d+\\s*-\\s*)?(${WEEKDAY_ALT})\\s*$`, 'i');
+
+const _weekdayFormatters = new Map();
 
 // Generic club fillers that never distinguish same-city clubs (unlike real, united, city, inter, athletic, atletico).
 const CLUB_AFFIXES = new Set([
@@ -221,6 +248,37 @@ function cleanSide(side) {
   return squad ? `${stripped} ${squad}`.trim() : stripped;
 }
 
+function stripLeadingLabels(text, isEventTagged) {
+  let part = text.replace(LEADING_SLOT_RE, '');
+  while (/^[^:]{1,60}:\s+(?=[A-Za-z0-9#])/.test(part)) {
+    const colonIdx = part.indexOf(':');
+    const prefix = part.slice(0, colonIdx);
+    const rest = part.slice(colonIdx + 1).trim();
+    if (VERSUS_SEP_RE.test(prefix) || (isEventTagged && /\s+x\s+/i.test(prefix))) break;
+    if (!VERSUS_SEP_RE.test(rest) && !(isEventTagged && /\s+x\s+/i.test(rest)) && !/\s+[-\u2013\u2014]\s+/.test(rest)) break;
+    part = rest;
+  }
+  return part;
+}
+
+function cleanClause(rawPart, isEventTagged) {
+  let part = rawPart.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ').trim();
+  part = stripLeadingLabels(part, isEventTagged);
+  return part
+    .replace(LEADING_SLOT_RE, '')
+    .replace(LEADING_SEASON_WEEK_RE, '')
+    .replace(LEADING_WEEKDAY_TIME_RE, '')
+    .replace(/^\s*\d{1,2}:\d\d\s+(?=[A-Za-z0-9#])/, '')
+    .replace(/^(?:(?:uefa\s+)?(?:champions|europa|conference|youth)\s+league|premier\s+league|championship|la\s*liga|serie\s*a|bundesliga|ligue\s*1)\s+(?=[A-Za-z#])/i, '')
+    .replace(/\s+(?:(?:uefa\s+)?(?:champions|europa|conference|youth)\s+league|premier\s+league|bundesliga|la\s*liga|serie\s*a|ligue\s*1|j\.?league|a-?league)\s+(?:matchday|matchweek|round|week|\d{4}(?:\/\d{2,4})?).*$/i, '')
+    .replace(/\s+@\s+(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d))/i, '\u0000')
+    .split('\u0000')[0]
+    .replace(TRAILING_DATE_TIME_RE, '')
+    .replace(TRAILING_AMPM_RE, '')
+    .replace(TRAILING_24H_RE, '')
+    .trim();
+}
+
 function parsePair(name) {
   // Allow a leading STAN stream bullet ("| • Everton v Liverpool"), while still
   // rejecting multi-game simulcasts ("A vs B • C vs D", ";") and ended placeholders.
@@ -228,28 +286,26 @@ function parsePair(name) {
   if (!cleanedName || /[;\u2022]|\b(?:end|ended|no event streaming now)\s*\|/i.test(cleanedName)) return null;
   const isEventTagged = /^\s*(?:live|next)\s*\|/i.test(cleanedName)
     || /\bstart:\s*20\d\d-|\(\s*20\d\d-\d\d-\d\d/i.test(cleanedName);
-  for (let part of cleanedName.split('|')) {
-    part = part.replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-      .trim()
-      .replace(/^.*?:\s+(?=[A-Za-z0-9#])/, '')
-      .replace(/^\s*\d+\s*-\s*(?:\d{1,2}(?::\d\d)?\s*[ap]m\s*)?/i, '')
-      .replace(/^\s*\d{1,2}:\d\d\s+(?=[A-Za-z#])/, '')
-      .replace(/^(?:(?:uefa\s+)?(?:champions|europa|conference|youth)\s+league|premier\s+league|championship|la\s*liga|serie\s*a|bundesliga|ligue\s*1)\s+(?=[A-Za-z#])/i, '')
-      .replace(/\s+(?:(?:uefa\s+)?(?:champions|europa|conference|youth)\s+league|premier\s+league|bundesliga|la\s*liga|serie\s*a|ligue\s*1|j\.?league|a-?league)\s+(?:matchday|matchweek|round|week|\d{4}(?:\/\d{2,4})?).*$/i, '')
-      .replace(/\s+@\s+(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|\d))/i, '\u0000')
-      .split('\u0000')[0]
-      .replace(/\s+\d{1,2}(?::\d\d)?\s*[ap]m(?:\s+(?:gmt|utc|cet|cest|eet|eest|est|edt|pst|pdt))?\s*$/i, '')
-      .replace(/\s+\d{1,2}:\d\d(?:\s*(?:gmt|utc|cet|cest|eet|eest|est|edt|pst|pdt|[ap]m))?\s*$/i, '')
-      .trim();
-    const hasVersus = /\s+(?:vs?\.?|versus|at|@)\s+/i.test(part);
+  let matched = null;
+  for (const rawPart of cleanedName.split('|')) {
+    const part = cleanClause(rawPart, isEventTagged);
+    const hasVersus = VERSUS_SEP_RE.test(part);
     const hasX = !hasVersus && isEventTagged && /\s+x\s+/i.test(part);
-    const sep = hasVersus ? /\s+(?:vs?\.?|versus|at|@)\s+/i : (hasX ? /\s+x\s+/i : /\s+[-\u2013\u2014]\s+/);
+    const sep = hasVersus ? VERSUS_SEP_RE : (hasX ? /\s+x\s+/i : /\s+[-\u2013\u2014]\s+/);
     const sides = part.split(sep);
     if (sides.length !== 2) continue;
     const [a, b] = sides.map(cleanSide);
-    if (a && b && a !== b && /[a-z]/.test(a) && /[a-z]/.test(b)) return { a, b };
+    if (!a || !b || a === b || !/[a-z]/.test(a) || !/[a-z]/.test(b)) continue;
+    const explicit = hasVersus || hasX;
+    if (!matched) {
+      matched = { a, b, explicit };
+    } else if (explicit && matched.explicit && pairKey(matched.a, matched.b) !== pairKey(a, b)) {
+      return null;
+    } else if (explicit && !matched.explicit) {
+      matched = { a, b, explicit };
+    }
   }
-  return null;
+  return matched ? { a: matched.a, b: matched.b } : null;
 }
 
 function fixtureDate(match) {
@@ -258,35 +314,154 @@ function fixtureDate(match) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function dateFits(name, kickoff) {
-  if (!kickoff) return true;
-  let year, month, day, text;
-  const iso = name.match(/\b(20\d\d)-(\d\d)-(\d\d)\b/);
-  const euro = name.match(/\b(\d\d)-(\d\d)-(20\d\d)\b/);
-  if (iso || euro) {
-    const m = iso || euro;
-    [year, month, day] = iso ? m.slice(1).map(Number) : [Number(m[3]), Number(m[2]), Number(m[1])];
-    text = name.slice(m.index + m[0].length);
-  } else {
-    const m = name.match(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\b/i);
-    if (!m) return true;
-    month = MONTHS.indexOf((m[2] || m[3]).toLowerCase()) + 1;
-    day = Number(m[1] || m[4]);
-    const y = new Date(kickoff).getUTCFullYear();
-    year = [y, y - 1, y + 1].sort((a, b) => Math.abs(Date.UTC(a, month - 1, day) - kickoff) - Math.abs(Date.UTC(b, month - 1, day) - kickoff))[0];
-    text = name.slice(m.index + m[0].length);
+function weekdayFormatter(timeZone) {
+  let fmt = _weekdayFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', { timeZone, weekday: 'short' });
+    _weekdayFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+function resolveZoneMinutes(zone) {
+  if (Object.hasOwn(ZONES, zone)) return ZONES[zone] * 60;
+  return (zone[0] === '-' ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(3).replace(':', '')));
+}
+
+function resolveCalendarInstant(year, month, day, hour, minute, zone) {
+  if (Object.hasOwn(IANA_ZONES, zone)) {
+    const wall = `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')} ${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+    return parseTimezone(wall, IANA_ZONES[zone]);
   }
   const calendar = Date.UTC(year, month - 1, day);
-  const timed = text.match(/^[\s|T]*(\d{1,2}):(\d\d)(?::\d\d)?\s*\(?(UTC|GMT|CEST|CET|EEST|EET|EST|EDT|CST|CDT|MST|MDT|PST|PDT|[+-]\d\d(?::?\d\d)?)\b/i);
-  if (timed) {
-    const zone = timed[3].toLowerCase();
-    const zoneMinutes = Object.hasOwn(ZONES, zone) ? ZONES[zone] * 60 :
-      (zone[0] === '-' ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(3).replace(':', '')));
-    const at = calendar + (Number(timed[1]) * 60 + Number(timed[2]) - zoneMinutes) * 60_000;
-    return Math.abs(kickoff - at) <= 6 * 3600_000;
+  return calendar + (hour * 60 + minute - resolveZoneMinutes(zone)) * 60_000;
+}
+
+function weekdayInZone(kickoff, zone) {
+  if (Object.hasOwn(IANA_ZONES, zone) || zone.includes('/') || zone === 'UTC') {
+    const iana = IANA_ZONES[zone] || zone;
+    return WEEKDAYS[weekdayFormatter(iana).format(new Date(kickoff)).toLowerCase()];
   }
-  // Labels without a timezone may use the local broadcast day.
-  return Math.abs(Math.floor(kickoff / DAY) - calendar / DAY) <= 1;
+  return new Date(kickoff + resolveZoneMinutes(zone) * 60_000).getUTCDay();
+}
+
+function isInsideParens(name, index) {
+  const segStart = name.lastIndexOf('|', index) + 1;
+  const segEnd = name.indexOf('|', index);
+  let open = 0;
+  for (let i = segStart; i < index; i += 1) {
+    if (name[i] === '(') open += 1;
+    else if (name[i] === ')' && open > 0) open -= 1;
+  }
+  if (open <= 0) return false;
+  const tail = segEnd === -1 ? name.slice(index) : name.slice(index, segEnd);
+  return tail.includes(')');
+}
+
+function parseTimedZone(trailing, year, month, day) {
+  const timed = trailing.match(TIMED_ZONE_RE);
+  if (!timed) return null;
+  let hour = Number(timed[1] || timed[4]);
+  const minute = Number(timed[2] || timed[5] || 0);
+  const meridiem = (timed[3] || '').toLowerCase();
+  const zone = timed[6].toLowerCase();
+  if (meridiem) {
+    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) return null;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    else if (meridiem === 'pm' && hour < 12) hour += 12;
+  } else if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  const at = resolveCalendarInstant(year, month, day, hour, minute, zone);
+  return Number.isFinite(at) ? at : null;
+}
+
+function extractCalendarCandidates(name, kickoff) {
+  const candidates = [];
+  const push = (year, month, day, index, end) => {
+    if (month < 1 || month > 12 || day < 1 || day > 31) return;
+    const inParens = isInsideParens(name, index);
+    const at = parseTimedZone(name.slice(end), year, month, day);
+    const zoned = at !== null;
+    candidates.push({
+      year,
+      month,
+      day,
+      at,
+      zoned,
+      priority: (zoned ? 0 : 2) + (inParens ? 1 : 0)
+    });
+  };
+  for (const m of name.matchAll(/\b(20\d\d)-(\d\d)-(\d\d)\b/g)) {
+    push(Number(m[1]), Number(m[2]), Number(m[3]), m.index, m.index + m[0].length);
+  }
+  for (const m of name.matchAll(/\b(\d\d)-(\d\d)-(20\d\d)\b/g)) {
+    push(Number(m[3]), Number(m[2]), Number(m[1]), m.index, m.index + m[0].length);
+  }
+  const refYear = new Date(kickoff).getUTCFullYear();
+  for (const m of name.matchAll(/\b(\d{1,2})\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\b|\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\b/gi)) {
+    const month = MONTHS.indexOf((m[2] || m[3]).toLowerCase()) + 1;
+    const day = Number(m[1] || m[4]);
+    const year = [refYear, refYear - 1, refYear + 1]
+      .sort((a, b) => Math.abs(Date.UTC(a, month - 1, day) - kickoff) - Math.abs(Date.UTC(b, month - 1, day) - kickoff))[0];
+    push(year, month, day, m.index, m.index + m[0].length);
+  }
+  return candidates;
+}
+
+function relevantWeekdayZones(name) {
+  if (/\b(?:nfl|nba|nhl|ahl|mlb|mls|wnba|ncaa|us|usa|ca|espn\+?|peacock|fox|cbs|nbc|tsn|sn)\b/i.test(name)) {
+    return ['America/New_York', 'America/Los_Angeles'];
+  }
+  if (/\b(?:uk|gb|ie|epl|premier\s+league|championship|efl|sky\s*sports|tnt\s*sports)\b/i.test(name)) {
+    return ['Europe/London'];
+  }
+  if (/\b(?:de|fr|es|it|nl|pt|be|se|dk|no|fi|pl|tr|uefa|champions\s+league|bundesliga|la\s*liga|serie\s*a|ligue\s*1|viaplay|dazn)\b/i.test(name)) {
+    return ['Europe/Berlin', 'Europe/Istanbul'];
+  }
+  if (/\b(?:au|stan|nz)\b/i.test(name)) {
+    return ['Australia/Sydney'];
+  }
+  return ['America/New_York', 'UTC', 'Europe/London'];
+}
+
+function extractWeekdaySchedule(name) {
+  const timed = name.match(WEEKDAY_TIME_RE);
+  if (timed) {
+    return {
+      weekday: WEEKDAYS[timed[1].toLowerCase()],
+      zone: timed[2] ? timed[2].toLowerCase() : ''
+    };
+  }
+  const parts = name.split('|');
+  for (let i = 0; i < parts.length; i += 1) {
+    const part = parts[i];
+    if (i === 0 && !/^\s*\d+\s*-/.test(part)) continue;
+    const standalone = part.match(STANDALONE_WEEKDAY_RE);
+    if (standalone) {
+      return { weekday: WEEKDAYS[standalone[1].toLowerCase()], zone: '' };
+    }
+  }
+  return null;
+}
+
+function dateFits(name, kickoff) {
+  if (!kickoff) return true;
+  const candidates = extractCalendarCandidates(name, kickoff);
+  if (candidates.length) {
+    candidates.sort((a, b) => a.priority - b.priority);
+    const best = candidates[0];
+    if (best.zoned) {
+      return Math.abs(kickoff - best.at) <= 6 * 3600_000;
+    }
+    // Labels without a timezone may use the local broadcast day.
+    const calendar = Date.UTC(best.year, best.month - 1, best.day);
+    return Math.abs(Math.floor(kickoff / DAY) - calendar / DAY) <= 1;
+  }
+  const weekdayMatch = extractWeekdaySchedule(name);
+  if (!weekdayMatch) return true;
+  const zones = weekdayMatch.zone ? [weekdayMatch.zone] : relevantWeekdayZones(name);
+  return zones.some((zone) => weekdayInZone(kickoff, zone) === weekdayMatch.weekday);
 }
 
 function sportOf(value, { isMatch = false } = {}) {

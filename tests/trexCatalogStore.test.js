@@ -194,4 +194,92 @@ describe('TrexCatalogStore', () => {
       team1: 'Dallas Mavericks', team2: 'Denver Nuggets', category: 'basketball', league: 'NBA', date: '2026-11-25T03:00:00Z'
     }).map(r => r.id)).toEqual(['ev:nba-ppv']);
   });
+
+  test('strips anchored schedule wrappers from event_pairs keys and validates zoned ET and weekday-only kickoffs', () => {
+    const scheduleMetas = [
+      { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)' },
+      { id: '1949760', name: 'US (ESPN+ 152) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:15)' },
+      { id: '836296', name: 'NFL  | 01 - WED 8pm Packers at Rams' },
+      { id: '202', name: 'US (ESPN+ 202) | Football: NFL Football: 2026 Week 12 Green Bay Packers vs. Los Angeles Rams (NFL Football: 2026 Week 12 Green Bay Packers vs. Los Angeles Rams) (2026-11-26 00:30:00)' },
+      { id: 'nba:uta-min', name: 'NBA | UTA vs MIN (2026-11-25 19:30:00)' },
+      { id: 'nba:utah-minn', name: 'NBA | Utah vs. Minnesota (2026-11-25 19:30:00)' },
+      { id: 'nhl:multi-bullet', name: 'Live | Utah Mammoth vs. Minnesota Wild \u2022 Oilers vs. Flames (2026-11-25 19:30:00)' },
+      { id: 'nhl:multi-pipe', name: 'NHL | Utah Mammoth vs. Minnesota Wild | Oilers vs. Flames' },
+      { id: 'city:bare', name: 'Live | Utah vs. Minnesota' }
+    ];
+    writeCatalogFile(dbPath, scheduleMetas);
+    const store = openStore({ dbPath });
+
+    const db = openDatabase(dbPath, { readOnly: true });
+    try {
+      const pairsFor = (key) => db
+        .prepare('SELECT channel_id FROM event_pairs WHERE pair_key = ? ORDER BY channel_id')
+        .all(key)
+        .map((row) => row.channel_id);
+
+      expect(pairsFor('minnesota wild|utah mammoth')).toEqual(['1949760', '1949763']);
+      expect(pairsFor('packers|rams')).toEqual(['836296']);
+      expect(pairsFor('green bay packers|los angeles rams')).toEqual(['202']);
+      expect(db.prepare('SELECT kind FROM channels WHERE id = ?').get('836296')).toEqual({ kind: 'linear' });
+    } finally {
+      db.close();
+    }
+
+    const utahQuery = (date) => store.findEvents({
+      team1: 'Utah Mammoth', team2: 'Minnesota Wild', category: 'hockey', league: 'NHL', date
+    }).map((r) => r.id);
+    const ramsQuery = (date) => store.findEvents({
+      team1: 'Green Bay Packers', team2: 'Los Angeles Rams', category: 'american football', league: 'NFL', date
+    }).map((r) => r.id);
+
+    const utahIds = utahQuery('2026-11-26T01:00:00Z');
+    const ramsIds = ramsQuery('2026-11-26T01:00:00Z');
+    expect(utahIds).toEqual(expect.arrayContaining(['1949763', '1949760']));
+    expect(utahIds).not.toContain('nba:uta-min');
+    expect(utahIds).not.toContain('nba:utah-minn');
+    expect(utahIds).not.toContain('nhl:multi-bullet');
+    expect(utahIds).not.toContain('nhl:multi-pipe');
+    expect(utahIds).not.toContain('city:bare');
+    expect(ramsIds).toContain('836296');
+    expect(ramsIds).toContain('202');
+
+    // Negative date checks: December 3 and same calendar date beyond 6h tolerance.
+    expect(utahQuery('2026-12-03T01:00:00Z')).toEqual([]);
+    expect(utahQuery('2026-11-26T12:00:00Z')).toEqual([]);
+    expect(utahQuery('2026-11-25T12:00:00Z')).toEqual([]);
+    expect(ramsQuery('2026-12-03T20:00:00Z')).toEqual([]);
+    expect(ramsQuery('2026-11-25T01:00:00Z')).not.toContain('836296');
+  });
+
+  test('interprets ET across DST and preserves untimed reused label and city-only guards', () => {
+    const extraMetas = [
+      { id: 'nhl:summer-et', name: 'US (ESPN+ 155) | Utah Mammoth vs. Minnesota Wild Jul 15 7:30PM ET (2026-07-15 19:30:00)' },
+      { id: 'nhl:reused-untimed', name: 'Live | Utah Mammoth vs. Minnesota Wild | all' },
+      { id: 'city:wed-bare', name: 'Live | WED 8pm Utah vs. Minnesota' },
+      { id: 'efl:wednesday', name: 'UK | Sheffield Wednesday vs. Leeds United' }
+    ];
+    writeCatalogFile(dbPath, extraMetas);
+    const store = openStore({ dbPath });
+
+    // July 15 7:30PM ET uses EDT (UTC-4) = 2026-07-15T23:30:00Z.
+    const summerHits = store.findEvents({
+      team1: 'Utah Mammoth', team2: 'Minnesota Wild', category: 'hockey', league: 'NHL', date: '2026-07-16T01:00:00Z'
+    }).map((r) => r.id).sort();
+    expect(summerHits).toEqual(['nhl:reused-untimed', 'nhl:summer-et']);
+
+    const outOfWindowHits = store.findEvents({
+      team1: 'Utah Mammoth', team2: 'Minnesota Wild', category: 'hockey', league: 'NHL', date: '2026-07-16T06:00:00Z'
+    }).map((r) => r.id);
+    expect(outOfWindowHits).toEqual(['nhl:reused-untimed']);
+
+    // Sheffield Wednesday must not be parsed as a Wednesday schedule marker.
+    expect(store.findEvents({
+      team1: 'Sheffield Wednesday', team2: 'Leeds United', category: 'football', league: 'Championship', date: '2026-11-26T20:00:00Z'
+    }).map((r) => r.id)).toEqual(['efl:wednesday']);
+
+    // Bare city-only weekday label without a matching sport stays blocked even on Wednesday ET.
+    expect(store.findEvents({
+      team1: 'Utah Mammoth', team2: 'Minnesota Wild', category: 'hockey', league: 'NHL', date: '2026-11-26T01:00:00Z'
+    }).map((r) => r.id)).toEqual(['nhl:reused-untimed']);
+  });
 });

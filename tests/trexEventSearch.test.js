@@ -171,6 +171,57 @@ describe('event-first discovery', () => {
       warn.mockRestore();
     }
   });
+
+  test('matches NHL zoned ET titles and blocks wrong-sport, multi-match, December 3, and out-of-window kickoffs', async () => {
+    const nhlMetas = [
+      { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)' },
+      { id: '1949760', name: 'US (ESPN+ 152) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:15)' },
+      { id: 'nba:uta-min', name: 'NBA | UTA vs MIN (2026-11-25 19:30:00)' },
+      { id: 'nba:utah-minn', name: 'NBA | Utah vs. Minnesota (2026-11-25 19:30:00)' },
+      { id: 'nhl:multi-bullet', name: 'Live | Utah Mammoth vs. Minnesota Wild \u2022 Oilers vs. Flames (2026-11-25 19:30:00)' },
+      { id: 'nhl:multi-pipe', name: 'NHL | Utah Mammoth vs. Minnesota Wild | Oilers vs. Flames' }
+    ];
+    const fetchImpl = jest.fn(async (url) => {
+      const q = decode(url).split('search=')[1];
+      if (q === 'mammoth.json') return jsonResponse(nhlMetas);
+      return jsonResponse([]);
+    });
+
+    const nov26 = Date.UTC(2026, 10, 26, 1, 0);
+    const searchNov26 = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => nov26 });
+    const hits = await searchNov26.findForFixture({
+      id: 'nhl-uta-min-nov26',
+      date: '2026-11-26T01:00:00Z',
+      category: 'hockey',
+      league: 'NHL',
+      team1: 'Utah Mammoth',
+      team2: 'Minnesota Wild'
+    });
+    expect(ids(hits)).toEqual(expect.arrayContaining(['1949763', '1949760']));
+    expect(ids(hits)).toHaveLength(2);
+
+    const sameDayLate = Date.UTC(2026, 10, 26, 12, 0);
+    const searchLate = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => sameDayLate });
+    await expect(searchLate.findForFixture({
+      id: 'nhl-uta-min-late',
+      date: '2026-11-26T12:00:00Z',
+      category: 'hockey',
+      league: 'NHL',
+      team1: 'Utah Mammoth',
+      team2: 'Minnesota Wild'
+    })).resolves.toEqual([]);
+
+    const dec03 = Date.UTC(2026, 11, 3, 1, 0);
+    const searchDec03 = new TrexEventSearch({ baseUrl: BASE, fetchImpl, now: () => dec03 });
+    await expect(searchDec03.findForFixture({
+      id: 'nhl-uta-min-dec03',
+      date: '2026-12-03T01:00:00Z',
+      category: 'hockey',
+      league: 'NHL',
+      team1: 'Utah Mammoth',
+      team2: 'Minnesota Wild'
+    })).resolves.toEqual([]);
+  });
 });
 
 describe('TrexEventSearch', () => {
