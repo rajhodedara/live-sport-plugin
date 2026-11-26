@@ -1683,3 +1683,329 @@ describe('handleStream event-first regression', () => {
     expect(upstreamIds).toEqual(['flixlivetvtest:trex:1949763', 'trex:label']);
   });
 });
+
+describe('Kafka channel temporary failure preservation', () => {
+  const { mintVerifiedSources } = require('../src/streams');
+  const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:6.0,\nseg100.ts\n';
+
+  function createChannelMintHarness() {
+    process.env.KAFKA_ENABLED = 'true';
+    process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+
+    const l2Posts = [];
+    const l2Deletes = [];
+    const sharedResolver = {
+      available: () => true,
+      request: jest.fn(async (raw, opts = {}) => {
+        const url = new URL(raw);
+        if (url.searchParams.get('claim') === '1') {
+          return { ok: true, json: async () => ({ ok: true, ownerToken: '11111111-1111-4111-8111-111111111111' }) };
+        }
+        if (opts.method === 'POST') {
+          const body = JSON.parse(opts.body);
+          l2Posts.push(body);
+          return { ok: true, json: async () => ({ ok: true, revision: '22222222-2222-4222-8222-222222222222' }) };
+        }
+        if (opts.method === 'DELETE') {
+          l2Deletes.push(url.pathname);
+          return { ok: true, json: async () => ({ ok: true }) };
+        }
+        return { ok: true, json: async () => ({ status: 'miss' }) };
+      })
+    };
+
+    const cache = new StreamResolveCache({ sharedResolver });
+    const provider = new KafkaProvider({});
+    const src = {
+      source: 'kafka',
+      id: 'trex:1641637',
+      channelName: 'UK| SKY SPORTS F1',
+      country: 'UK',
+      matchMode: 'label'
+    };
+    const match = {
+      id: 'ch_xx_sky-sports-f1',
+      title: 'Sky Sports F1',
+      category: 'motorsport',
+      sources: [src]
+    };
+    const key = StreamResolveCache.resolveKey(src, match.id) + ':v3:label';
+    const m3u8Parser = new M3U8ParserService();
+    const streamScorer = new StreamScoringService();
+    const services = {
+      kafkaProvider: provider,
+      streamResolveCache: cache,
+      m3u8Parser,
+      streamScorer,
+      cacheService: { findMatch: () => match }
+    };
+    const originalResolve = container.resolve;
+    container.resolve = (n) => services[n] || originalResolve.call(container, n);
+
+    const mint = (opts = {}) => mintVerifiedSources(src, match, null, key, { skipSpeedProbe: true, ...opts });
+    return {
+      cache, provider, src, match, key, l2Posts, l2Deletes, mint,
+      restore: () => { container.resolve = originalResolve; }
+    };
+  }
+
+  let harness;
+  let origEnv;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-27T01:00:00Z'));
+    origEnv = {
+      KAFKA_ENABLED: process.env.KAFKA_ENABLED,
+      KAFKA_MANIFEST_URL: process.env.KAFKA_MANIFEST_URL,
+      KAFKA_EVENT_FIRST_ENABLED: process.env.KAFKA_EVENT_FIRST_ENABLED
+    };
+    safeFetch.mockReset();
+    streamingFetch.mockReset().mockResolvedValue({
+      ok: true,
+      status: 206,
+      headers: { get: () => 'video/mp2t' },
+      body: { getReader: () => { let sent = false; return { read: async () => (sent ? { done: true } : (sent = true, { done: false, value: new Uint8Array(64) })), cancel: async () => {}, releaseLock: () => {} }; } }
+    });
+    for (const name of ['log', 'warn', 'error']) jest.spyOn(console, name).mockImplementation(() => {});
+    harness = createChannelMintHarness();
+  });
+
+  afterEach(() => {
+    harness?.restore();
+    jest.clearAllTimers();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    for (const [k, v] of Object.entries(origEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  async function runWithTimers(fn) {
+    let settled = false;
+    const p = Promise.resolve().then(fn).finally(() => { settled = true; });
+    for (let i = 0; i < 100 && !settled; i += 1) {
+      await jest.advanceTimersToNextTimerAsync();
+    }
+    return p;
+  }
+
+  test('all-timeout on resolve defers locally for 2000ms without L2 failed publication and recovers after cooldown', async () => {
+    let resolveCalls = 0;
+    let shouldFail = true;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        resolveCalls += 1;
+        if (shouldFail) throw Object.assign(new Error('Request timed out'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/f1.m3u8' }] }) };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const first = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(first).toEqual([]);
+    expect(resolveCalls).toBe(2);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.cache.getRemainingTtl(harness.key)).toBe(2000);
+    expect(harness.l2Posts).toEqual([]);
+    expect(harness.l2Deletes.length).toBeGreaterThanOrEqual(1);
+
+    // Inside cooldown: no extra upstream call.
+    const duringCooldown = await harness.cache.getOrCreate(harness.key, harness.mint);
+    expect(duringCooldown).toEqual([]);
+    expect(resolveCalls).toBe(2);
+
+    // Advance past 2000ms cooldown and recover.
+    shouldFail = false;
+    await jest.advanceTimersByTimeAsync(2000);
+    const recovered = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(recovered).toHaveLength(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+    expect(resolveCalls).toBe(3);
+  });
+
+  test('all-503 on resolve defers locally for 2000ms without L2 failed publication and recovers after cooldown', async () => {
+    let resolveCalls = 0;
+    let shouldFail = true;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        resolveCalls += 1;
+        if (shouldFail) return { ok: false, status: 503 };
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/f1-503.m3u8' }] }) };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const first = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(first).toEqual([]);
+    expect(resolveCalls).toBe(2);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.cache.getRemainingTtl(harness.key)).toBe(2000);
+    expect(harness.l2Posts).toEqual([]);
+
+    const duringCooldown = await harness.cache.getOrCreate(harness.key, harness.mint);
+    expect(duringCooldown).toEqual([]);
+    expect(resolveCalls).toBe(2);
+
+    shouldFail = false;
+    await jest.advanceTimersByTimeAsync(2000);
+    const recovered = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(recovered).toHaveLength(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+  });
+
+  test('all-503 on playlist verification defers locally for 2000ms without L2 failed publication and recovers', async () => {
+    let playlistCalls = 0;
+    let playlistDown = true;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/f1-pl503.m3u8' }] }) };
+      }
+      playlistCalls += 1;
+      if (playlistDown) return { status: 503, text: async () => 'Service Unavailable' };
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const first = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(first).toEqual([]);
+    expect(playlistCalls).toBe(3);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.cache.getRemainingTtl(harness.key)).toBe(2000);
+    expect(harness.l2Posts).toEqual([]);
+
+    playlistDown = false;
+    await jest.advanceTimersByTimeAsync(2000);
+    const recovered = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(recovered).toHaveLength(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+  });
+
+  test.each([
+    ['429', () => ({ ok: false, status: 429 })],
+    ['408', () => ({ ok: false, status: 408 })],
+    ['ECONNRESET', () => { throw Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }); }]
+  ])('transient %s on resolve defers locally for 2000ms and recovers', async (_label, makeFailure) => {
+    let fail = true;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        if (fail) return makeFailure();
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/f1-rec.m3u8' }] }) };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const first = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(first).toEqual([]);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.cache.getRemainingTtl(harness.key)).toBe(2000);
+    expect(harness.l2Posts).toEqual([]);
+
+    fail = false;
+    await jest.advanceTimersByTimeAsync(2000);
+    const recovered = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(recovered).toHaveLength(1);
+  });
+
+  test('timeout-once then healthy playlist recovers within the same mint', async () => {
+    let playlistCalls = 0;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        return { ok: true, status: 200, json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/f1-once.m3u8' }] }) };
+      }
+      playlistCalls += 1;
+      if (playlistCalls === 1) throw Object.assign(new Error('Timed out'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const result = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(result).toHaveLength(1);
+    expect(playlistCalls).toBe(2);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+    expect(harness.cache.has(harness.key)).toBe(true);
+  });
+
+  test.each([
+    ['HTTP 200 empty streams', async () => ({ ok: true, status: 200, json: async () => ({ streams: [] }) })],
+    ['HTTP 403', async () => ({ ok: false, status: 403 })],
+    ['HTTP 404', async () => ({ ok: false, status: 404 })],
+    ['HTTP 410', async () => ({ ok: false, status: 410 })],
+    ['blocked-policy-only', async () => ({ ok: true, status: 200, json: async () => ({ streams: [{ name: 'Web', externalUrl: 'https://example.invalid/watch' }, { name: 'DASH', url: 'https://cdn.invalid/a.mpd' }] }) })]
+  ])('definitive %s retains negative cache and L2 failed publication', async (_label, handler) => {
+    safeFetch.mockImplementation(async (url) => {
+      if (String(url).includes('/stream/tv/')) return handler();
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const result = await runWithTimers(() => harness.cache.getOrCreate(harness.key, harness.mint));
+    expect(result).toEqual([]);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+    expect(harness.cache.entries.get(harness.key)?.status).toBe('failed');
+    expect(harness.l2Posts.some(p => p.status === 'failed')).toBe(true);
+  });
+
+  test('capacity error makes one immediate provider call only and defers locally', async () => {
+    let resolveCalls = 0;
+    safeFetch.mockImplementation(async () => {
+      resolveCalls += 1;
+      throw Object.assign(new Error('Native pool capacity'), {
+        code: 'ERR_OUTBOUND_CAPACITY',
+        statusCode: 503,
+        isFatal: true
+      });
+    });
+
+    const result = await harness.cache.getOrCreate(harness.key, harness.mint);
+    expect(result).toEqual([]);
+    expect(resolveCalls).toBe(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.cache.getRemainingTtl(harness.key)).toBe(2000);
+    expect(harness.l2Posts).toEqual([]);
+  });
+
+  test('guard rejection wrapper with statusCode 503 gets no transient retry and remains definitive', async () => {
+    let resolveCalls = 0;
+    safeFetch.mockImplementation(async () => {
+      resolveCalls += 1;
+      const blocked = Object.assign(new Error('Blocked private IP'), {
+        code: 'ERR_OUTBOUND_BLOCKED',
+        statusCode: 403,
+        isFatal: true
+      });
+      throw Object.assign(new Error('Upstream wrapper 503'), {
+        statusCode: 503,
+        cause: blocked
+      });
+    });
+
+    const result = await harness.cache.getOrCreate(harness.key, harness.mint);
+    expect(result).toEqual([]);
+    expect(resolveCalls).toBe(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(false);
+    expect(harness.cache.entries.get(harness.key)?.status).toBe('failed');
+    expect(harness.l2Posts.some(p => p.status === 'failed')).toBe(true);
+  });
+
+  test('user cancellation aborts immediately without retry, distinct from attempt timeout', async () => {
+    let resolveCalls = 0;
+    const ac = new AbortController();
+    safeFetch.mockImplementation(async () => {
+      resolveCalls += 1;
+      ac.abort(Object.assign(new Error('Client disconnected'), { name: 'AbortError' }));
+      throw Object.assign(new Error('Client disconnected'), { name: 'AbortError' });
+    });
+
+    const result = await harness.cache.getOrCreate(harness.key, () => harness.mint({ signal: ac.signal }));
+    expect(result).toEqual([]);
+    expect(resolveCalls).toBe(1);
+    expect(harness.cache.isDeferred(harness.key)).toBe(true);
+    expect(harness.l2Posts).toEqual([]);
+  });
+});
+

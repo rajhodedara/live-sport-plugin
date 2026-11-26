@@ -450,6 +450,23 @@ async function dispatchToProvider(sourceName, src, match, opts = {}) {
 const RESOLVE_ATTEMPTS = Number(process.env.RESOLVE_ATTEMPTS || 2);
 const RESOLVE_TOTAL_BUDGET_MS = Number(process.env.RESOLVE_TOTAL_BUDGET_MS || 12000);
 
+function hasHardStopCause(error) {
+  if (!error || typeof error !== 'object') return false;
+  try {
+    const seen = new Set();
+    for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
+      if (seen.has(current)) return false;
+      seen.add(current);
+      if (current.isFatal === true || current.name === 'AbortError' ||
+          current.code === 'ERR_OUTBOUND_BLOCKED' || current.code === 'ERR_OUTBOUND_CAPACITY' ||
+          /^ERR_NATIVE_(POOL|SLOT)_/.test(current.code || '')) {
+        return true;
+      }
+    }
+  } catch (_) { return false; }
+  return false;
+}
+
 // Resolve one source, retaining inconclusive local failures for the mint/cache layer.
 async function resolveSource(src, match, config, opts = {}) {
   if (isEventStreamSource(src)) {
@@ -469,7 +486,7 @@ async function resolveSource(src, match, config, opts = {}) {
       baseDelayMs: 300,
       maxDelayMs: 1200,
       deadlineAt,
-      shouldRetryError: error => !opts?.signal?.aborted && (isTransientError(error) || isTransientStatus(error?.statusCode)),
+      shouldRetryError: error => !opts?.signal?.aborted && !hasHardStopCause(error) && (isTransientError(error) || isTransientStatus(error?.statusCode)),
       label: `resolve:${sourceName}`,
       // An empty result is a real answer ("nothing on offer"), not a failure —
       // retrying it would spend the budget to be told the same thing twice.
@@ -487,7 +504,7 @@ async function resolveSource(src, match, config, opts = {}) {
     try { opts?.onResolveFailure?.(e); } catch (_) {}
     // Distinguish "the network flaked and kept flaking" from "this provider is
     // broken": the first is expected noise, the second wants a stack trace.
-    if (isTransientError(e) || isTransientStatus(e?.statusCode)) {
+    if (!hasHardStopCause(e) && (isTransientError(e) || isTransientStatus(e?.statusCode))) {
       console.warn(`[streams.js] ${sourceName}/${src.id} unreachable after ${RESOLVE_ATTEMPTS} attempt(s): ${e.message}`);
     } else {
       console.error(`[streams.js] ${sourceName}/${src.id} failed to resolve:`, e && e.stack ? e.stack : e);
@@ -950,17 +967,25 @@ function evaluatePlaylistLiveness({ prevSequence, prevObservedAt, currentSequenc
 
 function classifyKafkaFailureReason(error, status, phase = 'playlist') {
   if (error) {
-    if (error.name === 'AbortError') return { reason: 'cancelled', retryable: false };
+    try {
+      const seen = new Set();
+      for (let current = error, depth = 0; current && typeof current === 'object' && depth < 8; current = current.cause, depth++) {
+        if (seen.has(current)) break;
+        seen.add(current);
+        if (current.name === 'AbortError') return { reason: 'cancelled', retryable: false };
+        const isCapacity = current.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(current.code || '');
+        if (current.code === 'ERR_OUTBOUND_BLOCKED' || (current.isFatal === true && !isCapacity)) {
+          return { reason: 'definitive_rejection', retryable: false };
+        }
+        if (isCapacity) return { reason: 'capacity', retryable: true };
+      }
+    } catch (_) {
+      return { reason: 'definitive_rejection', retryable: false };
+    }
     if (typeof error.kafkaFailureReason === 'string' && error.kafkaFailureReason) {
       const r = error.kafkaFailureReason;
       const retryable = !['definitive_rejection', 'unsupported_policy', 'ended_or_frozen', 'playlist_invalid', 'empty_streams', 'cancelled', 'deadline_expired'].includes(r);
       return { reason: r, retryable };
-    }
-    if (error.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(error.code || '')) {
-      return { reason: 'capacity', retryable: true };
-    }
-    if (error.code === 'ERR_OUTBOUND_BLOCKED' || error.isFatal) {
-      return { reason: 'definitive_rejection', retryable: false };
     }
     const reasonHint = inconclusiveErrorReason(error);
     if (reasonHint === 'capacity') return { reason: 'capacity', retryable: true };
@@ -1188,11 +1213,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         const inconclusive = reportInconclusiveResolution(fetchErr, opts);
         const kind = inconclusive ? 'temporarily unavailable' : isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
+        let retryableVerifyFailure = false;
         if (opts.onVerifyFailure) {
           const classified = classifyKafkaFailureReason(fetchErr, null, 'playlist');
+          retryableVerifyFailure = Boolean(classified.retryable);
           opts.onVerifyFailure(classified.reason, classified.retryable);
         }
-        if (cacheKey && !inconclusive) resolveCache.noteFailure(cacheKey);
+        if (cacheKey && !inconclusive && !retryableVerifyFailure) resolveCache.noteFailure(cacheKey);
         return null;
       }
 
@@ -1686,10 +1713,38 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
       clearTimeout(timer);
     }
   }
-  const minted = await resolveSource(src, match, config, options);
+  const isKafkaChannel = src?.source === 'kafka';
+  const channelOpts = isKafkaChannel ? {
+    ...options,
+    preserveFailure: true,
+    onResolveFailure: (err) => {
+      try { opts?.onResolveFailure?.(err); } catch (_) {}
+      const classified = classifyKafkaFailureReason(err, null, 'resolve');
+      if (classified.retryable) {
+        const reason = classified.reason === 'capacity'
+          ? 'capacity'
+          : classified.reason === 'resolve_timeout'
+            ? 'timeout'
+            : 'unavailable';
+        options.onInconclusive(reason);
+      }
+    },
+    onVerifyFailure: (reason, retryable) => {
+      try { opts?.onVerifyFailure?.(reason, retryable); } catch (_) {}
+      if (retryable) {
+        const mapped = reason === 'capacity'
+          ? 'capacity'
+          : reason === 'playlist_timeout' || reason === 'segment_timeout'
+            ? 'timeout'
+            : 'unavailable';
+        options.onInconclusive(mapped);
+      }
+    }
+  } : options;
+  const minted = await resolveSource(src, match, config, channelOpts);
   const providerReason = inconclusiveStreamsReason(minted);
   if (providerReason) options.onInconclusive(providerReason);
-  const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, options);
+  const verified = await verifyStreams(minted, cacheKey, m3u8Parser, resolveCache, channelOpts);
   if (!inconclusiveReason || verified.some(row => row && row.url)) return verified;
   // A surviving web button does not establish that the direct feed is gone.
   // Keep that usable fallback, but retry the inconclusive direct work soon.
