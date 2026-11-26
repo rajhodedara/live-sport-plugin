@@ -992,4 +992,110 @@ describe('handleStream event-first regression', () => {
     expect(resolveCalls.filter((u) => u.includes('trex%3Afast'))).toHaveLength(1);
     expect(jest.getTimerCount()).toBe(0);
   });
+
+  test('ranks 1080p broadcaster ahead of 720p-probed 8K-titled event and below-group team feed on cold and warm responses', async () => {
+    const match = buildFixture({
+      id: 'quality-rank-ev',
+      sources: [
+        { source: 'kafka', id: 'trex:team', channelName: 'DALLAS MAVERICKS', country: 'USA', matchMode: 'team' },
+        { source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' }
+      ]
+    });
+    const channels = [
+      { id: 'trex:ev-8k', name: 'US (PPV 1) | Denver Nuggets vs Dallas Mavericks | 8K EXCLUSIVE' },
+      { id: 'trex:label', name: 'US| NBA TV HD' },
+      { id: 'trex:team', name: 'NBA TEAM| DALLAS MAVERICKS' }
+    ];
+    setupHarness({
+      match,
+      channels,
+      playlistHandler: async (target) => {
+        if (target.includes('trex:label')) {
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4500000,RESOLUTION=1920x1080\n1080p.m3u8\n'
+          };
+        }
+        if (target.includes('trex:team')) {
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=9000000,RESOLUTION=3840x2160\n2160p.m3u8\n'
+          };
+        }
+        if (target.includes('trex:ev-8k')) {
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2500000,RESOLUTION=1280x720\n720p.m3u8\n'
+          };
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(cold.streams.map((s) => `${s._kafkaMatchMode}:${s.title.split('\n')[0].includes('Kafka · Event') ? 'Event' : 'Channel'}`)).toEqual([
+      'label:Channel',
+      'event:Event',
+      'team:Channel'
+    ]);
+    expect(cold.streams[0].title).toContain('Kafka · Channel');
+    expect(cold.streams[1].title).toContain('Kafka · Event');
+
+    safeFetch.mockClear();
+    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(warm.streams.map((s) => `${s._kafkaMatchMode}:${s.title.split('\n')[0].includes('Kafka · Event') ? 'Event' : 'Channel'}`)).toEqual([
+      'label:Channel',
+      'event:Event',
+      'team:Channel'
+    ]);
+    expect(safeFetch).not.toHaveBeenCalled();
+  });
+
+  test('ranks bitrate-probed 1080p broadcaster ahead of bitrate-probed 720p 8K-claimed event on cold and warm responses', async () => {
+    const match = buildFixture({
+      id: 'bitrate-rank-ev',
+      sources: [
+        { source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' }
+      ]
+    });
+    const channels = [
+      { id: 'trex:ev-8k', name: 'US (PPV 1) | Denver Nuggets vs Dallas Mavericks | 8K EXCLUSIVE' },
+      { id: 'trex:label', name: 'US| NBA TV HD' }
+    ];
+    setupHarness({
+      match,
+      channels,
+      playlistHandler: async (target) => {
+        const tag = target.includes('trex:label') ? 'chan1080' : 'ev720';
+        return {
+          status: 200,
+          text: async () => `#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:12\n#EXTINF:10.0,\nhttps://cdn.invalid/seg-${tag}.ts\n`
+        };
+      }
+    });
+    global.fetch.mockImplementation(async (segUrl) => {
+      const is1080 = String(segUrl).includes('seg-chan1080');
+      const bytes = is1080 ? 5625000 : 3125000; // 4.5 Mbps (1080p) vs 2.5 Mbps (720p) over 10s
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: (h) => (String(h).toLowerCase() === 'content-length' ? String(bytes) : null) },
+        body: { cancel: async () => {} }
+      };
+    });
+
+    const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(cold.streams.map(s => s._kafkaMatchMode)).toEqual(['label', 'event']);
+    expect(cold.streams[0].title).toContain('Kafka · Channel');
+    expect(cold.streams[0].title).toContain('1080p · 4.5 Mbps');
+    expect(cold.streams[1].title).toContain('Kafka · Event');
+    expect(cold.streams[1].title).toContain('720p · 2.5 Mbps');
+
+    safeFetch.mockClear();
+    global.fetch.mockClear();
+    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(warm.streams.map(s => s._kafkaMatchMode)).toEqual(['label', 'event']);
+    expect(safeFetch).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });

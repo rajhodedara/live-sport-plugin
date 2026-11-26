@@ -219,6 +219,114 @@ describe('Kafka event-first stream ordering', () => {
   });
 });
 
+describe('Mixed Kafka fixture quality ranking', () => {
+  const prevFlag = process.env.KAFKA_EVENT_FIRST_ENABLED;
+  afterEach(() => {
+    if (prevFlag === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED;
+    else process.env.KAFKA_EVENT_FIRST_ENABLED = prevFlag;
+  });
+
+  const { hasExplicitLanguage } = require('../src/services/LanguagePriorityService');
+
+  it('ranks a same-language 1080p broadcaster ahead of a 720p event in mixed mode while preserving legacy event-first default', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const channel1080 = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'label',
+      language: 'English',
+      _kafkaVerifiedHeight: 1080,
+      score: 60
+    });
+    const event720 = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'event',
+      language: 'English',
+      _kafkaVerifiedHeight: 720,
+      score: 95
+    });
+
+    expect(compareStreams(channel1080, event720, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(event720, channel1080, [], false)).toBeLessThan(0);
+  });
+
+  it('prefers event over broadcaster at the same verified quality and keeps team/untagged below both', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const event1080 = direct({ _source: 'kafka', _kafkaMatchMode: 'event', language: 'English', _kafkaVerifiedHeight: 1080, score: 50 });
+    const channel1080 = direct({ _source: 'kafka', _kafkaMatchMode: 'label', language: 'English', _kafkaVerifiedHeight: 1080, score: 90 });
+    const team4k = direct({ _source: 'kafka', _kafkaMatchMode: 'team', language: 'English', _kafkaVerifiedHeight: 2160, score: 99 });
+    const untagged4k = direct({ _source: 'kafka', language: 'English', _kafkaVerifiedHeight: 2160, score: 99 });
+
+    expect(compareStreams(event1080, channel1080, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(event1080, team4k, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(channel1080, team4k, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(channel1080, untagged4k, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+  });
+
+  it('ignores claimed 8K title/resolution tags without measured evidence and uses bitrate fallback + secondary bps', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const claimed8kEvent = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'event',
+      title: 'Live | Team A vs Team B | 8K EXCLUSIVE',
+      resolution: '2160p',
+      quality: '8K',
+      language: 'English',
+      _kafkaMeasuredBitrateBps: 2500000 // 720p estimate
+    });
+    const channel1080 = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'label',
+      title: 'US| NBA TV HD',
+      resolution: 'HD',
+      language: 'English',
+      _kafkaVerifiedHeight: 1080
+    });
+    const unverified8kEvent = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'event',
+      title: 'Live | Team A vs Team B | 8K EXCLUSIVE',
+      resolution: '2160p',
+      language: 'English'
+    });
+    const channelHigherBps = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'label',
+      language: 'English',
+      _kafkaMeasuredBitrateBps: 6000000 // 1080p tier, higher bps
+    });
+    const eventLowerBps = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'event',
+      language: 'English',
+      _kafkaMeasuredBitrateBps: 4200000 // 1080p tier, lower bps
+    });
+
+    expect(compareStreams(channel1080, claimed8kEvent, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(channel1080, unverified8kEvent, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+    expect(compareStreams(channelHigherBps, eventLowerBps, [], false, { mixedKafkaFixture: true })).toBeLessThan(0);
+  });
+
+  it('preserves explicit language preference over a higher quality channel in a less preferred language', () => {
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    const config = { languages: 'Spanish' };
+    const priorities = parseLanguagePriority(config);
+    const spanish720 = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'label',
+      language: 'Spanish',
+      _kafkaVerifiedHeight: 720
+    });
+    const german1080 = direct({
+      _source: 'kafka',
+      _kafkaMatchMode: 'label',
+      language: 'German',
+      _kafkaVerifiedHeight: 1080
+    });
+
+    expect(compareStreams(spanish720, german1080, priorities, hasExplicitLanguage(config), { mixedKafkaFixture: true })).toBeLessThan(0);
+  });
+});
+
 describe('helpers', () => {
   it('canonicalLanguage folds names, codes and accents', () => {
     expect(canonicalLanguage('HI')).toBe('hindi');

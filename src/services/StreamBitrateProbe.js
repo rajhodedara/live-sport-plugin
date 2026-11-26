@@ -91,6 +91,7 @@ async function probeBitrate({ playlistText, playlistUrl, fetchImpl = fetch, time
     }
     return {
       bitrate: formatBitrate(bitsPerSecond),
+      bitrateBps: Math.round(bitsPerSecond),
       resolution: resolutionFromBitrate(bitsPerSecond)
     };
   } catch (_) {

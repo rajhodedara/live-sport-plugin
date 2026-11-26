@@ -77,6 +77,12 @@ class StreamEntity {
     if (data._kafkaEventScore !== undefined) {
       this._kafkaEventScore = data._kafkaEventScore;
     }
+    if (data._kafkaVerifiedHeight !== undefined) {
+      this._kafkaVerifiedHeight = data._kafkaVerifiedHeight;
+    }
+    if (data._kafkaMeasuredBitrateBps !== undefined) {
+      this._kafkaMeasuredBitrateBps = data._kafkaMeasuredBitrateBps;
+    }
     if (data._isChannelFallback !== undefined) {
       this._isChannelFallback = data._isChannelFallback;
     }

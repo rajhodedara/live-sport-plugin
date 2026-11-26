@@ -32,6 +32,8 @@
 /** Canonical key for the mandatory top language. */
 const ENGLISH = 'english';
 
+const { resolutionFromBitrate } = require('./StreamBitrateProbe');
+
 /** Stream names handleStream assigns; a direct stream outranks a web fallback. */
 const DIRECT_STREAM_NAME = '⚡ Direct Stream';
 
@@ -330,6 +332,25 @@ function kafkaPlaybackRank(row) {
   return row._kafkaMatchMode === 'team' ? 2 : 1;
 }
 
+function kafkaConfidenceGroup(row) {
+  if (row?._kafkaMatchMode === 'event' || row?._kafkaMatchMode === 'label') return 0;
+  return 1;
+}
+
+function kafkaQualityHeight(row) {
+  if (!row) return 0;
+  if (Number.isFinite(row._kafkaVerifiedHeight) && row._kafkaVerifiedHeight > 0) {
+    return row._kafkaVerifiedHeight;
+  }
+  if (Number.isFinite(row._kafkaMeasuredBitrateBps) && row._kafkaMeasuredBitrateBps > 0) {
+    const tier = resolutionFromBitrate(row._kafkaMeasuredBitrateBps);
+    if (tier === '1080p60' || tier === '1080p') return 1080;
+    if (tier === '720p') return 720;
+    if (tier === 'SD') return 480;
+  }
+  return 0;
+}
+
 function hasExplicitLanguage(config) {
   if (parseLanguagePriority(config).length > 0) return true;
   const raw = typeof config === 'string'
@@ -339,23 +360,35 @@ function hasExplicitLanguage(config) {
   return tokens.some(token => isEnglish(token));
 }
 
-function compareStreams(a, b, priorities, explicitLanguage = Boolean(priorities?.length)) {
+function compareStreams(a, b, priorities, explicitLanguage = Boolean(priorities?.length), { mixedKafkaFixture = false } = {}) {
   try {
     const aIsDirect = a && a.name === DIRECT_STREAM_NAME ? 1 : 0;
     const bIsDirect = b && b.name === DIRECT_STREAM_NAME ? 1 : 0;
     if (aIsDirect !== bIsDirect) return bIsDirect - aIsDirect;
 
-    const eventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true';
-    const kafkaDelta = eventFirst ? kafkaPlaybackRank(a) - kafkaPlaybackRank(b) : 0;
-    if (!explicitLanguage && kafkaDelta) return kafkaDelta;
-    const rankDelta = languageRank(a && a.language, priorities) - languageRank(b && b.language, priorities);
-    if (rankDelta) return rankDelta;
-    if (kafkaDelta) return kafkaDelta;
-
-    // Within each language: Kafka (Priority 1) streams are placed at the top of the list
     const aIsKafka = Boolean(a && (a._source === 'kafka' || a.sourceName === 'kafka')) ? 1 : 0;
     const bIsKafka = Boolean(b && (b._source === 'kafka' || b.sourceName === 'kafka')) ? 1 : 0;
-    if (aIsKafka !== bIsKafka) return bIsKafka - aIsKafka;
+    const rankDelta = languageRank(a && a.language, priorities) - languageRank(b && b.language, priorities);
+
+    if (mixedKafkaFixture) {
+      if (!explicitLanguage && aIsKafka !== bIsKafka) return bIsKafka - aIsKafka;
+      if (rankDelta) return rankDelta;
+      if (aIsKafka !== bIsKafka) return bIsKafka - aIsKafka;
+    } else {
+      const eventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true';
+      const kafkaDelta = eventFirst ? kafkaPlaybackRank(a) - kafkaPlaybackRank(b) : 0;
+      if (!explicitLanguage && kafkaDelta) return kafkaDelta;
+      if (rankDelta) return rankDelta;
+      if (kafkaDelta) return kafkaDelta;
+
+      // Within each language: Kafka (Priority 1) streams are placed at the top of the list
+      if (aIsKafka !== bIsKafka) return bIsKafka - aIsKafka;
+    }
+
+    if (mixedKafkaFixture && aIsKafka && bIsKafka) {
+      const confidenceDelta = kafkaConfidenceGroup(a) - kafkaConfidenceGroup(b);
+      if (confidenceDelta) return confidenceDelta;
+    }
 
     // Within each language: prefer standard feed, backup last
     const aIsBackup = Boolean(a && (a.isBackup || a._isBackup || (a.title && /\bbackup\b/i.test(a.title))));
@@ -375,9 +408,22 @@ function compareStreams(a, b, priorities, explicitLanguage = Boolean(priorities?
     const condensedDelta = (aIsCondensed ? 1 : 0) - (bIsCondensed ? 1 : 0);
     if (condensedDelta) return condensedDelta;
 
-    // Prefer highest quality / resolution
-    const qualityDelta = getResolutionRank(b) - getResolutionRank(a);
-    if (qualityDelta) return qualityDelta;
+    if (mixedKafkaFixture && aIsKafka && bIsKafka) {
+      const heightDelta = kafkaQualityHeight(b) - kafkaQualityHeight(a);
+      if (heightDelta) return heightDelta;
+
+      const aBps = Number.isFinite(a?._kafkaMeasuredBitrateBps) && a._kafkaMeasuredBitrateBps > 0 ? a._kafkaMeasuredBitrateBps : 0;
+      const bBps = Number.isFinite(b?._kafkaMeasuredBitrateBps) && b._kafkaMeasuredBitrateBps > 0 ? b._kafkaMeasuredBitrateBps : 0;
+      if (aBps > 0 && bBps > 0 && bBps !== aBps) return bBps - aBps;
+
+      const aIsEvent = a?._kafkaMatchMode === 'event' ? 1 : 0;
+      const bIsEvent = b?._kafkaMatchMode === 'event' ? 1 : 0;
+      if (aIsEvent !== bIsEvent) return bIsEvent - aIsEvent;
+    } else {
+      // Prefer highest quality / resolution
+      const qualityDelta = getResolutionRank(b) - getResolutionRank(a);
+      if (qualityDelta) return qualityDelta;
+    }
 
     // Cluster reliability tier for Vavoo feeds:
     // Only compare cluster reliability when BOTH feeds are Vavoo streams.

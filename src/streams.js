@@ -1123,6 +1123,13 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           // never be labelled. A master playlist's declared RESOLUTION/BANDWIDTH
           // still overrides everything, exactly as before.
           applyParsedPlaylistQuality(s, parsedQuality);
+          if (s._source === 'kafka' || s.sourceName === 'kafka') {
+            const dimMatch = /(?:^|\D)\d+x(\d+)(?:\D|$)/i.exec(String(parsedQuality.resolution || ''));
+            const parsedHeight = dimMatch ? Number(dimMatch[1]) : Number(parsedQuality.height);
+            if (Number.isFinite(parsedHeight) && parsedHeight > 0) {
+              s._kafkaVerifiedHeight = parsedHeight;
+            }
+          }
         }
 
         if (ENABLE_SPEED_PROBE && !opts.skipSpeedProbe && !bodyTruncated) {
@@ -1140,6 +1147,9 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           });
           if (measured.bitrate) s.bitrate = measured.bitrate;
           if (measured.resolution && (!s.resolution || s.resolution === 'HD')) s.resolution = measured.resolution;
+          if ((s._source === 'kafka' || s.sourceName === 'kafka') && Number.isFinite(measured.bitrateBps) && measured.bitrateBps > 0) {
+            s._kafkaMeasuredBitrateBps = measured.bitrateBps;
+          }
         }
       }
 
@@ -2269,7 +2279,7 @@ async function handleStream(type, id, config) {
   // LanguagePriorityService for the ranking and the alias handling.
   const languagePriorities = parseLanguagePriority(config);
 
-  streams.sort((a, b) => compareStreams(a, b, languagePriorities, hasExplicitLanguage(config)));
+  streams.sort((a, b) => compareStreams(a, b, languagePriorities, hasExplicitLanguage(config), { mixedKafkaFixture }));
 
   // Pinned donation link: unshifted to index 0 so it appears at the top of every match
   const donationUrl = process.env.DONATION_URL || '/donate';
