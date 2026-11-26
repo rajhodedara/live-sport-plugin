@@ -7,7 +7,14 @@ const fallbackListeners = new Map();
 
 const DEFAULT_JOB_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_UPSTREAM_MIN_LOCAL = 6;
-const PROBE_WORKERS = 2;
+const DEFAULT_PROBE_WORKERS = 2;
+
+function getProbeConcurrency(provider) {
+  const value = typeof provider?.getEventProbeConcurrency === 'function'
+    ? provider.getEventProbeConcurrency()
+    : DEFAULT_PROBE_WORKERS;
+  return Number.isInteger(value) && value >= 1 && value <= 4 ? value : DEFAULT_PROBE_WORKERS;
+}
 
 function toPositiveInt(value, fallback) {
   const n = Number(value);
@@ -199,13 +206,14 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
       }
     };
 
-    await Promise.all(Array.from({ length: PROBE_WORKERS }, worker));
+    const probeWorkers = getProbeConcurrency(provider);
+    await Promise.all(Array.from({ length: probeWorkers }, worker));
 
     // Re-check fallback upstream once all initial workers drain if nothing verified locally.
     if (!job.upstreamTried && job.verifiedByUrl.size === 0 && Date.now() < job.workDeadlineAt && job.attemptedIds.size < maxCandidates) {
       await ensureUpstream();
       if (job.nextIndex < job.queue.length) {
-        await Promise.all(Array.from({ length: PROBE_WORKERS }, worker));
+        await Promise.all(Array.from({ length: probeWorkers }, worker));
       }
     }
 

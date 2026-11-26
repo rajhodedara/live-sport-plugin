@@ -212,6 +212,7 @@ describe('handleStream event-first regression', () => {
     'KAFKA_ENABLED',
     'KAFKA_MANIFEST_URL',
     'KAFKA_EVENT_SEARCH_ENABLED',
+    'KAFKA_EVENT_PROBE_CONCURRENCY',
     'KAFKA_LIVENESS_GUARD_ENABLED',
     'DONATION_URL',
     'STREAM_SOFT_DEADLINE_MS',
@@ -694,58 +695,92 @@ describe('handleStream event-first regression', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
-  test('verifies more than six candidates, keeps multiple URLs per candidate, caps concurrent probes at 2 across 20 viewers, and survives missing metrics', async () => {
-    const match = buildFixture({ sources: [] });
-    const channels = Array.from({ length: 9 }, (_, idx) => ({
-      id: `trex:ev${idx + 1}`,
-      name: `Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV ${idx + 1}`
-    }));
+  test('verifies candidates across fixtures with configured concurrency 4, keeps multiple URLs per candidate, dedupes viewers, and releases slots on errors', async () => {
+    process.env.KAFKA_EVENT_PROBE_CONCURRENCY = '4';
+    const matches = [
+      buildFixture({ id: 'multi-1', title: 'Denver Nuggets vs Dallas Mavericks', team1: { name: 'Denver Nuggets' }, team2: { name: 'Dallas Mavericks' }, sources: [] }),
+      buildFixture({ id: 'multi-2', title: 'Boston Celtics vs Miami Heat', team1: { name: 'Boston Celtics' }, team2: { name: 'Miami Heat' }, sources: [] }),
+      buildFixture({ id: 'multi-3', title: 'Los Angeles Lakers vs Golden State Warriors', team1: { name: 'Los Angeles Lakers' }, team2: { name: 'Golden State Warriors' }, sources: [] })
+    ];
+    const fixtureCandidates = new Map([
+      ['multi-1', [
+        { id: 'trex:m1-err', name: 'Live | Nuggets vs Mavericks | US: PPV 1' },
+        { id: 'trex:m1-seq0', name: 'Live | Nuggets vs Mavericks | US: PPV 2' },
+        { id: 'trex:m1-ok', name: 'Live | Nuggets vs Mavericks | US: PPV 3' },
+        { id: 'trex:m1-multi', name: 'Live | Nuggets vs Mavericks | US: PPV 4' }
+      ]],
+      ['multi-2', [
+        { id: 'trex:m2-dup', name: 'Live | Celtics vs Heat | US: PPV 5' },
+        { id: 'trex:m2-ck', name: 'Live | Celtics vs Heat | US: PPV 6' },
+        { id: 'trex:m2-ok1', name: 'Live | Celtics vs Heat | US: PPV 7' },
+        { id: 'trex:m2-ok2', name: 'Live | Celtics vs Heat | US: PPV 8' }
+      ]],
+      ['multi-3', [
+        { id: 'trex:m3-ok1', name: 'Live | Lakers vs Warriors | US: PPV 9' },
+        { id: 'trex:m3-ok2', name: 'Live | Lakers vs Warriors | US: PPV 10' },
+        { id: 'trex:m3-ok3', name: 'Live | Lakers vs Warriors | US: PPV 11' }
+      ]]
+    ]);
+    const uniqueCandidateCount = [...fixtureCandidates.values()].reduce((sum, list) => sum + list.length, 0);
 
     let activeProbes = 0;
-    let peakProbes = 0;
-    const probedIds = [];
-    setupHarness({
-      match,
-      channels,
-      healthService: undefined // missing providerHealthService in container!
+    let peakActive = 0;
+    let candidateAttempts = 0;
+    const kafkaProvider = new KafkaProvider({
+      catalogStore: {
+        isReady: () => true,
+        findEvents: (m) => fixtureCandidates.get(m.id) || [],
+        findChannel: () => [],
+        findTeam: () => []
+      },
+      eventSearch: { cachedFor: () => [], findForFixture: async () => [], isInWindow: () => true }
     });
+    const resolveCache = new StreamResolveCache({
+      sharedResolver: { available: () => false, request: () => { throw new Error('unexpected L2'); } }
+    });
+    const services = {
+      cacheService: { findMatch: (id) => matches.find(m => m.id === id) || null },
+      kafkaProvider,
+      streamResolveCache: resolveCache,
+      m3u8Parser: new M3U8ParserService(),
+      streamScorer: new StreamScoringService()
+    };
+    container.resolve = jest.fn((name) => services[name]);
 
     safeFetch.mockImplementation(async (url) => {
       const target = String(url);
       if (target.includes('/stream/tv/')) {
         const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
-        probedIds.push(id);
+        candidateAttempts += 1;
         activeProbes += 1;
-        peakProbes = Math.max(peakProbes, activeProbes);
-        await new Promise((r) => setTimeout(r, 10));
+        peakActive = Math.max(peakActive, activeProbes);
+        await new Promise((r) => setTimeout(r, 15));
         activeProbes -= 1;
-        if (id === 'trex:ev1') {
-          return { ok: false, status: 502, statusText: 'Bad Gateway' };
-        }
-        if (id === 'trex:ev4') {
+        if (id === 'trex:m1-err') return { ok: false, status: 502, statusText: 'Bad Gateway' };
+        if (id === 'trex:m1-multi') {
           return {
             ok: true,
             status: 200,
             json: async () => ({
               streams: [
-                { name: '▶ Watch Live', title: `${id} mirror A`, url: 'https://cdn.invalid/ev4-a.m3u8' },
-                { name: '▶ Watch Live', title: `${id} mirror B`, url: 'https://cdn.invalid/ev4-b.m3u8' }
+                { name: '▶ Watch Live', title: `${id} mirror A`, url: 'https://cdn.invalid/m1-a.m3u8' },
+                { name: '▶ Watch Live', title: `${id} mirror B`, url: 'https://cdn.invalid/m1-b.m3u8' }
               ]
             })
           };
         }
-        if (id === 'trex:ev5') {
+        if (id === 'trex:m2-dup') {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/ev4-a.m3u8' }] })
+            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/trex:m2-ok1.m3u8' }] })
           };
         }
-        if (id === 'trex:ev7') {
+        if (id === 'trex:m2-ck') {
           return {
             ok: true,
             status: 200,
-            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/ev7.mpd', clearkey: { k: 'v' } }] })
+            json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: 'https://cdn.invalid/m2.mpd', clearkey: { k: 'v' } }] })
           };
         }
         return {
@@ -754,29 +789,41 @@ describe('handleStream event-first regression', () => {
           json: async () => ({ streams: [{ name: '▶ Watch Live', title: id, url: `https://cdn.invalid/${id}.m3u8` }] })
         };
       }
-      if (target.includes('ev2.m3u8')) {
+      if (target.includes('m1-seq0.m3u8')) {
         return { status: 200, text: async () => ENDED_SEQ0_PLAYLIST };
       }
       return { status: 200, text: async () => LIVE_PLAYLIST };
     });
 
-    const responses = await runWithTimers(() =>
-      Promise.all(Array.from({ length: 20 }, () => handleStream('tv', `nuvio_sport_${match.id}`, {})))
-    );
-
-    expect(peakProbes).toBe(2);
-    expect(new Set(probedIds).size).toBe(9);
-    // Surviving distinct verified URLs: ev3, ev4-a, ev4-b, ev6, ev8, ev9 (ev1=502, ev2=seq0, ev5=dup ev4-a, ev7=blocked ClearKey)
-    const urls = responses[0].streams.map((s) => s.url);
-    expect(urls).toHaveLength(6);
-    for (const expected of ['ev3.m3u8', 'ev4-a.m3u8', 'ev4-b.m3u8', 'ev6.m3u8', 'ev8.m3u8', 'ev9.m3u8']) {
-      expect(urls.some((u) => u.includes(expected))).toBe(true);
+    const viewerRequests = [];
+    for (let i = 0; i < 21; i += 1) {
+      const m = matches[i % matches.length];
+      viewerRequests.push(handleStream('tv', `nuvio_sport_${m.id}`, {}));
     }
-    expect(responses.every((r) => r.streams.length === 6)).toBe(true);
+    const responses = await runWithTimers(() => Promise.all(viewerRequests));
+
+    expect(peakActive).toBe(4);
+    expect(candidateAttempts).toBe(uniqueCandidateCount);
+
+    const m1Urls = responses[0].streams.map(s => s.url);
+    expect(m1Urls).toHaveLength(3);
+    for (const u of ['trex%3Am1-ok.m3u8', 'm1-a.m3u8', 'm1-b.m3u8']) {
+      expect(m1Urls.some(url => url.includes(u))).toBe(true);
+    }
+    const m2Urls = responses[1].streams.map(s => s.url);
+    expect(m2Urls).toHaveLength(2);
+    for (const u of ['trex%3Am2-ok1.m3u8', 'trex%3Am2-ok2.m3u8']) {
+      expect(m2Urls.some(url => url.includes(u))).toBe(true);
+    }
+    const m3Urls = responses[2].streams.map(s => s.url);
+    expect(m3Urls).toHaveLength(3);
+    for (const u of ['trex%3Am3-ok1.m3u8', 'trex%3Am3-ok2.m3u8', 'trex%3Am3-ok3.m3u8']) {
+      expect(m3Urls.some(url => url.includes(u))).toBe(true);
+    }
 
     safeFetch.mockClear();
-    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
-    expect(warm.streams).toHaveLength(6);
+    const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${matches[0].id}`, {}));
+    expect(warm.streams).toHaveLength(3);
     expect(safeFetch).not.toHaveBeenCalled();
   });
 

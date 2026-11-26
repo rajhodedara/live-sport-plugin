@@ -355,24 +355,54 @@ describe('KafkaProvider coverage sources', () => {
       expect(eventSearch.findForFixture).not.toHaveBeenCalled();
     });
 
-    test('shares two probe slots, removes canceled waiters and releases slots on exceptions', async () => {
+    test.each([
+      ['unset', undefined, 2],
+      ['2', '2', 2],
+      ['3', '3', 3],
+      ['4', '4', 4]
+    ])('shares %s probe slots, removes canceled waiters and releases slots on exceptions', async (_label, envValue, expectedLimit) => {
+      if (envValue === undefined) delete process.env.KAFKA_EVENT_PROBE_CONCURRENCY;
+      else process.env.KAFKA_EVENT_PROBE_CONCURRENCY = envValue;
+
       const provider = new KafkaProvider();
+      expect(provider.getEventProbeConcurrency()).toBe(expectedLimit);
+
       const release = [];
-      const hold = () => new Promise(done => release.push(done));
-      const first = provider.withEventProbe(hold);
-      const second = provider.withEventProbe(hold);
+      let active = 0;
+      let peakActive = 0;
+      const hold = () => new Promise(done => {
+        active += 1;
+        peakActive = Math.max(peakActive, active);
+        release.push(() => {
+          active -= 1;
+          done();
+        });
+      });
+
+      const held = Array.from({ length: expectedLimit }, () => provider.withEventProbe(hold));
+      await Promise.resolve();
+      expect(peakActive).toBe(expectedLimit);
+
       const controller = new AbortController();
       const unused = jest.fn();
       const canceled = provider.withEventProbe(unused, controller.signal);
-      const third = provider.withEventProbe(() => { throw new Error('upstream down'); });
+      const queuedAfter = provider.withEventProbe(() => { throw new Error('upstream down'); });
       controller.abort();
       await expect(canceled).rejects.toMatchObject({ name: 'AbortError' });
       expect(unused).not.toHaveBeenCalled();
+
       release[0]();
-      await expect(third).rejects.toThrow('upstream down');
+      await expect(queuedAfter).rejects.toThrow('upstream down');
       expect(await provider.withEventProbe(() => 'available')).toBe('available');
-      release[1]();
-      await Promise.all([first, second]);
+
+      for (let i = 1; i < release.length; i += 1) release[i]();
+      await Promise.all(held);
+    });
+
+    test.each(['', '   ', '0', '-1', '5', '2.5', 'abc'])('falls back to 2 probe slots when KAFKA_EVENT_PROBE_CONCURRENCY is %j', (badValue) => {
+      process.env.KAFKA_EVENT_PROBE_CONCURRENCY = badValue;
+      const provider = new KafkaProvider();
+      expect(provider.getEventProbeConcurrency()).toBe(2);
     });
   });
 });

@@ -17,6 +17,20 @@ const DEFAULT_MAX_PAGES = 10;
 const DEFAULT_MAX_ITEMS = 1000;
 const DEFAULT_MAX_CATALOGS = 50;
 const DEFAULT_INDEX_TTL_MS = 900000; // 15 minutes
+const DEFAULT_EVENT_PROBE_CONCURRENCY = 2;
+const MIN_EVENT_PROBE_CONCURRENCY = 1;
+const MAX_EVENT_PROBE_CONCURRENCY = 4;
+
+function parseEventProbeConcurrency(raw) {
+  if (raw === undefined || raw === null) return DEFAULT_EVENT_PROBE_CONCURRENCY;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return DEFAULT_EVENT_PROBE_CONCURRENCY;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < MIN_EVENT_PROBE_CONCURRENCY || n > MAX_EVENT_PROBE_CONCURRENCY) {
+    return DEFAULT_EVENT_PROBE_CONCURRENCY;
+  }
+  return n;
+}
 
 const SPORTS_CATALOG_PATTERN = /\b(?:sport|sports|event|events|ppv|football|soccer|cricket|basketball|baseball|american football|nfl|nba|nhl|hockey|tennis|motorsport|motor racing|formula 1|f1|mma|ufc|boxing|wrestling|rugby|golf|volleyball|handball|cycling|athletics|darts|snooker|aussie rules|gaelic football|hurling|netball|badminton|table tennis|swimming|diving|gymnastics|skiing|biathlon|skating|futsal|beach soccer|water polo|lacrosse|field hockey|horse racing|triathlon|esports|chess|espn|dazn|flosports|flo sports|bein|tsn)\b/i;
 
@@ -41,6 +55,7 @@ class KafkaProvider extends BaseProvider {
 
     this.catalogStore = (opts && opts.catalogStore) || null;
     this.eventSearch = (opts && opts.eventSearch) || null;
+    this._eventProbeConcurrency = parseEventProbeConcurrency(process.env.KAFKA_EVENT_PROBE_CONCURRENCY);
     this._activeEventProbes = 0;
     this._eventProbeWaiters = new Set();
   }
@@ -433,10 +448,14 @@ class KafkaProvider extends BaseProvider {
     return this._rankEvents(candidates);
   }
 
+  getEventProbeConcurrency() {
+    return this._eventProbeConcurrency;
+  }
+
   /** Transfers an occupied slot directly to the next live waiter. */
   async withEventProbe(probe, signal) {
     signal?.throwIfAborted();
-    if (this._activeEventProbes < 2) {
+    if (this._activeEventProbes < this.getEventProbeConcurrency()) {
       this._activeEventProbes++;
     } else {
       await new Promise((resolve, reject) => {
