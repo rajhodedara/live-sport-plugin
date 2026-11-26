@@ -3,9 +3,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const { fetchCatalogRows, run } = require('../scripts/refresh_trex_catalog');
-const { openDatabase, readMeta } = require('../src/services/TrexCatalogDb');
+const { openDatabase, readMeta, writeCatalogFile } = require('../src/services/TrexCatalogDb');
 
 const BASE = 'https://upstream.invalid/u/secret';
 
@@ -91,5 +92,57 @@ describe('refresh_trex_catalog', () => {
     expect(readMeta(db).generated_at).toBe(before);
     expect(readMeta(db).row_count).toBe('3');
     db.close();
+  });
+
+  test('--reindex-events rebuilds event_pairs on disk without upstream fetches and preserves non-event data', async () => {
+    const dbPath = path.join(dir, 'existing.sqlite');
+    writeCatalogFile(dbPath, [
+      { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)', type: 'tv' },
+      { id: 'trex:willow', name: 'CA| WILLOW CRICKET HD', type: 'tv' }
+    ], { generatedAt: '2026-11-25T10:00:00.000Z', source: 'live' });
+
+    const setupDb = openDatabase(dbPath);
+    setupDb.exec('DELETE FROM event_pairs');
+    setupDb.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)')
+      .run('minnesota wild nov 25 7 30pm et|utah mammoth', '1949763', 50);
+    setupDb.prepare('INSERT INTO channel_health (channel_id, status, checked_at, frozen) VALUES (?, ?, ?, ?)')
+      .run('trex:willow', 'ok', '2026-11-25T11:00:00.000Z', 0);
+    setupDb.close();
+
+    const fetchImpl = jest.fn(() => { throw new Error('unexpected upstream fetch'); });
+    expect(await run(['--reindex-events', '--db', dbPath, '--quiet'], { fetchImpl })).toBe(0);
+    expect(fetchImpl).not.toHaveBeenCalled();
+
+    const checkDb = openDatabase(dbPath, { readOnly: true });
+    expect(checkDb.prepare('SELECT pair_key FROM event_pairs').all().map(r => r.pair_key)).toEqual(['minnesota wild|utah mammoth']);
+    expect(checkDb.prepare('SELECT status FROM channel_health WHERE channel_id = ?').get('trex:willow')).toEqual({ status: 'ok' });
+    expect(readMeta(checkDb).generated_at).toBe('2026-11-25T10:00:00.000Z');
+    checkDb.close();
+  });
+
+  test('--reindex-events rejects a missing database file via run() and CLI without creating it', async () => {
+    const missingPath = path.join(dir, 'missing.sqlite');
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      expect(await run(['--reindex-events', '--db', missingPath, '--quiet'])).toBe(1);
+      expect(fs.existsSync(missingPath)).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
+
+    let exitCode = 0;
+    try {
+      execFileSync(process.execPath, [
+        path.join(__dirname, '..', 'scripts', 'refresh_trex_catalog.js'),
+        '--reindex-events',
+        '--db',
+        missingPath,
+        '--quiet'
+      ], { encoding: 'utf8', stdio: 'pipe' });
+    } catch (err) {
+      exitCode = err.status;
+    }
+    expect(exitCode).toBe(1);
+    expect(fs.existsSync(missingPath)).toBe(false);
   });
 });

@@ -9,7 +9,8 @@ const {
   ensureSchema,
   replaceCatalog,
   writeCatalogFile,
-  readMeta
+  readMeta,
+  reindexEventPairs
 } = require('../src/services/TrexCatalogDb');
 
 const METAS = [
@@ -112,5 +113,79 @@ describe('TrexCatalogDb', () => {
       { norm_key: 'cnn', channel_id: 'trex:cnn' }
     ]);
     db.close();
+  });
+
+  test('reindexEventPairs rebuilds malformed event_pairs while preserving channels, channel_keys, channel_health, and meta', () => {
+    const db = openDatabase(dbPath);
+    try {
+      ensureSchema(db);
+      const seedMetas = [
+        { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)', type: 'tv' },
+        { id: '836296', name: 'NFL  | 01 - WED 8pm Packers at Rams', type: 'tv' },
+        { id: 'trex:willow', name: 'CA| WILLOW CRICKET HD', type: 'tv' },
+        { id: 'trex:nba-bulls', name: 'NBA TEAM| CHICAGO BULLS', type: 'tv' }
+      ];
+      replaceCatalog(db, seedMetas, { generatedAt: '2026-11-25T10:00:00.000Z', source: 'live' });
+
+      // Inject legacy malformed keys and a channel_health record to simulate pre-fix on-disk catalog.
+      db.exec('DELETE FROM event_pairs');
+      db.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)')
+        .run('minnesota wild nov 25 7 30pm et|utah mammoth', '1949763', 12000);
+      db.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)')
+        .run('rams|wed 8pm packers', '836296', 11000);
+      db.prepare('INSERT INTO channel_health (channel_id, status, checked_at, frozen) VALUES (?, ?, ?, ?)')
+        .run('trex:willow', 'ok', '2026-11-25T12:00:00.000Z', 0);
+
+      const channelsBefore = db.prepare('SELECT * FROM channels ORDER BY id').all();
+      const channelKeysBefore = db.prepare('SELECT * FROM channel_keys ORDER BY norm_key, channel_id').all();
+      const healthBefore = db.prepare('SELECT * FROM channel_health ORDER BY channel_id').all();
+      const metaBefore = readMeta(db);
+
+      const result = reindexEventPairs(db);
+      expect(result).toEqual({ rowsScanned: 4, eventPairs: 2 });
+
+      const keysAfter = db.prepare('SELECT pair_key FROM event_pairs ORDER BY pair_key').all().map((r) => r.pair_key);
+      expect(keysAfter).toContain('minnesota wild|utah mammoth');
+      expect(keysAfter).toContain('packers|rams');
+      expect(keysAfter).not.toContain('minnesota wild nov 25 7 30pm et|utah mammoth');
+      expect(keysAfter).not.toContain('rams|wed 8pm packers');
+
+      expect(db.prepare('SELECT * FROM channels ORDER BY id').all()).toEqual(channelsBefore);
+      expect(db.prepare('SELECT * FROM channel_keys ORDER BY norm_key, channel_id').all()).toEqual(channelKeysBefore);
+      expect(db.prepare('SELECT * FROM channel_health ORDER BY channel_id').all()).toEqual(healthBefore);
+      expect(readMeta(db)).toEqual(metaBefore);
+    } finally {
+      db.close();
+    }
+  });
+
+  test('reindexEventPairs rolls back and preserves old event_pairs on insert failure', () => {
+    const db = openDatabase(dbPath);
+    try {
+      ensureSchema(db);
+      replaceCatalog(db, [
+        { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)', type: 'tv' },
+        { id: 'fail-row', name: 'Live | Celtics vs. Wizards', type: 'tv' }
+      ], { generatedAt: '2026-11-25T10:00:00.000Z', source: 'live' });
+
+      db.exec('DELETE FROM event_pairs');
+      db.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)')
+        .run('old-malformed|utah mammoth', '1949763', 999);
+      db.exec(`
+        CREATE TEMP TRIGGER fail_event_insert
+        BEFORE INSERT ON event_pairs
+        WHEN NEW.channel_id = 'fail-row'
+        BEGIN
+          SELECT RAISE(ABORT, 'simulated insert failure');
+        END;
+      `);
+
+      expect(() => reindexEventPairs(db)).toThrow(/simulated insert failure/);
+
+      const surviving = db.prepare('SELECT pair_key, channel_id, score FROM event_pairs').all();
+      expect(surviving).toEqual([{ pair_key: 'old-malformed|utah mammoth', channel_id: '1949763', score: 999 }]);
+    } finally {
+      db.close();
+    }
   });
 });

@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { writeCatalogFile, openDatabase } = require('../src/services/TrexCatalogDb');
+const { writeCatalogFile, openDatabase, reindexEventPairs } = require('../src/services/TrexCatalogDb');
 const { TrexCatalogStore } = require('../src/services/TrexCatalogStore');
 
 const METAS = [
@@ -140,6 +140,43 @@ describe('TrexCatalogStore', () => {
     writer.close();
 
     expect(store.findTeam('Chicago Bulls')[0].id).toBe('trex:nba-bulls-4k');
+  });
+
+  test('an open reader sees rebuilt event_pairs on the same database path and inode after commit', () => {
+    const metas = [
+      { id: '1949763', name: 'US (ESPN+ 149) | Utah Mammoth vs. Minnesota Wild Nov 25 7:30PM ET (2026-11-25 19:30:00)', type: 'tv' },
+      { id: 'trex:willow', name: 'CA| WILLOW CRICKET HD', type: 'tv' }
+    ];
+    writeCatalogFile(dbPath, metas, { generatedAt: '2026-11-25T10:00:00.000Z', source: 'live' });
+
+    const writer = openDatabase(dbPath);
+    writer.exec('DELETE FROM event_pairs');
+    writer.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)')
+      .run('minnesota wild nov 25 7 30pm et|utah mammoth', '1949763', 100);
+
+    const inodeBefore = fs.statSync(dbPath).ino;
+    const store = openStore({ dbPath });
+    expect(store.isReady()).toBe(true);
+    expect(store.findEvents({
+      team1: 'Utah Mammoth',
+      team2: 'Minnesota Wild',
+      category: 'hockey',
+      league: 'NHL',
+      date: '2026-11-26T01:00:00Z'
+    })).toEqual([]);
+
+    reindexEventPairs(writer);
+    writer.close();
+
+    expect(fs.statSync(dbPath).ino).toBe(inodeBefore);
+    expect(store.findChannel('Willow Cricket')[0].id).toBe('trex:willow');
+    expect(store.findEvents({
+      team1: 'Utah Mammoth',
+      team2: 'Minnesota Wild',
+      category: 'hockey',
+      league: 'NHL',
+      date: '2026-11-26T01:00:00Z'
+    }).map(r => r.id)).toEqual(['1949763']);
   });
 
   test('matches soccer events and team channels while blocking squad and same-city leaks', () => {

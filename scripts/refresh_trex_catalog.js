@@ -6,9 +6,12 @@
  *
  *   node scripts/refresh_trex_catalog.js --db data/trex_catalog.sqlite
  *   node scripts/refresh_trex_catalog.js --from-csv trex_channels.csv
+ *   node scripts/refresh_trex_catalog.js --reindex-events --db data/trex_catalog.sqlite
  *
- * Runs as a standalone nightly cron job on the VPS, never inside a worker:
- * it pages the catalog in small batches, keeps only compact { id, name, type }
+ * Runs as a standalone nightly cron job on the VPS (guarded by
+ * `flock -n /tmp/trex-refresh.lock`), never inside a worker: operator reindex
+ * runs share the same `/tmp/trex-refresh.lock` flock guard.
+ * It pages the catalog in small batches, keeps only compact { id, name, type }
  * tuples, and replaces the database in one transaction (WAL keeps readers on
  * the previous catalog until the commit). On any failure the database is left
  * exactly as it was and the process exits 1.
@@ -28,7 +31,7 @@ try {
 const fs = require('fs');
 const path = require('path');
 
-const { writeCatalogFile } = require('../src/services/TrexCatalogDb');
+const { writeCatalogFile, openDatabase, reindexEventPairs } = require('../src/services/TrexCatalogDb');
 
 const CATALOG_ID = 'flix-live-tv-v2-trex';
 const PAGE_SIZE = 100;
@@ -196,6 +199,33 @@ async function run(argv = [], deps = {}) {
   const dbPath = typeof args.db === 'string' ? args.db : DEFAULT_DB;
 
   try {
+    if (args['reindex-events']) {
+      let existingFile = false;
+      try {
+        existingFile = fs.existsSync(dbPath) && fs.statSync(dbPath).isFile();
+      } catch (_) {
+        existingFile = false;
+      }
+      if (!existingFile) {
+        console.error(`[trex-refresh] catalog database does not exist: ${dbPath}`);
+        return 1;
+      }
+      const db = openDatabase(dbPath);
+      try {
+        const stats = reindexEventPairs(db);
+        if (!quiet) {
+          console.log(`[trex-refresh] reindex-events: ${stats.rowsScanned} row(s) scanned, ${stats.eventPairs} event pair(s) indexed`);
+        }
+        return 0;
+      } finally {
+        try {
+          db.close();
+        } catch (_) {
+          /* ignore close error */
+        }
+      }
+    }
+
     if (typeof args['from-csv'] === 'string') {
       const metas = readCsv(args['from-csv']);
       if (metas.length === 0) {

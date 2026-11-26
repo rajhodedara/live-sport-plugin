@@ -188,6 +188,48 @@ function replaceCatalog(db, metas, { generatedAt, source } = {}) {
   return counts;
 }
 
+/**
+ * Rebuilds only `event_pairs` from rows already stored in `channels`.
+ * Runs in one `BEGIN IMMEDIATE` transaction so WAL readers continue seeing the
+ * prior index until commit, and rolls back cleanly on any insert error.
+ * Preserves `channels`, `channel_keys`, `channel_health`, and `meta`.
+ */
+function reindexEventPairs(db) {
+  if (!db) throw new Error('Trex catalog database is required');
+  const hasChannels = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='channels'").get();
+  if (!hasChannels) throw new Error('Trex catalog missing channels table');
+  ensureSchema(db);
+  const insertEvent = db.prepare('INSERT INTO event_pairs (pair_key, channel_id, score) VALUES (?, ?, ?)');
+  let rowsScanned = 0;
+  let eventPairs = 0;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const rows = db.prepare('SELECT id, name, grp FROM channels').all();
+    rowsScanned = rows.length;
+    db.exec('DELETE FROM event_pairs');
+    for (const row of rows) {
+      const id = row && row.id ? String(row.id).trim() : '';
+      const name = row && row.name ? String(row.name).trim() : '';
+      if (!id || !name) continue;
+      const pair = parsePair(name);
+      if (!pair) continue;
+      const group = row.grp != null ? String(row.grp) : groupOf(name);
+      insertEvent.run(pairKey(pair.a, pair.b), id, eventScore(name, group));
+      eventPairs += 1;
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch (_) {
+      /* the transaction may already be gone */
+    }
+    throw err;
+  }
+  return { rowsScanned, eventPairs };
+}
+
 /** Opens (creating when needed), writes the whole catalog, closes. */
 function writeCatalogFile(dbPath, metas, opts = {}) {
   const db = openDatabase(dbPath);
@@ -213,6 +255,7 @@ module.exports = {
   openDatabase,
   ensureSchema,
   replaceCatalog,
+  reindexEventPairs,
   writeCatalogFile,
   readMeta,
   groupOf
