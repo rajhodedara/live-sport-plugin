@@ -9,6 +9,19 @@ const MAX_SAMPLES = 12;
 const DEFAULT_SAMPLES = 6;
 const MAX_CONCURRENCY = 2;
 const REQUEST_TIMEOUT_MS = 22000;
+const MAX_RESPONSE_BYTES = 1024 * 1024;
+
+function parseLoopbackOrigin(value) {
+  const origin = new URL(value);
+  const hostname = origin.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!['http:', 'https:'].includes(origin.protocol) || !['127.0.0.1', '::1', 'localhost'].includes(hostname)) {
+    throw new TypeError('Origin must be an HTTP(S) loopback address');
+  }
+  if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) {
+    throw new TypeError('Origin must not include credentials, a path, query, or fragment');
+  }
+  return origin;
+}
 
 function parseArgs(argv) {
   const args = {
@@ -40,15 +53,32 @@ function requestJsonWithAgent(urlString, agent) {
     const mod = url.protocol === 'https:' ? https : http;
     const req = mod.request(url, { method: 'GET', agent, timeout: REQUEST_TIMEOUT_MS }, (res) => {
       const chunks = [];
-      res.on('data', (chunk) => chunks.push(chunk));
+      let bytes = 0;
+      let settled = false;
+      const finish = (fn, value) => {
+        if (settled) return;
+        settled = true;
+        fn(value);
+      };
+      res.on('data', (chunk) => {
+        bytes += chunk.length;
+        if (bytes > MAX_RESPONSE_BYTES) {
+          res.destroy();
+          finish(reject, new RangeError('Response exceeds sampler limit'));
+          return;
+        }
+        chunks.push(chunk);
+      });
       res.on('end', () => {
+        if (settled) return;
         const text = Buffer.concat(chunks).toString('utf8');
         try {
-          resolve({ status: res.statusCode || 0, json: JSON.parse(text) });
+          finish(resolve, { status: res.statusCode || 0, json: JSON.parse(text) });
         } catch (_) {
-          resolve({ status: res.statusCode || 0, json: null });
+          finish(resolve, { status: res.statusCode || 0, json: null });
         }
       });
+      res.on('error', (err) => finish(reject, err));
     });
     req.on('timeout', () => {
       req.destroy(new Error('Request timed out'));
@@ -183,7 +213,7 @@ async function probeUpstreamId(manifestBase, candidateId) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const originUrl = new URL(args.origin);
+  const originUrl = parseLoopbackOrigin(args.origin);
   const configSeg = Buffer.from(JSON.stringify({ liveSources: args.sources })).toString('base64url');
   const streamPath = `/${configSeg}/stream/tv/${encodeURIComponent(args.id)}.json`;
 
@@ -224,4 +254,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, extractCandidateIds, diffWorkerCache };
+module.exports = { parseArgs, parseLoopbackOrigin, extractCandidateIds, diffWorkerCache };

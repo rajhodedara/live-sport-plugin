@@ -2208,7 +2208,7 @@ describe('Kafka channel recovery across workers, cache churn, and trace attribut
     // Trace attribution checks: resolve/verify failures and published sources are distinct and redacted.
     expect(traceEvents.some(e => e.stage === 'resolve' && e.reason === 'http_5xx')).toBe(true);
     expect(traceEvents.some(e => e.stage === 'verify' && e.reason === 'http_5xx')).toBe(true);
-    expect(traceEvents.some(e => e.stage === 'publish' && e.reason === 'published')).toBe(true);
+    expect(traceEvents.some(e => e.stage === 'published' && e.reason === 'published')).toBe(true);
     expect(traceEvents.every(e => Number.isInteger(e.pid) && e.source === 'kafka' && e.matchId === match.id)).toBe(true);
   });
 

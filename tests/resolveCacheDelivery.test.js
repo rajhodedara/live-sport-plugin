@@ -64,6 +64,8 @@ describe('StreamResolveCache active-caller media delivery', () => {
     const keyA = 'kafka:mA:chA';
     const keyB = 'kafka:mB:chB';
     const mintA = jest.fn(async () => [direct('alpha')]);
+    const outcomes = [];
+    mintA.onResolveOutcome = (event) => outcomes.push(event);
 
     const p1 = cache.getOrCreate(keyA, mintA);
     const p2 = cache.getOrCreate(keyA, () => { throw new Error('Duplicate mint'); });
@@ -75,6 +77,9 @@ describe('StreamResolveCache active-caller media delivery', () => {
     cache._set(keyB, 'kafka', 'mB', [direct('beta')], 'ok', 60000);
     expect(cache.entries.has(keyA)).toBe(false);
     expect(cache.entries.has(keyB)).toBe(true);
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      source: 'kafka', matchId: 'mA', candidateId: 'chA', stage: 'cache', reason: 'lru_evicted'
+    }));
 
     releasePost();
     const [r1, r2] = await Promise.all([p1, p2]);

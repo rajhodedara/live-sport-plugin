@@ -2282,6 +2282,11 @@ async function handleStream(type, id, config) {
     if (state.eventDiscovery && kafkaProviderInstance) {
       progressUnsubs.push(subscribeEventProgress(kafkaProviderInstance, match, pushProgress, eventStreamValid));
     }
+    const mint = () => mintVerifiedSources(src, match, config, key, {
+      ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {}),
+      onInconclusive() { state.inconclusive = true; }
+    });
+    if (traceSink) mint.onResolveOutcome = traceSink.emit;
     const promise = (src.kafkaFixtureEvents
       ? mintVerifiedSources(src, match, config, null, {
           deadlineAt: resolutionStartedAt + HARD_DEADLINE_MS,
@@ -2290,10 +2295,7 @@ async function handleStream(type, id, config) {
           ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {}),
           onInconclusive() { state.inconclusive = true; }
         })
-      : resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
-          ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {}),
-          onInconclusive() { state.inconclusive = true; }
-        }), timingStream))
+      : resolveCache.getOrCreate(key, mint, timingStream))
       .then((minted) => {
         const rows = Array.isArray(minted) ? minted : [];
         const hasResults = rows.length > 0;
@@ -2308,7 +2310,7 @@ async function handleStream(type, id, config) {
               source: src.source,
               matchId: match.id,
               candidateId: String(src.id || key),
-              stage: 'publish',
+              stage: 'published',
               reason: state.wasWarm ? 'published_cached' : 'published'
             });
           } else if (state.wasDeferred) {

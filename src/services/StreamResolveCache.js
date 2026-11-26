@@ -266,22 +266,23 @@ class StreamResolveCache {
     return Math.max(0, e.expiresAt - Date.now());
   }
 
-  _emitOutcome(key, stage, reason, startedAt = Date.now()) {
-    if (!this.onResolveOutcome || !key) return;
+  _emitOutcome(key, stage, reason, startedAt = Date.now(), observers = null) {
+    if (!key) return;
     try {
       const parts = String(key).split(':');
-      const source = parts[0] || '';
-      const matchId = parts[1] || '';
-      const candidateId = parts.slice(2).join(':') || String(key);
-      this.onResolveOutcome({
+      const event = {
         pid: process.pid,
-        source,
-        matchId,
-        candidateId,
+        source: parts[0] || '',
+        matchId: parts[1] || '',
+        candidateId: parts.slice(2).join(':') || String(key),
         stage,
         reason,
         elapsedMs: Math.max(0, Date.now() - startedAt)
-      });
+      };
+      const callbacks = new Set([this.onResolveOutcome, ...(observers || [])]);
+      for (const callback of callbacks) {
+        if (typeof callback === 'function') callback(event);
+      }
     } catch (_) { /* diagnostic only */ }
   }
 
@@ -374,6 +375,7 @@ class StreamResolveCache {
   async getOrCreate(key, mintFn, timingStream = null) {
     const now = Date.now();
     const existing = this.entries.get(key);
+    const outcomeObserver = typeof mintFn?.onResolveOutcome === 'function' ? mintFn.onResolveOutcome : null;
 
     if (existing && existing.expiresAt > now) {
       existing.lastAccess = now;
@@ -382,15 +384,15 @@ class StreamResolveCache {
       if (existing.status !== 'ok') {
         if (existing.status === 'deferred') {
           this.statsCounters.deferredHits++;
-          this._emitOutcome(key, 'cache', 'deferred_hit', now);
+          this._emitOutcome(key, 'cache', 'deferred_hit', now, outcomeObserver ? [outcomeObserver] : null);
         } else {
           this.statsCounters.negativeHits++;
-          this._emitOutcome(key, 'cache', 'failed_hit', now);
+          this._emitOutcome(key, 'cache', 'failed_hit', now, outcomeObserver ? [outcomeObserver] : null);
         }
         return [];
       }
       this.statsCounters.hits++;
-      this._emitOutcome(key, 'cache', 'cache_hit', now);
+      this._emitOutcome(key, 'cache', 'cache_hit', now, outcomeObserver ? [outcomeObserver] : null);
       return existing.streams.map(clonePublicStream);
     }
 
@@ -398,7 +400,10 @@ class StreamResolveCache {
     if (pending) {
       const operation = this.pendingOperations.get(key);
       this._linkTiming(timingStream, operation?.timingWork);
-      if (operation) operation.consumers += 1;
+      if (operation) {
+        operation.consumers += 1;
+        if (outcomeObserver) operation.outcomeObservers.add(outcomeObserver);
+      }
       try {
         await pending.catch(() => {});
         return operation ? this._deliverOperationResult(key, operation) : (this.get(key) || []);
@@ -412,7 +417,8 @@ class StreamResolveCache {
       matchId: key.split(':')[1] || '',
       pruned: false,
       consumers: 1,
-      deliveryEntry: null
+      deliveryEntry: null,
+      outcomeObservers: new Set(outcomeObserver ? [outcomeObserver] : [])
     };
     this.pendingOperations.set(key, operation);
     this._trackActiveDelivery(key, operation);
@@ -515,11 +521,11 @@ class StreamResolveCache {
         if (this._adoptRemote(key, remote, operation)) {
           if (remote.status === 'ok') {
             this.statsCounters.hits++;
-            this._emitOutcome(key, 'cache', 'l2_hit', startedAt);
+            this._emitOutcome(key, 'cache', 'l2_hit', startedAt, operation.outcomeObservers);
             return;
           }
           this.statsCounters.negativeHits++;
-          this._emitOutcome(key, 'cache', 'l2_failed_hit', startedAt);
+          this._emitOutcome(key, 'cache', 'l2_failed_hit', startedAt, operation.outcomeObservers);
           return;
         }
         remote = null; // expired in transit: claim and mint instead
@@ -582,7 +588,7 @@ class StreamResolveCache {
         if (isDeferredResolution(streams)) {
           deferred = streams;
           storeDeferred(streams);
-          this._emitOutcome(key, 'cache', 'deferred', startedAt);
+          this._emitOutcome(key, 'cache', 'deferred', startedAt, operation.outcomeObservers);
           // The resolver protocol remains ok/failed/minting only. A short
           // local cooldown must not become a shared 30-second dead verdict.
           await releaseOwnedClaim();
@@ -624,10 +630,10 @@ class StreamResolveCache {
           if (!localEntry.retryReason && localEntry.streams.some(s => s && s.url)) {
             operation.deliveryEntry = localEntry;
           }
-          this._emitOutcome(key, 'cache', 'mint_ok', startedAt);
+          this._emitOutcome(key, 'cache', 'mint_ok', startedAt, operation.outcomeObservers);
         } else {
           localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
-          this._emitOutcome(key, 'cache', 'mint_failed', startedAt);
+          this._emitOutcome(key, 'cache', 'mint_failed', startedAt, operation.outcomeObservers);
         }
         // Keep publication authority until the RPC settles, even if an expiry
         // reader has already removed this entry from the local map.
@@ -833,7 +839,7 @@ class StreamResolveCache {
       if (operation && operation.publicationEntry === this.entries.get(oldestKey)) operation.publicationEvicted = true;
       this.entries.delete(oldestKey);
       this.statsCounters.evictions++;
-      this._emitOutcome(oldestKey, 'cache', 'lru_evicted', Date.now());
+      this._emitOutcome(oldestKey, 'cache', 'lru_evicted', Date.now(), operation?.outcomeObservers);
     }
   }
 
