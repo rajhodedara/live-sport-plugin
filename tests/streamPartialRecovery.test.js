@@ -8,7 +8,7 @@ jest.mock('../src/services/TimingRuntime', () => ({ relations: null }));
 jest.mock('../src/catalog', () => ({ isReplayMatch: () => false }));
 
 const container = require('../src/container');
-const { safeFetch } = require('../src/services/ProviderOutbound');
+const { safeFetch, streamingFetch } = require('../src/services/ProviderOutbound');
 const { mintVerifiedSources, handleStream } = require('../src/streams');
 const Cache = require('../src/services/StreamResolveCache');
 const TimStreamsProvider = require('../src/providers/TimStreamsProvider');
@@ -36,6 +36,21 @@ beforeEach(() => {
     cacheService: { findMatch: () => match }, ppvStProvider: { resolveStream: jest.fn(async () => [direct('ppv'), web()]) } };
   container.resolve.mockImplementation(name => services[name]);
   safeFetch.mockReset().mockResolvedValue(ok());
+  streamingFetch.mockReset().mockResolvedValue({
+    ok: true,
+    status: 206,
+    headers: { get: () => '1024' },
+    body: {
+      getReader: () => {
+        let done = false;
+        return {
+          read: async () => (done ? { done: true } : (done = true, { done: false, value: new Uint8Array(64) })),
+          cancel: async () => {},
+          releaseLock: () => {}
+        };
+      }
+    }
+  });
   for (const name of ['log', 'warn', 'error']) jest.spyOn(console, name).mockImplementation(() => {});
 });
 afterEach(() => {
@@ -384,5 +399,52 @@ test('mixed fixture returns ready Kafka channel at soft deadline with short fres
     if (a === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = a;
     if (b === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = b;
     if (c === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = c;
+  }
+});
+
+test('repeat event clicks join the original job window and observe its deadline while preserving 2s partial freshness', async () => {
+  const { collectEventStreams } = require('../src/services/KafkaEventPlayback');
+  const prevJobTimeout = process.env.KAFKA_EVENT_JOB_TIMEOUT_MS;
+  process.env.KAFKA_EVENT_JOB_TIMEOUT_MS = '1000';
+
+  try {
+    let attempts = 0;
+    const provider = {
+      getEventProbeConcurrency: () => 1,
+      withEventProbe: (fn, sig) => fn(sig),
+      eventCandidates: jest.fn(async () => [
+        { id: 'trex:retry-me', name: 'Live | Team A vs Team B | Feed 1' },
+        { id: 'trex:second-cand', name: 'Live | Team A vs Team B | Feed 2' }
+      ])
+    };
+    const probe = jest.fn(async (candidate, sig) => {
+      attempts += 1;
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 600);
+        sig?.addEventListener('abort', () => { clearTimeout(timer); resolve(); }, { once: true });
+      });
+      if (sig?.aborted) return { streams: [], retryableReason: 'deadline_expired' };
+      return { streams: [{ url: `https://cdn.fixture.test/${candidate.id}.m3u8` }], retryableReason: null };
+    });
+
+    const match = { id: 'original-window-fx', date: String(Date.now()) };
+    const ctrl1 = new AbortController();
+    const first = collectEventStreams({ provider, match, signal: ctrl1.signal, probe });
+    await jest.advanceTimersByTimeAsync(100);
+    ctrl1.abort();
+    expect((await first).incomplete).toBe(true);
+
+    // Repeat click at t=700ms joins the original 1000ms window (expires at t=1000ms, NOT t=1700ms).
+    await jest.advanceTimersByTimeAsync(600);
+    const ctrl2 = new AbortController();
+    const second = collectEventStreams({ provider, match, signal: ctrl2.signal, probe });
+    await jest.advanceTimersByTimeAsync(400);
+    const secondRes = await second;
+    // second-cand started at t=600ms and needed until t=1200ms; aborted at original t=1000ms deadline.
+    expect(secondRes.streams.some((s) => s.url.includes('second-cand'))).toBe(false);
+    expect(attempts).toBe(2);
+  } finally {
+    if (prevJobTimeout === undefined) delete process.env.KAFKA_EVENT_JOB_TIMEOUT_MS;
+    else process.env.KAFKA_EVENT_JOB_TIMEOUT_MS = prevJobTimeout;
   }
 });

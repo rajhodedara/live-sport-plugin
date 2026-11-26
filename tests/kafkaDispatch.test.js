@@ -12,7 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const container = require('../src/container');
-const { safeFetch } = require('../src/services/ProviderOutbound');
+const { safeFetch, streamingFetch } = require('../src/services/ProviderOutbound');
 const KafkaProvider = require('../src/providers/KafkaProvider');
 const { writeCatalogFile } = require('../src/services/TrexCatalogDb');
 const { TrexCatalogStore } = require('../src/services/TrexCatalogStore');
@@ -213,6 +213,9 @@ describe('handleStream event-first regression', () => {
     'KAFKA_MANIFEST_URL',
     'KAFKA_EVENT_SEARCH_ENABLED',
     'KAFKA_EVENT_PROBE_CONCURRENCY',
+    'KAFKA_EVENT_MAX_CANDIDATES',
+    'KAFKA_EVENT_JOB_TIMEOUT_MS',
+    'KAFKA_EVENT_TRACE_FIXTURE_ID',
     'KAFKA_LIVENESS_GUARD_ENABLED',
     'DONATION_URL',
     'STREAM_SOFT_DEADLINE_MS',
@@ -260,6 +263,7 @@ describe('handleStream event-first regression', () => {
     searchMetas = [],
     searchFetch,
     playlistHandler,
+    segmentHandler,
     daddyLiveStreams = [{ name: 'DaddyLive', title: 'NBA TV', url: 'https://cdn.invalid/dl1.m3u8', language: 'English', country: 'USA' }],
     healthService = new ProviderHealthService(),
     extraServices = {}
@@ -323,6 +327,26 @@ describe('handleStream event-first regression', () => {
       return { status: 200, text: async () => LIVE_PLAYLIST };
     });
 
+    streamingFetch.mockImplementation(async (segUrl, opts = {}) => {
+      const target = String(segUrl);
+      if (segmentHandler) return segmentHandler(target, opts);
+      return {
+        ok: true,
+        status: 206,
+        headers: { get: (h) => (String(h).toLowerCase() === 'content-type' ? 'video/mp2t' : '1024') },
+        body: {
+          getReader: () => {
+            let done = false;
+            return {
+              read: async () => (done ? { done: true } : (done = true, { done: false, value: new Uint8Array(64) })),
+              cancel: async () => {},
+              releaseLock: () => {}
+            };
+          }
+        }
+      };
+    });
+
     return { services, kafkaProvider, eventSearch, fetchImpl, resolveCache, daddyLiveProvider, healthService };
   }
 
@@ -370,6 +394,7 @@ describe('handleStream event-first regression', () => {
     container.resolve = originalResolve;
     global.fetch = originalFetch;
     safeFetch.mockReset();
+    streamingFetch.mockReset();
     jest.restoreAllMocks();
     jest.useRealTimers();
     for (const [k, v] of Object.entries(savedEnv)) {
@@ -691,7 +716,7 @@ describe('handleStream event-first regression', () => {
     expect(response.streams.map((s) => s._source)).toEqual(['daddylive']);
     const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
     expect(kafkaHealth.eventPlayback.stops.deadline).toBe(1);
-    await jest.advanceTimersByTimeAsync(10000);
+    await jest.advanceTimersByTimeAsync(20000);
     expect(jest.getTimerCount()).toBe(0);
   });
 
@@ -756,7 +781,7 @@ describe('handleStream event-first regression', () => {
         peakActive = Math.max(peakActive, activeProbes);
         await new Promise((r) => setTimeout(r, 15));
         activeProbes -= 1;
-        if (id === 'trex:m1-err') return { ok: false, status: 502, statusText: 'Bad Gateway' };
+        if (id === 'trex:m1-err') return { ok: false, status: 404, statusText: 'Not Found' };
         if (id === 'trex:m1-multi') {
           return {
             ok: true,
@@ -793,6 +818,21 @@ describe('handleStream event-first regression', () => {
         return { status: 200, text: async () => ENDED_SEQ0_PLAYLIST };
       }
       return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+    streamingFetch.mockResolvedValue({
+      ok: true,
+      status: 206,
+      headers: { get: (h) => (String(h).toLowerCase() === 'content-type' ? 'video/mp2t' : '1024') },
+      body: {
+        getReader: () => {
+          let sent = false;
+          return {
+            read: async () => (sent ? { done: true } : (sent = true, { done: false, value: new Uint8Array(64) })),
+            cancel: async () => {},
+            releaseLock: () => {}
+          };
+        }
+      }
     });
 
     const viewerRequests = [];
@@ -1144,5 +1184,285 @@ describe('handleStream event-first regression', () => {
     expect(warm.streams.map(s => s._kafkaMatchMode)).toEqual(['label', 'event']);
     expect(safeFetch).not.toHaveBeenCalled();
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  test('retries temporary NHL 11 failure after first-attempt queue within 4 slots while keeping definitive rejections at 1 attempt and emitting safe trace', async () => {
+    process.env.KAFKA_EVENT_PROBE_CONCURRENCY = '4';
+    process.env.STREAM_SOFT_DEADLINE_MS = '100';
+    process.env.STREAM_HARD_DEADLINE_MS = '200';
+    const match = buildFixture({
+      id: 'nhl-recovery-ev',
+      title: 'Utah Mammoth vs Minnesota Wild',
+      category: 'hockey',
+      league: 'NHL',
+      team1: { name: 'Utah Mammoth' },
+      team2: { name: 'Minnesota Wild' },
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NHL Network', country: 'USA', matchMode: 'label' }]
+    });
+    process.env.KAFKA_EVENT_TRACE_FIXTURE_ID = match.id;
+
+    const channels = [
+      { id: 'trex:836411', name: 'Live | Utah Mammoth vs Minnesota Wild | US: NHL 11', score: 9500 },
+      { id: 'trex:ended', name: 'Live | Utah Mammoth vs Minnesota Wild | US: ENDED', score: 9400 },
+      { id: 'trex:policy', name: 'Live | Utah Mammoth vs Minnesota Wild | US: POLICY', score: 9300 },
+      { id: 'trex:slow1', name: 'Live | Utah Mammoth vs Minnesota Wild | US: SLOW 1', score: 9200 },
+      { id: 'trex:slow2', name: 'Live | Utah Mammoth vs Minnesota Wild | US: SLOW 2', score: 9100 },
+      { id: 'trex:slow3', name: 'Live | Utah Mammoth vs Minnesota Wild | US: SLOW 3', score: 9000 },
+      { id: 'trex:slow4', name: 'Live | Utah Mammoth vs Minnesota Wild | US: SLOW 4', score: 8900 },
+      { id: 'trex:label', name: 'US| NHL NETWORK HD' }
+    ];
+
+    const traceLogs = [];
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation((...args) => {
+      if (String(args[0]).includes('[KafkaEventTrace]')) traceLogs.push(String(args.join(' ')));
+    });
+
+    const probeCallOrder = [];
+    let activeSlots = 0;
+    let peakActive = 0;
+    let nhl11Attempts = 0;
+    let endedAttempts = 0;
+    let policyAttempts = 0;
+    let releaseSlow;
+    const slowGate = new Promise((r) => { releaseSlow = r; });
+
+    const { kafkaProvider } = setupHarness({
+      match,
+      channels,
+      playlistHandler: async (target) => {
+        if (target.includes('trex:ended')) {
+          return { status: 200, text: async () => '#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:5\n#EXTINF:4,\nseg.ts\n#EXT-X-ENDLIST\n' };
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    const baseWithEventProbe = kafkaProvider.withEventProbe.bind(kafkaProvider);
+    kafkaProvider.withEventProbe = (fn, sig) => baseWithEventProbe(async () => {
+      activeSlots += 1;
+      peakActive = Math.max(peakActive, activeSlots);
+      try {
+        return await fn();
+      } finally {
+        activeSlots -= 1;
+      }
+    }, sig);
+
+    const prevSafeFetch = safeFetch.getMockImplementation();
+    safeFetch.mockImplementation(async (url, opts) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        probeCallOrder.push(id);
+        if (id === 'trex:836411') {
+          nhl11Attempts += 1;
+          if (nhl11Attempts <= 2) {
+            throw Object.assign(new Error('secret-token-should-not-leak: upstream timed out'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+          }
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              streams: [{
+                name: '▶ Watch Live',
+                title: id,
+                url: 'https://cdn.invalid/nhl11-recovered.m3u8?token=SECRET_TOKEN_XYZ',
+                behaviorHints: { proxyHeaders: { request: { Referer: 'https://secret.header/' } } }
+              }]
+            })
+          };
+        }
+        if (id === 'trex:ended') endedAttempts += 1;
+        if (id === 'trex:policy') {
+          policyAttempts += 1;
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ streams: [{ name: '▶ Watch Live', url: 'https://cdn.invalid/ck.mpd', clearkey: { k: 'v' } }] })
+          };
+        }
+        if (id.startsWith('trex:slow')) {
+          await slowGate;
+        }
+      }
+      return prevSafeFetch(url, opts);
+    });
+
+    try {
+      let firstRes;
+      const firstPromise = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((v) => { firstRes = v; });
+      await jest.advanceTimersByTimeAsync(110);
+      await firstPromise;
+
+      expect(firstRes.cacheMaxAge).toBe(2);
+      expect(firstRes.streams).toContainEqual(expect.objectContaining({ _kafkaMatchMode: 'label' }));
+      expect(firstRes.streams.some((s) => s.url.includes('nhl11-recovered'))).toBe(false);
+
+      // Let slow candidates and NHL 11 retry finish in background.
+      releaseSlow();
+      await jest.advanceTimersByTimeAsync(2500);
+
+      // Candidate-level attempts on NHL 11: 1st candidate attempt exhausted per-request retries,
+      // then 2nd candidate attempt succeeded after queued first attempts started.
+      const nhl11TraceProbes = traceLogs.filter((l) => l.includes('trex:836411') && l.includes('"probe_started"'));
+      expect(nhl11TraceProbes).toHaveLength(2);
+      expect(endedAttempts).toBe(1);
+      expect(policyAttempts).toBe(1);
+      expect(peakActive).toBe(4);
+      const firstSlow3Idx = probeCallOrder.indexOf('trex:slow3');
+      const lastNhl11Idx = probeCallOrder.lastIndexOf('trex:836411');
+      expect(lastNhl11Idx).toBeGreaterThan(firstSlow3Idx);
+
+      const repeatRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+      expect(repeatRes.streams.some((s) => s.url.includes('nhl11-recovered'))).toBe(true);
+      expect(repeatRes.streams.some((s) => s._kafkaMatchMode === 'label')).toBe(true);
+      const joinedTrace = traceLogs.join('\n');
+      expect(joinedTrace).toContain('"queued"');
+      expect(joinedTrace).toContain('"probe_started"');
+      expect(joinedTrace).toContain('"retry_scheduled"');
+      expect(joinedTrace).toContain('"verified"');
+      expect(joinedTrace).toContain('"rejected"');
+      expect(joinedTrace).toContain('"published"');
+      expect(joinedTrace).not.toContain('SECRET_TOKEN_XYZ');
+      expect(joinedTrace).not.toContain('secret.header');
+      expect(joinedTrace).not.toContain('secret-token-should-not-leak');
+      expect(joinedTrace).not.toContain('https://cdn.invalid');
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  test('verifies recent media segment with playback headers and Range, handles slow advancing playlist, and rejects failing segment after retry', async () => {
+    process.env.STREAM_SOFT_DEADLINE_MS = '400';
+    process.env.STREAM_HARD_DEADLINE_MS = '800';
+    const match = buildFixture({
+      id: 'segment-liveness-ev',
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' }]
+    });
+    const channels = [
+      { id: 'trex:slow-adv', name: 'Live | Mavericks vs. Nuggets | US: PPV 1', score: 9000 },
+      { id: 'trex:seg-retry', name: 'Live | Mavericks vs. Nuggets | US: PPV 2', score: 8500 },
+      { id: 'trex:seg-dead', name: 'Live | Mavericks vs. Nuggets | US: PPV 3', score: 8000 },
+      { id: 'trex:label', name: 'US| NBA TV HD' }
+    ];
+
+    const cancelSpies = [];
+    const segCalls = [];
+    let slowAttempt = 0;
+    let segRetryCount = 0;
+
+    setupHarness({
+      match,
+      channels,
+      playlistHandler: async (target) => {
+        if (target.includes('trex:slow-adv')) {
+          slowAttempt += 1;
+          if (slowAttempt <= 3) {
+            throw Object.assign(new Error('slow playlist timeout'), { name: 'TimeoutError', code: 'ETIMEDOUT' });
+          }
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:15\n#EXTINF:4,\nhttps://cdn.invalid/slow-15.ts\n#EXTINF:4,\nhttps://cdn.invalid/slow-16.ts\n'
+          };
+        }
+        if (target.includes('trex:seg-retry')) {
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:20\n#EXTINF:4,\nhttps://cdn.invalid/retry-old.ts\n#EXTINF:4,\nhttps://cdn.invalid/retry-recent.ts\n'
+          };
+        }
+        if (target.includes('trex:seg-dead')) {
+          return {
+            status: 200,
+            text: async () => '#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:30\n#EXTINF:4,\nhttps://cdn.invalid/dead-recent.ts\n'
+          };
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      },
+      segmentHandler: async (target, opts) => {
+        segCalls.push({ target, headers: opts.headers });
+        if (target.includes('dead-recent.ts')) {
+          return { ok: false, status: 502, headers: { get: () => null }, body: { cancel: async () => {} } };
+        }
+        if (target.includes('retry-recent.ts')) {
+          segRetryCount += 1;
+          if (segRetryCount === 1) {
+            return { ok: false, status: 502, headers: { get: () => null }, body: { cancel: async () => {} } };
+          }
+        }
+        const cancelSpy = jest.fn(async () => {});
+        cancelSpies.push(cancelSpy);
+        return {
+          ok: true,
+          status: 206,
+          headers: { get: (h) => (String(h).toLowerCase() === 'content-type' ? 'video/mp2t' : '1024') },
+          body: {
+            getReader: () => {
+              let sent = false;
+              return {
+                read: async () => (sent ? { done: true } : (sent = true, { done: false, value: new Uint8Array(64) })),
+                cancel: cancelSpy,
+                releaseLock: () => {}
+              };
+            }
+          }
+        };
+      }
+    });
+
+    const first = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 150);
+    expect(first.streams.some((s) => s._kafkaMatchMode === 'label')).toBe(true);
+    expect(first.streams.some((s) => s.url.includes('trex%3Aseg-retry'))).toBe(true);
+    expect(first.streams.some((s) => s.url.includes('trex%3Aseg-dead'))).toBe(false);
+
+    // Advance so slow-adv background retry finishes.
+    await jest.advanceTimersByTimeAsync(15000);
+    const repeat = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}), 150);
+    expect(repeat.streams.some((s) => s.url.includes('trex%3Aslow-adv'))).toBe(true);
+    expect(repeat.streams.some((s) => s.url.includes('trex%3Aseg-dead'))).toBe(false);
+
+    // Recent segment selected, Range + headers forwarded, body cancelled after minimum evidence.
+    expect(segCalls.some((c) => c.target.includes('slow-16.ts') && c.headers.Range === 'bytes=0-1023')).toBe(true);
+    expect(segCalls.some((c) => c.target.includes('retry-recent.ts') && c.headers['User-Agent'])).toBe(true);
+    expect(segCalls.some((c) => c.target.includes('retry-old.ts'))).toBe(false);
+    expect(cancelSpies.length).toBeGreaterThan(0);
+    expect(cancelSpies.every((fn) => fn.mock.calls.length === 1)).toBe(true);
+  });
+
+  test('applies KAFKA_EVENT_MAX_CANDIDATES to unique candidates across retries', async () => {
+    process.env.KAFKA_EVENT_MAX_CANDIDATES = '2';
+    const match = buildFixture({ id: 'max-cand-unique', sources: [] });
+    let c1Attempts = 0;
+    const probedIds = [];
+
+    setupHarness({
+      match,
+      channels: [
+        { id: 'trex:c1', name: 'Live | Mavericks vs. Nuggets | US: PPV 1', score: 9000 },
+        { id: 'trex:c2', name: 'Live | Mavericks vs. Nuggets | US: PPV 2', score: 8500 },
+        { id: 'trex:c3', name: 'Live | Mavericks vs. Nuggets | US: PPV 3', score: 8000 }
+      ],
+      playlistHandler: async (target) => {
+        if (target.includes('trex:c1')) {
+          c1Attempts += 1;
+          if (c1Attempts <= 3) return { status: 429, text: async () => 'Too Many Requests' };
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    const baseSafe = safeFetch.getMockImplementation();
+    safeFetch.mockImplementation(async (url, opts) => {
+      if (String(url).includes('/stream/tv/')) {
+        probedIds.push(decodeURIComponent(String(url).split('/stream/tv/')[1].replace(/\.json$/, '')));
+      }
+      return baseSafe(url, opts);
+    });
+
+    const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(res.streams).toHaveLength(2);
+    expect(probedIds).not.toContain('trex:c3');
+    expect(probedIds.filter((id) => id === 'trex:c1')).toHaveLength(2);
+    expect(probedIds.filter((id) => id === 'trex:c2')).toHaveLength(1);
   });
 });

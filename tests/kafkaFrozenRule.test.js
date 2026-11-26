@@ -7,7 +7,7 @@ jest.mock('../src/impitClient', () => ({
 }));
 
 const { safeFetch } = require('../src/impitClient');
-const { verifyStreams } = require('../src/streams');
+const { verifyStreams, evaluatePlaylistLiveness } = require('../src/streams');
 const StreamEntity = require('../src/domain/StreamEntity');
 const M3U8ParserService = require('../src/services/M3U8ParserService');
 
@@ -124,6 +124,43 @@ describe('Kafka frozen-playlist rule in verifyStreams', () => {
       });
       const live = await verifyStreams([makeStream('kafka')], null, parser, cache, { requireLivePlaylist: true });
       expect(live).toHaveLength(1);
+    });
+  });
+
+  describe('evaluatePlaylistLiveness sequence-window rules', () => {
+    test('treats a nonzero sequence that stays flat for less than one target duration as inconclusive, then flat once exceeded', () => {
+      const base = 1_700_000_000_000;
+      expect(evaluatePlaylistLiveness({
+        prevSequence: 12,
+        prevObservedAt: base,
+        currentSequence: 12,
+        now: base + 3500,
+        targetDurationSec: 4
+      })).toBe('inconclusive');
+
+      expect(evaluatePlaylistLiveness({
+        prevSequence: 12,
+        prevObservedAt: base,
+        currentSequence: 12,
+        now: base + 4000,
+        targetDurationSec: 4
+      })).toBe('flat');
+
+      expect(evaluatePlaylistLiveness({
+        prevSequence: 12,
+        prevObservedAt: base,
+        currentSequence: 13,
+        now: base + 2000,
+        targetDurationSec: 4
+      })).toBe('advancing');
+
+      expect(evaluatePlaylistLiveness({
+        prevSequence: 0,
+        prevObservedAt: base,
+        currentSequence: 0,
+        now: base + 1000,
+        targetDurationSec: 4
+      })).toBe('frozen');
     });
   });
 });

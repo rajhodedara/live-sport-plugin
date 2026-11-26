@@ -666,6 +666,7 @@ class KafkaProvider extends BaseProvider {
     if (!this.configured || !sourceId) {
       return [];
     }
+    const preserveFailure = Boolean(opts && opts.preserveFailure);
 
     try {
       const manifestUrl = this.manifestUrl || process.env.KAFKA_MANIFEST_URL;
@@ -681,19 +682,49 @@ class KafkaProvider extends BaseProvider {
       });
 
       if (!res || !res.ok) {
+        if (preserveFailure) {
+          const status = Number(res && res.status) || 0;
+          if (!status) {
+            throw Object.assign(new Error('Kafka stream request failed'), {
+              code: 'KAFKA_STREAM_NO_RESPONSE',
+              kafkaFailureReason: 'unavailable'
+            });
+          }
+          const kafkaFailureReason = status === 429
+            ? 'http_429'
+            : (status === 408 || status >= 500)
+              ? 'http_5xx'
+              : 'definitive_rejection';
+          throw Object.assign(new Error(`Kafka stream HTTP ${status}`), {
+            statusCode: status,
+            code: `HTTP_${status}`,
+            kafkaFailureReason,
+            isFatal: kafkaFailureReason === 'definitive_rejection'
+          });
+        }
         return [];
       }
 
       const data = await res.json();
       const rawStreams = data && Array.isArray(data.streams) ? data.streams : [];
       const streams = [];
+      let blockedPolicyCount = 0;
 
       const channelLabel = (src && (src.channelName || src.name)) || '';
 
       for (const s of rawStreams) {
-        if (!s || !s.url || typeof s.url !== 'string') continue;
-        if (s.externalUrl || s.infoHash || s.ytId) continue;
-        if (isBlockedStream(s)) continue;
+        if (!s || !s.url || typeof s.url !== 'string') {
+          if (s && (s.externalUrl || s.infoHash || s.ytId)) blockedPolicyCount += 1;
+          continue;
+        }
+        if (s.externalUrl || s.infoHash || s.ytId) {
+          blockedPolicyCount += 1;
+          continue;
+        }
+        if (isBlockedStream(s)) {
+          blockedPolicyCount += 1;
+          continue;
+        }
 
         let title = channelLabel;
         if (s.title && s.title !== channelLabel) {
@@ -746,9 +777,14 @@ class KafkaProvider extends BaseProvider {
         streams.push(entity);
       }
 
+      if (preserveFailure && streams.length === 0 && typeof opts?.onResolveOutcome === 'function') {
+        opts.onResolveOutcome(blockedPolicyCount > 0 ? 'unsupported_policy' : 'empty_streams');
+      }
+
       return streams;
     } catch (err) {
       console.warn(`[KafkaProvider] resolveStream failed: ${safeErrorKind(err)}`);
+      if (preserveFailure) throw err;
       return [];
     }
   }

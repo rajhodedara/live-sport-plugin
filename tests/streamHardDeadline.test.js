@@ -313,4 +313,65 @@ describe('handleStream hard response deadline', () => {
       if (prevManifest === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = prevManifest;
     }
   });
+
+  test('collectEventStreams stops queued work at fake job deadline and detaches timed-out HTTP viewer without aborting job', async () => {
+    const { collectEventStreams } = require('../src/services/KafkaEventPlayback');
+    const prevJobTimeout = process.env.KAFKA_EVENT_JOB_TIMEOUT_MS;
+    process.env.KAFKA_EVENT_JOB_TIMEOUT_MS = '300';
+    try {
+      const candidates = [
+        { id: 'c1', name: 'Live | A vs B | 1' },
+        { id: 'c2', name: 'Live | A vs B | 2' },
+        { id: 'c3', name: 'Live | A vs B | 3' }
+      ];
+      const provider = {
+        getEventProbeConcurrency: () => 1,
+        withEventProbe: (fn, sig) => fn(sig),
+        eventCandidates: jest.fn(async () => candidates)
+      };
+      const jobSignals = [];
+      const probed = [];
+      let releaseFirst;
+      const probe = jest.fn(async (candidate, sig) => {
+        probed.push(candidate.id);
+        jobSignals.push(sig);
+        if (candidate.id === 'c1') {
+          await new Promise((resolve) => {
+            releaseFirst = resolve;
+            sig?.addEventListener('abort', resolve, { once: true });
+          });
+          return { streams: [], retryableReason: 'playlist_timeout' };
+        }
+        return { streams: [{ url: `https://cdn.example/${candidate.id}.m3u8` }], retryableReason: null };
+      });
+      const events = [];
+      const httpCtrl = new AbortController();
+      const firstViewer = collectEventStreams({
+        provider,
+        match: { id: 'job-deadline-fx', date: '1700000000000' },
+        signal: httpCtrl.signal,
+        probe,
+        onCandidateOutcome: (e) => events.push(e)
+      });
+
+      await jest.advanceTimersByTimeAsync(100);
+      httpCtrl.abort(new Error('HTTP viewer timed out'));
+      const firstResult = await firstViewer;
+      expect(firstResult.incomplete).toBe(true);
+      expect(firstResult.streams).toEqual([]);
+      // Viewer HTTP abort must NOT abort the background job signal.
+      expect(jobSignals[0]?.aborted).toBe(false);
+
+      // At 300ms job deadline, job aborts c1 and stops queued c2/c3 without running them.
+      await jest.advanceTimersByTimeAsync(250);
+      expect(jobSignals[0]?.aborted).toBe(true);
+      expect(probed).toEqual(['c1']);
+      expect(events).toContainEqual(expect.objectContaining({ candidateId: 'c2', stage: 'rejected', reason: 'deadline_expired' }));
+      expect(firstResult.streams).toEqual([]);
+      if (releaseFirst) releaseFirst();
+    } finally {
+      if (prevJobTimeout === undefined) delete process.env.KAFKA_EVENT_JOB_TIMEOUT_MS;
+      else process.env.KAFKA_EVENT_JOB_TIMEOUT_MS = prevJobTimeout;
+    }
+  });
 });

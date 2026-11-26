@@ -465,7 +465,7 @@ async function resolveSource(src, match, config, opts = {}) {
       baseDelayMs: 300,
       maxDelayMs: 1200,
       deadlineAt,
-      shouldRetryError: error => !opts?.signal?.aborted && isTransientError(error),
+      shouldRetryError: error => !opts?.signal?.aborted && (isTransientError(error) || isTransientStatus(error?.statusCode)),
       label: `resolve:${sourceName}`,
       // An empty result is a real answer ("nothing on offer"), not a failure —
       // retrying it would spend the budget to be told the same thing twice.
@@ -480,9 +480,10 @@ async function resolveSource(src, match, config, opts = {}) {
     }
   } catch (e) {
     reportInconclusiveResolution(e, opts);
+    try { opts?.onResolveFailure?.(e); } catch (_) {}
     // Distinguish "the network flaked and kept flaking" from "this provider is
     // broken": the first is expected noise, the second wants a stack trace.
-    if (isTransientError(e)) {
+    if (isTransientError(e) || isTransientStatus(e?.statusCode)) {
       console.warn(`[streams.js] ${sourceName}/${src.id} unreachable after ${RESOLVE_ATTEMPTS} attempt(s): ${e.message}`);
     } else {
       console.error(`[streams.js] ${sourceName}/${src.id} failed to resolve:`, e && e.stack ? e.stack : e);
@@ -546,7 +547,14 @@ function parseManifestProxyUrl(rawUrl) {
 
 // Probe the upstream segment directly; never request the addon's signed redirect.
 function buildProbeSegmentUrl(segmentUri, manifestUrl) {
-  return resolveSegmentUrl(segmentUri, manifestUrl);
+  if (typeof resolveSegmentUrl === 'function') {
+    return resolveSegmentUrl(segmentUri, manifestUrl);
+  }
+  try {
+    return new URL(segmentUri, manifestUrl).toString();
+  } catch (_) {
+    return '';
+  }
 }
 
 // Stream only the bounded speed sample through the shared guarded transport.
@@ -895,6 +903,185 @@ function upstreamPlaylistUrl(targetUrl) {
   }
 }
 
+function parseMediaSequenceAndDuration(playlistText) {
+  if (typeof playlistText !== 'string' || !playlistText.includes('#EXT')) {
+    return { mediaSequence: null, targetDurationSec: null, mediaSegments: [] };
+  }
+  const seqMatch = /#EXT-X-MEDIA-SEQUENCE:\s*(\d+)/.exec(playlistText);
+  const targetMatch = /#EXT-X-TARGETDURATION:\s*([\d.]+)/.exec(playlistText);
+  const mediaSequence = seqMatch ? Number(seqMatch[1]) : null;
+  const targetDurationSec = targetMatch ? Number(targetMatch[1]) : null;
+  const isMaster = /#EXT-X-STREAM-INF/i.test(playlistText);
+  const mediaSegments = [];
+  if (!isMaster) {
+    let expectSegment = false;
+    for (const rawLine of playlistText.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      if (line.startsWith('#EXTINF:')) {
+        expectSegment = true;
+        continue;
+      }
+      if (line.startsWith('#')) continue;
+      if (expectSegment) {
+        mediaSegments.push(line);
+        expectSegment = false;
+      }
+    }
+  }
+  return { mediaSequence, targetDurationSec, mediaSegments };
+}
+
+function evaluatePlaylistLiveness({ prevSequence, prevObservedAt, currentSequence, now = Date.now(), targetDurationSec }) {
+  if (currentSequence === 0) return 'frozen';
+  if (prevSequence != null && Number.isFinite(currentSequence) && currentSequence > 0) {
+    if (currentSequence > prevSequence) return 'advancing';
+    if (currentSequence === prevSequence) {
+      const targetMs = (Number.isFinite(targetDurationSec) && targetDurationSec > 0 ? targetDurationSec : 6) * 1000;
+      return (now - prevObservedAt) < targetMs ? 'inconclusive' : 'flat';
+    }
+  }
+  return 'ok';
+}
+
+function classifyKafkaFailureReason(error, status, phase = 'playlist') {
+  if (error) {
+    if (error.name === 'AbortError') return { reason: 'cancelled', retryable: false };
+    if (typeof error.kafkaFailureReason === 'string' && error.kafkaFailureReason) {
+      const r = error.kafkaFailureReason;
+      const retryable = !['definitive_rejection', 'unsupported_policy', 'ended_or_frozen', 'playlist_invalid', 'empty_streams', 'cancelled', 'deadline_expired'].includes(r);
+      return { reason: r, retryable };
+    }
+    if (error.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(error.code || '')) {
+      return { reason: 'capacity', retryable: true };
+    }
+    if (error.code === 'ERR_OUTBOUND_BLOCKED' || error.isFatal) {
+      return { reason: 'definitive_rejection', retryable: false };
+    }
+    const reasonHint = inconclusiveErrorReason(error);
+    if (reasonHint === 'capacity') return { reason: 'capacity', retryable: true };
+    if (reasonHint === 'timeout' || error.name === 'TimeoutError' || /timeout|timed out/i.test(error.message || '')) {
+      return { reason: phase === 'resolve' ? 'resolve_timeout' : phase === 'segment' ? 'segment_timeout' : 'playlist_timeout', retryable: true };
+    }
+    if (isTransientStatus(error.statusCode)) {
+      return { reason: error.statusCode === 429 ? 'http_429' : 'http_5xx', retryable: true };
+    }
+    if ([400, 401, 403, 404, 410].includes(error.statusCode)) {
+      return { reason: 'definitive_rejection', retryable: false };
+    }
+    if (isTransientError(error)) {
+      return { reason: 'unavailable', retryable: true };
+    }
+    return { reason: 'definitive_rejection', retryable: false };
+  }
+  if (status === 429) return { reason: 'http_429', retryable: true };
+  if (status === 408 || status >= 500) return { reason: 'http_5xx', retryable: true };
+  if ([400, 401, 403, 404, 410].includes(status)) return { reason: 'definitive_rejection', retryable: false };
+  return { reason: phase === 'segment' ? 'segment_failed' : 'playlist_invalid', retryable: false };
+}
+
+async function consumeSegmentMinimumEvidence(response) {
+  const contentType = response?.headers && typeof response.headers.get === 'function'
+    ? String(response.headers.get('content-type') || '')
+    : '';
+  if (/^(?:text\/html|application\/json)\b/i.test(contentType)) {
+    if (response.body && typeof response.body.cancel === 'function') {
+      await response.body.cancel().catch(() => {});
+    }
+    return false;
+  }
+  const contentLength = response?.headers && typeof response.headers.get === 'function'
+    ? response.headers.get('content-length')
+    : null;
+  if (response?.body && typeof response.body.getReader === 'function') {
+    const reader = response.body.getReader();
+    try {
+      const first = await reader.read();
+      const gotBytes = Boolean(first && !first.done && first.value && first.value.byteLength > 0);
+      await reader.cancel().catch(() => {});
+      if (!gotBytes && contentLength === '0') return false;
+      return gotBytes || contentLength === null || Number(contentLength) > 0;
+    } finally {
+      try { reader.releaseLock(); } catch (_) {}
+    }
+  }
+  if (response?.body && typeof response.body.cancel === 'function') {
+    await response.body.cancel().catch(() => {});
+  }
+  return contentLength === null || Number(contentLength) > 0;
+}
+
+async function verifyRecentEventSegment(playlistText, playlistUrl, reqHeaders, verifyDeadlineAt, options) {
+  const { mediaSegments } = parseMediaSequenceAndDuration(playlistText);
+  if (!mediaSegments.length) return { ok: true };
+  const recentUri = mediaSegments[mediaSegments.length - 1];
+  const segmentUrl = buildProbeSegmentUrl(recentUri, upstreamPlaylistUrl(playlistUrl));
+  if (!segmentUrl) return { ok: false, retryable: false, reason: 'segment_failed' };
+  const segHeaders = { ...reqHeaders, Range: 'bytes=0-1023' };
+
+  try {
+    const attemptResult = await withRetry(async () => {
+      options?.signal?.throwIfAborted();
+      const remainingMs = verifyDeadlineAt - Date.now();
+      const timeoutMs = Math.min(VERIFY_TIMEOUT_MS, remainingMs);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw createAttemptTimeoutError();
+      const timeout = new AbortController();
+      const attemptSignal = AbortSignal.any([timeout.signal, ...(options?.signal ? [options.signal] : [])]);
+      const timer = setTimeout(() => timeout.abort(createAttemptTimeoutError()), timeoutMs);
+      try {
+        const res = await guardedProbeFetch(segmentUrl, {
+          method: 'GET',
+          headers: segHeaders,
+          signal: attemptSignal,
+          timeoutMs
+        });
+        if (!res) {
+          return { ok: false, status: 0, definitive: true };
+        }
+        if (isTransientStatus(res.status)) {
+          if (res.body && typeof res.body.cancel === 'function') {
+            await res.body.cancel().catch(() => {});
+          }
+          return { ok: false, status: res.status };
+        }
+        if (!res.ok) {
+          if (res.body && typeof res.body.cancel === 'function') {
+            await res.body.cancel().catch(() => {});
+          }
+          return { ok: false, status: res.status, definitive: true };
+        }
+        const hasEvidence = await consumeSegmentMinimumEvidence(res);
+        if (!hasEvidence) {
+          return { ok: false, status: res.status, definitive: true };
+        }
+        return { ok: true, status: res.status };
+      } finally {
+        clearTimeout(timer);
+      }
+    }, {
+      attempts: VERIFY_ATTEMPTS,
+      deadlineAt: verifyDeadlineAt,
+      label: 'verify-segment',
+      shouldRetryError: error => !options?.signal?.aborted && isTransientError(error),
+      shouldRetryResult: r => !r.ok && !r.definitive && isTransientStatus(r.status)
+    });
+
+    if (attemptResult && attemptResult.ok) return { ok: true };
+    if (attemptResult && !attemptResult.definitive && isTransientStatus(attemptResult.status)) {
+      const classified = classifyKafkaFailureReason(null, attemptResult.status, 'segment');
+      return { ok: false, retryable: classified.retryable, reason: classified.reason };
+    }
+    return { ok: false, retryable: false, reason: 'segment_failed' };
+  } catch (err) {
+    const classified = classifyKafkaFailureReason(err, null, 'segment');
+    return {
+      ok: false,
+      retryable: classified.retryable,
+      reason: classified.reason === 'definitive_rejection' ? 'segment_failed' : classified.reason
+    };
+  }
+}
+
 async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts = {}) {
   // No new probe starts after the shared budget is spent; those streams are kept
   // unverified (same policy as a 403 with no referer) instead of being dropped.
@@ -997,6 +1184,10 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
         const inconclusive = reportInconclusiveResolution(fetchErr, opts);
         const kind = inconclusive ? 'temporarily unavailable' : isTransientError(fetchErr) ? 'unreachable after retries' : 'hard error';
         console.log(`[Filter] Dropped stream (${kind}): ${targetUrl} - ${fetchErr.message}`);
+        if (opts.onVerifyFailure) {
+          const classified = classifyKafkaFailureReason(fetchErr, null, 'playlist');
+          opts.onVerifyFailure(classified.reason, classified.retryable);
+        }
         if (cacheKey && !inconclusive) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -1043,7 +1234,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       }
 
       // Edge servers return 404 for dead streams, 403 for IP-locked/expired tokens, 502 for upstream failures
-      if (res.status === 404 || res.status === 403 || res.status >= 500) {
+      if (res.status === 404 || res.status === 403 || res.status === 429 || res.status >= 500 || res.status === 408 || res.status === 401 || res.status === 410) {
         // A 403 that persisted through the repair attempt, with a referer still
         // attached, is a genuine refusal.
         // A 403 with no referer available at all is not proof of a dead stream,
@@ -1053,18 +1244,35 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
           console.log(`[Filter] Keeping stream despite 403 (no referer available): ${targetUrl}`);
           return s;
         }
-        console.log(`[Filter] Dropped dead stream (${res.status}): ${targetUrl}`);
-        if (cacheKey) resolveCache.noteFailure(cacheKey);
-        return null;
+        if (opts.onVerifyFailure) {
+          const classified = classifyKafkaFailureReason(null, res.status, 'playlist');
+          opts.onVerifyFailure(classified.reason, classified.retryable);
+          if (classified.retryable) {
+            console.log(`[Filter] Temporarily unavailable stream (${res.status}): ${targetUrl}`);
+            return null;
+          }
+        }
+        if (res.status === 404 || res.status === 403 || res.status >= 500) {
+          console.log(`[Filter] Dropped dead stream (${res.status}): ${targetUrl}`);
+          if (cacheKey) resolveCache.noteFailure(cacheKey);
+          return null;
+        }
       }
 
       // Some CDNs (like lb8.strmd.st) return 200 OK with "Not found" when token is expired.
       // If it doesn't contain #EXT or <MPD (for DASH manifests), it's not a valid playlist.
       const isMpd = targetUrl.includes('.mpd') || bodySample.includes('<MPD') || bodySample.includes('<mpd');
       if (opts.requireLivePlaylist && (res.status !== 200 || !bodySample.trimStart().startsWith('#EXTM3U') ||
-          !/^(?:#EXTINF:|#EXT-X-STREAM-INF:)/m.test(bodySample) || bodySample.includes('#EXT-X-ENDLIST'))) return null;
+          !/^(?:#EXTINF:|#EXT-X-STREAM-INF:)/m.test(bodySample) || bodySample.includes('#EXT-X-ENDLIST'))) {
+        if (opts.onVerifyFailure) {
+          const reason = bodySample.includes('#EXT-X-ENDLIST') ? 'ended_or_frozen' : 'playlist_invalid';
+          opts.onVerifyFailure(reason, false);
+        }
+        return null;
+      }
       if (lacksPlaylistEvidence({ isMpd, isMp4, bodySample, bodyTruncated })) {
         console.log(`[Filter] Dropped fake 200 stream (Invalid M3U8 body): ${targetUrl}`);
+        if (opts.onVerifyFailure) opts.onVerifyFailure('playlist_invalid', false);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -1072,6 +1280,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Reject Pluto TV takedown slates ("That's a wrap" / "no longer available on this device" loops)
       if (/takedownslate|ptv_takedownslates/i.test(bodySample)) {
         console.log(`[Filter] Dropped Pluto takedown slate: ${targetUrl}`);
+        if (opts.onVerifyFailure) opts.onVerifyFailure('unsupported_policy', false);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -1081,6 +1290,7 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // first segment until the token dies.
       if (s._source === 'kafka' && process.env.KAFKA_LIVENESS_GUARD_ENABLED !== 'false' && isFrozenMediaPlaylist(bodySample)) {
         console.log(`[Filter] Dropped frozen playlist (sequence 0): ${targetUrl}`);
+        if (opts.onVerifyFailure) opts.onVerifyFailure('ended_or_frozen', false);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
       }
@@ -1090,8 +1300,35 @@ async function verifyStreams(streams, cacheKey, m3u8Parser, resolveCache, opts =
       // Reject PNG-cloaked streams (HLS playlists pointing to fake .png segments)
       if (/(?:^|\n)[^#\n\r]+\.png(?:\?[^\n\r]*)?(?:\r?\n|$)/i.test(bodySample)) {
         console.log(`[Filter] Dropped PNG-cloaked stream: ${targetUrl}`);
+        if (opts.onVerifyFailure) opts.onVerifyFailure('unsupported_policy', false);
         if (cacheKey) resolveCache.noteFailure(cacheKey);
         return null;
+      }
+
+      if (opts.verifyEventSegment && !isMpd && !isMp4) {
+        if (opts.livenessObservation) {
+          const { mediaSequence, targetDurationSec } = parseMediaSequenceAndDuration(bodySample);
+          const liveness = evaluatePlaylistLiveness({
+            ...opts.livenessObservation,
+            currentSequence: mediaSequence,
+            targetDurationSec
+          });
+          if (liveness === 'inconclusive') {
+            opts.onVerifyFailure?.('liveness_inconclusive', true);
+            return null;
+          }
+          if (liveness === 'flat' || liveness === 'frozen') {
+            opts.onVerifyFailure?.('ended_or_frozen', false);
+            return null;
+          }
+        }
+        const effectiveHeaders = repairedHeaders || reqHeaders;
+        const segOutcome = await verifyRecentEventSegment(bodySample, targetUrl, effectiveHeaders, verifyDeadlineAt, opts);
+        if (!segOutcome.ok) {
+          if (opts.onVerifyFailure) opts.onVerifyFailure(segOutcome.reason, segOutcome.retryable);
+          if (!segOutcome.retryable && cacheKey) resolveCache.noteFailure(cacheKey);
+          return null;
+        }
       }
 
       if (repairedHeaders) {
@@ -1213,19 +1450,22 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
     const timeoutController = new AbortController();
     const timer = setTimeout(() => timeoutController.abort(createAttemptTimeoutError()), Math.max(1, deadlineAt - Date.now()));
     const signal = options.signal ? AbortSignal.any([options.signal, timeoutController.signal]) : timeoutController.signal;
-    const probeOpts = {
+    const baseProbeOpts = {
       ...options,
       deadlineAt: undefined,
       signal: undefined,
       onInconclusive: undefined,
+      onCandidateOutcome: undefined,
       requireLivePlaylist: true,
-      skipSpeedProbe: true
+      skipSpeedProbe: true,
+      verifyEventSegment: true
     };
     try {
       const outcome = await collectEventStreams({
         provider,
         match,
         signal,
+        onCandidateOutcome: options.onCandidateOutcome,
         metrics: stats => {
           try {
             const health = container.resolve('providerHealthService');
@@ -1233,7 +1473,28 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
           } catch (_) { /* missing metrics cannot prevent playback */ }
         },
         onProgress: options.onProgress,
-        probe: async candidate => {
+        probe: async (candidate, jobSignal) => {
+          let resolveReason = null;
+          let resolveRetryable = false;
+          let resolveOutcome = null;
+          let verifyReason = null;
+          let verifyRetryable = false;
+
+          const probeOpts = {
+            ...baseProbeOpts,
+            signal: jobSignal,
+            preserveFailure: true,
+            onResolveOutcome: (r) => { resolveOutcome = r; },
+            onResolveFailure: (err) => {
+              const classified = classifyKafkaFailureReason(err, null, 'resolve');
+              resolveReason = classified.reason;
+              resolveRetryable = classified.retryable;
+            },
+            onVerifyFailure: (reason, retryable) => {
+              verifyReason = reason;
+              verifyRetryable = Boolean(retryable);
+            }
+          };
           const channel = {
             source: 'kafka',
             matchMode: 'event',
@@ -1247,10 +1508,38 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
           const checked = [];
           // Verify all distinct direct URLs of one candidate sequentially inside one probe slot.
           for (const s of direct) {
+            if (jobSignal?.aborted) {
+              verifyReason = 'deadline_expired';
+              verifyRetryable = false;
+              break;
+            }
             const verified = await verifyStreams([s], null, m3u8Parser, resolveCache, probeOpts);
-            for (const v of verified) checked.push({ ...v, _kafkaMatchMode: 'event', _isChannelFallback: false });
+            for (const v of verified) {
+              checked.push({ ...v, _kafkaMatchMode: 'event', _isChannelFallback: false, _kafkaCandidateId: String(candidate.id) });
+            }
           }
-          return checked;
+          if (checked.length > 0) {
+            return { streams: checked, retryableReason: null };
+          }
+          if (verifyReason) {
+            return {
+              streams: [],
+              retryableReason: verifyRetryable ? verifyReason : null,
+              rejectReason: verifyRetryable ? null : verifyReason
+            };
+          }
+          if (resolveReason) {
+            return {
+              streams: [],
+              retryableReason: resolveRetryable ? resolveReason : null,
+              rejectReason: resolveRetryable ? null : resolveReason
+            };
+          }
+          return {
+            streams: [],
+            retryableReason: null,
+            rejectReason: resolveOutcome || (direct.length === 0 ? 'empty_streams' : 'definitive_rejection')
+          };
         }
       });
       const rows = Array.isArray(outcome) ? outcome : (outcome?.streams || []);
@@ -1523,6 +1812,44 @@ function deduplicateResolutions(streams) {
   return streams;
 }
 
+const MAX_EVENT_TRACE_EVENTS = 200;
+
+function isKafkaTraceSelected(matchId) {
+  const raw = process.env.KAFKA_EVENT_TRACE_FIXTURE_ID || process.env.KAFKA_EVENT_TRACE_FIXTURES || '';
+  if (!raw || !matchId) return false;
+  const target = String(matchId).trim();
+  return raw.split(',').some(item => item.trim() === target);
+}
+
+function createFixtureTraceSink(matchId, userCallback) {
+  const operatorEnabled = isKafkaTraceSelected(matchId);
+  if (!operatorEnabled && typeof userCallback !== 'function') return null;
+  const startedAt = Date.now();
+  let emitted = 0;
+  const latestByCandidate = new Map();
+  const emit = (rawEvent) => {
+    if (!rawEvent || !rawEvent.candidateId) return;
+    if (emitted >= MAX_EVENT_TRACE_EVENTS) return;
+    emitted += 1;
+    const event = {
+      fixtureId: String(rawEvent.fixtureId || matchId || ''),
+      candidateId: String(rawEvent.candidateId),
+      stage: String(rawEvent.stage || ''),
+      reason: String(rawEvent.reason || rawEvent.stage || ''),
+      attempt: Number(rawEvent.attempt) || 0,
+      elapsedMs: Number.isFinite(rawEvent.elapsedMs) ? rawEvent.elapsedMs : Math.max(0, Date.now() - startedAt)
+    };
+    latestByCandidate.set(event.candidateId, event);
+    if (operatorEnabled) {
+      console.info('[KafkaEventTrace]', JSON.stringify(event));
+    }
+    if (typeof userCallback === 'function') {
+      try { userCallback(event); } catch (_) {}
+    }
+  };
+  return { emit, latestByCandidate };
+}
+
 async function handleStream(type, id, config) {
   if ((type !== 'tv' && type !== 'series' && type !== 'channel') || !id.startsWith('nuvio_sport_')) {
     return { streams: [] };
@@ -1675,6 +2002,7 @@ async function handleStream(type, id, config) {
   const PRIORITY1_QUORUM = 3;
   const inFlight = [];
   const progressUnsubs = [];
+  const traceSink = createFixtureTraceSink(match.id, config?._onCandidateOutcome);
   let kafkaProviderInstance = null;
   if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
     try { kafkaProviderInstance = container.resolve('kafkaProvider'); } catch (_) {}
@@ -1713,7 +2041,11 @@ async function handleStream(type, id, config) {
     }
     const promise = resolveCache
       .getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
-        ...(src.kafkaFixtureEvents ? { deadlineAt: resolutionStartedAt + HARD_DEADLINE_MS, onProgress: pushProgress } : {}),
+        ...(src.kafkaFixtureEvents ? {
+          deadlineAt: resolutionStartedAt + HARD_DEADLINE_MS,
+          onProgress: pushProgress,
+          ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {})
+        } : {}),
         onInconclusive() { state.inconclusive = true; }
       }), timingStream)
       .then((minted) => {
@@ -1945,6 +2277,9 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Dropped ${beforeDashPolicy - policyAllowed.length} DASH stream(s) by bandwidth policy for ${matchId}`);
   }
 
+  const verifiedCandidateIds = new Set(
+    streams.map(s => s && s._kafkaCandidateId).filter(Boolean).map(String)
+  );
   // Collapse duplicate streams that arise when several sources of one match
   // resolve to the same underlying clip (e.g. LiveTV's "Other Videos" siblings
   // are re-listed by every clip page). Keyed on the playable identity so real
@@ -2281,6 +2616,45 @@ async function handleStream(type, id, config) {
 
   streams.sort((a, b) => compareStreams(a, b, languagePriorities, hasExplicitLanguage(config), { mixedKafkaFixture }));
 
+  if (traceSink) {
+    const publishedCandidateIds = new Set(
+      streams.map(s => s && s._kafkaCandidateId).filter(Boolean).map(String)
+    );
+    for (const candidateId of publishedCandidateIds) {
+      const latest = traceSink.latestByCandidate.get(candidateId);
+      traceSink.emit({
+        fixtureId: match.id,
+        candidateId,
+        stage: 'published',
+        reason: 'published',
+        attempt: latest?.attempt || 0
+      });
+    }
+    for (const candidateId of verifiedCandidateIds) {
+      if (publishedCandidateIds.has(candidateId)) continue;
+      const latest = traceSink.latestByCandidate.get(candidateId);
+      traceSink.emit({
+        fixtureId: match.id,
+        candidateId,
+        stage: 'rejected',
+        reason: 'url_deduplicated',
+        attempt: latest?.attempt || 0
+      });
+    }
+    for (const [candidateId, latest] of traceSink.latestByCandidate.entries()) {
+      if (publishedCandidateIds.has(candidateId)) continue;
+      if (latest.stage === 'queued' || latest.stage === 'probe_started' || latest.stage === 'retry_scheduled') {
+        traceSink.emit({
+          fixtureId: match.id,
+          candidateId,
+          stage: 'rejected',
+          reason: 'response_cutoff',
+          attempt: latest.attempt
+        });
+      }
+    }
+  }
+
   // Pinned donation link: unshifted to index 0 so it appears at the top of every match
   const donationUrl = process.env.DONATION_URL || '/donate';
   if (streams.length > 0 && donationUrl && donationUrl !== 'disabled' && donationUrl !== 'false') {
@@ -2405,6 +2779,8 @@ module.exports = {
   // without requiring a live container / IoC / match-cache setup.
   deduplicateResolutions,
   applyParsedPlaylistQuality,
+  evaluatePlaylistLiveness,
+  parseMediaSequenceAndDuration,
   formatChannelStreamTitle,
   isChannelFallbackSource,
   applyFixtureChannelFallback,

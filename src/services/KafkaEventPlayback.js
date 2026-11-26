@@ -1,5 +1,7 @@
 'use strict';
 
+const { createAttemptTimeoutError, isTransientError, isTransientStatus } = require('./retry');
+
 const providerJobs = new WeakMap();
 const fallbackJobs = new Map();
 const providerListeners = new WeakMap();
@@ -8,6 +10,25 @@ const fallbackListeners = new Map();
 const DEFAULT_JOB_TIMEOUT_MS = 60 * 1000;
 const DEFAULT_UPSTREAM_MIN_LOCAL = 6;
 const DEFAULT_PROBE_WORKERS = 2;
+
+const RETRYABLE_REASONS = new Set([
+  'resolve_timeout',
+  'playlist_timeout',
+  'segment_timeout',
+  'http_429',
+  'http_5xx',
+  'capacity',
+  'unavailable',
+  'liveness_inconclusive',
+  'timeout'
+]);
+
+const TIMEOUT_CODES = new Set([
+  'ETIMEDOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT'
+]);
 
 function getProbeConcurrency(provider) {
   const value = typeof provider?.getEventProbeConcurrency === 'function'
@@ -79,14 +100,65 @@ function fixtureJobKey(match) {
   return JSON.stringify([String(match?.id || ''), String(match?.date || '')]);
 }
 
+function emitCandidateOutcome(job, { candidateId, stage, reason, attempt }) {
+  if (!job || !job.outcomeListeners || job.outcomeListeners.size === 0) return;
+  const event = {
+    fixtureId: job.fixtureId,
+    candidateId: String(candidateId || ''),
+    stage,
+    reason: String(reason || stage),
+    attempt: Number(attempt) || 0,
+    elapsedMs: Math.max(0, Date.now() - job.startedAt)
+  };
+  for (const listener of job.outcomeListeners) {
+    try { listener(event); } catch (_) {}
+  }
+}
+
+function classifyFailureReason(err, signal) {
+  if (signal?.aborted || err?.name === 'AbortError') {
+    return { reason: 'deadline_expired', retryable: false };
+  }
+  if (err && typeof err.kafkaFailureReason === 'string' && err.kafkaFailureReason) {
+    const r = err.kafkaFailureReason;
+    return { reason: r, retryable: RETRYABLE_REASONS.has(r) };
+  }
+  if (err?.code === 'ERR_OUTBOUND_CAPACITY' || /^ERR_NATIVE_(POOL|SLOT)_/.test(err?.code || '')) {
+    return { reason: 'capacity', retryable: true };
+  }
+  if (err?.name === 'TimeoutError' || TIMEOUT_CODES.has(err?.code)) {
+    return { reason: 'resolve_timeout', retryable: true };
+  }
+  if (err?.statusCode === 429) {
+    return { reason: 'http_429', retryable: true };
+  }
+  if (isTransientStatus(err?.statusCode)) {
+    return { reason: 'http_5xx', retryable: true };
+  }
+  if (err?.code === 'ERR_OUTBOUND_BLOCKED' || err?.isFatal || [400, 401, 403, 404, 410].includes(err?.statusCode)) {
+    return { reason: 'definitive_rejection', retryable: false };
+  }
+  if (isTransientError(err)) {
+    return { reason: 'unavailable', retryable: true };
+  }
+  return { reason: 'definitive_rejection', retryable: false };
+}
+
 function enqueueCandidates(job, candidates, maxCandidates) {
   for (const candidate of candidates || []) {
     if (!candidate?.id) continue;
     const id = String(candidate.id);
     if (job.queuedIds.has(id) || job.attemptedIds.has(id)) continue;
-    if (job.queue.length >= maxCandidates) break;
+    if (job.uniqueCandidateIds.size >= maxCandidates) break;
+    job.uniqueCandidateIds.add(id);
     job.queuedIds.add(id);
     job.queue.push(candidate);
+    emitCandidateOutcome(job, {
+      candidateId: id,
+      stage: 'queued',
+      reason: 'queued',
+      attempt: 0
+    });
   }
 }
 
@@ -123,11 +195,33 @@ function wakeWaiters(job) {
   }
 }
 
-function runWithProbeSlot(provider, candidate, probe, signal) {
-  if (typeof provider?.withEventProbe === 'function') {
-    return provider.withEventProbe(() => probe(candidate, signal), signal);
+function wakeQueueWaiters(job) {
+  for (const wake of job.queueWaiters) {
+    try { wake(); } catch (_) {}
   }
-  return Promise.resolve().then(() => probe(candidate, signal));
+  job.queueWaiters.clear();
+}
+
+function runWithProbeSlot(provider, fn, signal) {
+  if (typeof provider?.withEventProbe === 'function') {
+    return provider.withEventProbe(fn, signal);
+  }
+  return Promise.resolve().then(fn);
+}
+
+function normalizeProbeOutcome(rawOutcome) {
+  if (Array.isArray(rawOutcome)) {
+    return { streams: rawOutcome, retryableReason: null, rejectReason: null };
+  }
+  if (rawOutcome && typeof rawOutcome === 'object') {
+    return {
+      streams: Array.isArray(rawOutcome.streams) ? rawOutcome.streams : [],
+      retryableReason: rawOutcome.retryableReason || null,
+      rejectReason: rawOutcome.rejectReason || null,
+      cancelledBeforeStart: Boolean(rawOutcome.cancelledBeforeStart)
+    };
+  }
+  return { streams: [], retryableReason: null, rejectReason: null };
 }
 
 async function pumpFixtureJob(job, { provider, match, probe }) {
@@ -137,8 +231,19 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
   const minLocal = getUpstreamMinLocal(provider);
   let upstreamInFlight = null;
 
+  const remainingMs = Math.max(0, job.workDeadlineAt - Date.now());
+  let jobTimer = null;
+  if (remainingMs <= 0) {
+    job.controller.abort(createAttemptTimeoutError());
+  } else {
+    jobTimer = setTimeout(() => {
+      job.controller.abort(createAttemptTimeoutError());
+      wakeQueueWaiters(job);
+    }, remainingMs);
+  }
+
   try {
-    if (!job.localLoaded) {
+    if (!job.localLoaded && !job.controller.signal.aborted && Date.now() < job.workDeadlineAt) {
       job.localLoaded = true;
       const local = (await provider.eventCandidates(match, {
         upstream: false,
@@ -149,29 +254,52 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
     }
 
     const ensureUpstream = async () => {
-      if (job.upstreamTried || Date.now() >= job.workDeadlineAt) return;
+      if (job.upstreamTried || job.controller.signal.aborted || Date.now() >= job.workDeadlineAt) return;
       if (job.localHits >= minLocal && job.verifiedByUrl.size > 0) return;
       if (upstreamInFlight) return upstreamInFlight;
       job.upstreamTried = true;
       upstreamInFlight = Promise.resolve()
-        .then(() => provider.eventCandidates(match, { upstream: true, stats: job.searchStats }))
+        .then(() => provider.eventCandidates(match, {
+          upstream: true,
+          signal: job.controller.signal,
+          stats: job.searchStats
+        }))
         .then((extra) => {
           enqueueCandidates(job, extra, maxCandidates);
         })
         .catch((err) => {
           if (!job.verifiedByUrl.size && !job.queue.length) job.lastError = err;
         })
-        .finally(() => { upstreamInFlight = null; });
+        .finally(() => {
+          upstreamInFlight = null;
+          wakeQueueWaiters(job);
+        });
       return upstreamInFlight;
     };
 
-    const nextCandidate = async () => {
+    const waitQueueChange = () => new Promise((resolve) => {
+      const done = () => {
+        job.queueWaiters.delete(done);
+        job.controller.signal.removeEventListener('abort', done);
+        resolve();
+      };
+      if (job.controller.signal.aborted) {
+        resolve();
+        return;
+      }
+      job.queueWaiters.add(done);
+      job.controller.signal.addEventListener('abort', done, { once: true });
+    });
+
+    const nextWorkItem = async () => {
       for (;;) {
-        if (Date.now() >= job.workDeadlineAt) return null;
+        if (job.controller.signal.aborted || Date.now() >= job.workDeadlineAt) return null;
         if (job.nextIndex < job.queue.length && job.attemptedIds.size < maxCandidates) {
           const candidate = job.queue[job.nextIndex++];
-          if (!candidate?.id || job.attemptedIds.has(String(candidate.id))) continue;
-          return candidate;
+          const id = candidate?.id ? String(candidate.id) : '';
+          if (!id || job.attemptedIds.has(id)) continue;
+          job.attemptedIds.add(id);
+          return { candidate, attempt: 1, retryReason: null };
         }
         if (upstreamInFlight) {
           await upstreamInFlight;
@@ -181,27 +309,126 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
           await ensureUpstream();
           continue;
         }
+        if (job.retryQueue.length > 0) {
+          return job.retryQueue.shift();
+        }
+        if (job.inFlightProbes > 0) {
+          await waitQueueChange();
+          continue;
+        }
         return null;
       }
     };
 
     const worker = async () => {
       for (;;) {
-        const candidate = await nextCandidate();
-        if (!candidate) break;
+        const item = await nextWorkItem();
+        if (!item) break;
+        const { candidate, attempt, retryReason } = item;
         const id = String(candidate.id);
-        job.attemptedIds.add(id);
+        job.inFlightProbes += 1;
         try {
-          const streams = await runWithProbeSlot(provider, candidate, probe, undefined);
+          const rawOutcome = await runWithProbeSlot(provider, async () => {
+            if (job.controller.signal.aborted || Date.now() >= job.workDeadlineAt) {
+              return { streams: [], retryableReason: null, rejectReason: 'deadline_expired', cancelledBeforeStart: true };
+            }
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'probe_started',
+              reason: attempt > 1 ? (retryReason || 'retry') : 'initial',
+              attempt
+            });
+            return probe(candidate, job.controller.signal);
+          }, job.controller.signal);
+
+          const outcome = normalizeProbeOutcome(rawOutcome);
+          if (outcome.cancelledBeforeStart) {
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'rejected',
+              reason: 'deadline_expired',
+              attempt
+            });
+            continue;
+          }
+
           let added = false;
-          for (const stream of Array.isArray(streams) ? streams : []) {
-            if (!stream?.url || job.verifiedByUrl.has(stream.url)) continue;
-            job.verifiedByUrl.set(stream.url, stream);
+          let hadAnyUrl = false;
+          for (const stream of outcome.streams) {
+            if (!stream?.url) continue;
+            hadAnyUrl = true;
+            if (job.verifiedByUrl.has(stream.url)) continue;
+            job.verifiedByUrl.set(stream.url, { ...stream, _kafkaCandidateId: id });
             added = true;
           }
-          if (added) emitProgress(provider, job);
-        } catch (_) {
-          // Probe failures skip the candidate without stopping the rolling queue.
+
+          if (added) {
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'verified',
+              reason: 'verified',
+              attempt
+            });
+            emitProgress(provider, job);
+            continue;
+          }
+
+          if (hadAnyUrl) {
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'rejected',
+              reason: 'url_deduplicated',
+              attempt
+            });
+            continue;
+          }
+
+          const retryableReason = outcome.retryableReason && RETRYABLE_REASONS.has(outcome.retryableReason)
+            ? outcome.retryableReason
+            : null;
+          if (retryableReason && attempt < 2 && !job.controller.signal.aborted && Date.now() < job.workDeadlineAt) {
+            job.retryQueue.push({ candidate, attempt: 2, retryReason: retryableReason });
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'retry_scheduled',
+              reason: retryableReason,
+              attempt
+            });
+            wakeQueueWaiters(job);
+            continue;
+          }
+
+          const finalReason = job.controller.signal.aborted || Date.now() >= job.workDeadlineAt
+            ? 'deadline_expired'
+            : (outcome.rejectReason || outcome.retryableReason || 'definitive_rejection');
+          emitCandidateOutcome(job, {
+            candidateId: id,
+            stage: 'rejected',
+            reason: finalReason,
+            attempt
+          });
+        } catch (err) {
+          const { reason, retryable } = classifyFailureReason(err, job.controller.signal);
+          if (retryable && attempt < 2 && !job.controller.signal.aborted && Date.now() < job.workDeadlineAt) {
+            job.retryQueue.push({ candidate, attempt: 2, retryReason: reason });
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'retry_scheduled',
+              reason,
+              attempt
+            });
+            wakeQueueWaiters(job);
+          } else {
+            emitCandidateOutcome(job, {
+              candidateId: id,
+              stage: 'rejected',
+              reason,
+              attempt
+            });
+          }
+        } finally {
+          job.inFlightProbes -= 1;
+          wakeQueueWaiters(job);
         }
       }
     };
@@ -210,18 +437,44 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
     await Promise.all(Array.from({ length: probeWorkers }, worker));
 
     // Re-check fallback upstream once all initial workers drain if nothing verified locally.
-    if (!job.upstreamTried && job.verifiedByUrl.size === 0 && Date.now() < job.workDeadlineAt && job.attemptedIds.size < maxCandidates) {
+    if (!job.upstreamTried && job.verifiedByUrl.size === 0 && !job.controller.signal.aborted && Date.now() < job.workDeadlineAt && job.attemptedIds.size < maxCandidates) {
       await ensureUpstream();
-      if (job.nextIndex < job.queue.length) {
+      if (job.nextIndex < job.queue.length || job.retryQueue.length > 0) {
         await Promise.all(Array.from({ length: probeWorkers }, worker));
       }
     }
 
+    const timedOut = job.controller.signal.aborted || Date.now() >= job.workDeadlineAt;
+    if (timedOut) {
+      while (job.nextIndex < job.queue.length && job.attemptedIds.size < maxCandidates) {
+        const candidate = job.queue[job.nextIndex++];
+        const id = candidate?.id ? String(candidate.id) : '';
+        if (!id || job.attemptedIds.has(id)) continue;
+        job.attemptedIds.add(id);
+        emitCandidateOutcome(job, {
+          candidateId: id,
+          stage: 'rejected',
+          reason: 'deadline_expired',
+          attempt: 0
+        });
+      }
+      while (job.retryQueue.length > 0) {
+        const item = job.retryQueue.shift();
+        emitCandidateOutcome(job, {
+          candidateId: item.candidate?.id,
+          stage: 'rejected',
+          reason: 'deadline_expired',
+          attempt: item.attempt
+        });
+      }
+    }
+
     const drained = job.nextIndex >= job.queue.length || job.attemptedIds.size >= maxCandidates;
-    if (drained) {
+    if (!timedOut && drained && job.retryQueue.length === 0) {
       job.done = true;
       job.lastStopReason = job.verifiedByUrl.size > 0 ? 'complete' : 'exhausted';
     } else {
+      job.done = true;
       job.lastStopReason = 'deadline';
     }
   } catch (err) {
@@ -231,7 +484,10 @@ async function pumpFixtureJob(job, { provider, match, probe }) {
       job.lastStopReason = 'exhausted';
     }
   } finally {
+    if (jobTimer) clearTimeout(jobTimer);
     job.running = false;
+    if (job.done) job.outcomeListeners.clear();
+    wakeQueueWaiters(job);
     wakeWaiters(job);
   }
 }
@@ -240,14 +496,20 @@ function getOrCreateJob(provider, match) {
   const store = jobStoreFor(provider);
   const key = fixtureJobKey(match);
   let job = store.get(key);
-  if (!job || (job.done && job.consumedComplete)) {
+  if (!job || (job.done && job.consumedComplete) || (!job.running && Date.now() >= job.workDeadlineAt)) {
+    const startedAt = Date.now();
     job = {
       id: key,
+      fixtureId: String(match?.id || ''),
+      startedAt,
       queue: [],
       queuedIds: new Set(),
+      uniqueCandidateIds: new Set(),
       attemptedIds: new Set(),
+      retryQueue: [],
       verifiedByUrl: new Map(),
       nextIndex: 0,
+      inFlightProbes: 0,
       upstreamTried: false,
       localLoaded: false,
       localHits: 0,
@@ -258,21 +520,41 @@ function getOrCreateJob(provider, match) {
       lastStopReason: 'exhausted',
       lastError: null,
       waiters: new Set(),
-      workDeadlineAt: Date.now() + getJobTimeoutMs()
+      queueWaiters: new Set(),
+      outcomeListeners: new Set(),
+      controller: new AbortController(),
+      workDeadlineAt: startedAt + getJobTimeoutMs()
     };
     store.set(key, job);
-  } else if (!job.done) {
-    job.workDeadlineAt = Date.now() + getJobTimeoutMs();
   }
   return job;
 }
 
 // A single fixture coordinator runs rolling probe workers up to the job budget,
 // exposes verified rows immediately at HTTP deadlines, and resumes pending items
-// cleanly on later clicks without re-probing completed candidates.
-async function collectEventStreams({ provider, match, probe, signal, metrics, onProgress }) {
+// cleanly on later clicks without re-probing completed candidates or extending
+// the original job window.
+async function collectEventStreams({ provider, match, probe, signal, metrics, onProgress, onCandidateOutcome }) {
   const job = getOrCreateJob(provider, match);
   const removeProgress = typeof onProgress === 'function' ? addKeyListener(provider, job.id, onProgress) : null;
+  const hasOutcomeListener = typeof onCandidateOutcome === 'function';
+  if (hasOutcomeListener) job.outcomeListeners.add(onCandidateOutcome);
+
+  if (hasOutcomeListener && job.verifiedByUrl.size > 0) {
+    const seenCandidates = new Set();
+    for (const stream of job.verifiedByUrl.values()) {
+      const candidateId = stream?._kafkaCandidateId;
+      if (!candidateId || seenCandidates.has(candidateId)) continue;
+      seenCandidates.add(candidateId);
+      emitCandidateOutcome(job, {
+        candidateId,
+        stage: 'cache_hit',
+        reason: 'worker_job_hit',
+        attempt: 0
+      });
+    }
+  }
+
   if (removeProgress && job.verifiedByUrl.size > 0) {
     try { onProgress([...job.verifiedByUrl.values()]); } catch (_) {}
   }
@@ -309,6 +591,7 @@ async function collectEventStreams({ provider, match, probe, signal, metrics, on
     finishedCleanly = true;
   } finally {
     if (removeProgress) removeProgress();
+    if (hasOutcomeListener && job.done) job.outcomeListeners.delete(onCandidateOutcome);
     const reason = job.done ? job.lastStopReason : (signal?.aborted ? 'deadline' : job.lastStopReason);
     if (job.done) job.consumedComplete = true;
     try {
