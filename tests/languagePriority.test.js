@@ -325,6 +325,25 @@ describe('Mixed Kafka fixture quality ranking', () => {
 
     expect(compareStreams(spanish720, german1080, priorities, hasExplicitLanguage(config), { mixedKafkaFixture: true })).toBeLessThan(0);
   });
+
+  it('keeps equal-height Kafka feeds in the same order when a bitrate is missing', () => {
+    const feed = (matchMode, bitrate, score) => direct({
+      _source: 'kafka', _kafkaMatchMode: matchMode, language: 'English',
+      _kafkaVerifiedHeight: 1080, _kafkaMeasuredBitrateBps: bitrate, score
+    });
+    const fastChannel = feed('label', 6000000, 20);
+    const event = feed('event', 4200000, 70);
+    const unmeasuredChannel = feed('label', undefined, 99);
+    const compare = (a, b) => compareStreams(a, b, [], false, { mixedKafkaFixture: true });
+
+    for (const input of [
+      [fastChannel, event, unmeasuredChannel],
+      [unmeasuredChannel, fastChannel, event],
+      [event, unmeasuredChannel, fastChannel]
+    ]) {
+      expect(input.sort(compare)).toEqual([fastChannel, event, unmeasuredChannel]);
+    }
+  });
 });
 
 describe('helpers', () => {

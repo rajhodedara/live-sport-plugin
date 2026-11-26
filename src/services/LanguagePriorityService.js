@@ -414,7 +414,9 @@ function compareStreams(a, b, priorities, explicitLanguage = Boolean(priorities?
 
       const aBps = Number.isFinite(a?._kafkaMeasuredBitrateBps) && a._kafkaMeasuredBitrateBps > 0 ? a._kafkaMeasuredBitrateBps : 0;
       const bBps = Number.isFinite(b?._kafkaMeasuredBitrateBps) && b._kafkaMeasuredBitrateBps > 0 ? b._kafkaMeasuredBitrateBps : 0;
-      if (aBps > 0 && bBps > 0 && bBps !== aBps) return bBps - aBps;
+      // Treat missing bitrate as the same lowest value in every comparison.
+      // Skipping it pairwise can make three equal-height feeds sort cyclically.
+      if (aBps !== bBps) return bBps - aBps;
 
       const aIsEvent = a?._kafkaMatchMode === 'event' ? 1 : 0;
       const bIsEvent = b?._kafkaMatchMode === 'event' ? 1 : 0;
