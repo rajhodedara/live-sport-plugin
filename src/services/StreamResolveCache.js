@@ -142,6 +142,7 @@ class StreamResolveCache {
     // a verified resolver connection. Merely returning true is not proof.
     this.sharedResolver = opts.sharedResolver ?? null;
     this.resolverConflictState = opts.resolverConflictState ?? resolverConflictState;
+    this.onResolveOutcome = typeof opts.onResolveOutcome === 'function' ? opts.onResolveOutcome : null;
 
     this.entries = new Map();   // key -> { streams, matchId, status, resolvedAt, expiresAt, lastAccess }
     this.inFlight = new Map();  // key -> Promise (mint in progress)
@@ -265,6 +266,25 @@ class StreamResolveCache {
     return Math.max(0, e.expiresAt - Date.now());
   }
 
+  _emitOutcome(key, stage, reason, startedAt = Date.now()) {
+    if (!this.onResolveOutcome || !key) return;
+    try {
+      const parts = String(key).split(':');
+      const source = parts[0] || '';
+      const matchId = parts[1] || '';
+      const candidateId = parts.slice(2).join(':') || String(key);
+      this.onResolveOutcome({
+        pid: process.pid,
+        source,
+        matchId,
+        candidateId,
+        stage,
+        reason,
+        elapsedMs: Math.max(0, Date.now() - startedAt)
+      });
+    } catch (_) { /* diagnostic only */ }
+  }
+
   /** Fresh positive entry? Returns streams with isolated behavior hints, else null. */
   get(key) {
     const e = this.entries.get(key);
@@ -360,11 +380,17 @@ class StreamResolveCache {
       this.entries.delete(key);
       this.entries.set(key, existing);
       if (existing.status !== 'ok') {
-        if (existing.status === 'deferred') this.statsCounters.deferredHits++;
-        else this.statsCounters.negativeHits++;
+        if (existing.status === 'deferred') {
+          this.statsCounters.deferredHits++;
+          this._emitOutcome(key, 'cache', 'deferred_hit', now);
+        } else {
+          this.statsCounters.negativeHits++;
+          this._emitOutcome(key, 'cache', 'failed_hit', now);
+        }
         return [];
       }
       this.statsCounters.hits++;
+      this._emitOutcome(key, 'cache', 'cache_hit', now);
       return existing.streams.map(clonePublicStream);
     }
 
@@ -473,6 +499,7 @@ class StreamResolveCache {
   }
 
   async _resolveAndStore(key, mintFn, operation) {
+    const startedAt = Date.now();
 
     // ── Shared L2: another worker may have minted (or be minting) this key ──
     let claimed = false;
@@ -488,9 +515,11 @@ class StreamResolveCache {
         if (this._adoptRemote(key, remote, operation)) {
           if (remote.status === 'ok') {
             this.statsCounters.hits++;
+            this._emitOutcome(key, 'cache', 'l2_hit', startedAt);
             return;
           }
           this.statsCounters.negativeHits++;
+          this._emitOutcome(key, 'cache', 'l2_failed_hit', startedAt);
           return;
         }
         remote = null; // expired in transit: claim and mint instead
@@ -553,6 +582,7 @@ class StreamResolveCache {
         if (isDeferredResolution(streams)) {
           deferred = streams;
           storeDeferred(streams);
+          this._emitOutcome(key, 'cache', 'deferred', startedAt);
           // The resolver protocol remains ok/failed/minting only. A short
           // local cooldown must not become a shared 30-second dead verdict.
           await releaseOwnedClaim();
@@ -594,8 +624,10 @@ class StreamResolveCache {
           if (!localEntry.retryReason && localEntry.streams.some(s => s && s.url)) {
             operation.deliveryEntry = localEntry;
           }
+          this._emitOutcome(key, 'cache', 'mint_ok', startedAt);
         } else {
           localEntry = this._set(key, sourceName, matchId, [], 'failed', ttl);
+          this._emitOutcome(key, 'cache', 'mint_failed', startedAt);
         }
         // Keep publication authority until the RPC settles, even if an expiry
         // reader has already removed this entry from the local map.
@@ -801,6 +833,7 @@ class StreamResolveCache {
       if (operation && operation.publicationEntry === this.entries.get(oldestKey)) operation.publicationEvicted = true;
       this.entries.delete(oldestKey);
       this.statsCounters.evictions++;
+      this._emitOutcome(oldestKey, 'cache', 'lru_evicted', Date.now());
     }
   }
 

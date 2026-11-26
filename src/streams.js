@@ -1717,9 +1717,30 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
   const channelOpts = isKafkaChannel ? {
     ...options,
     preserveFailure: true,
+    onResolveOutcome: (outcome) => {
+      try { opts?.onResolveOutcome?.(outcome); } catch (_) {}
+      try {
+        opts?.onCandidateOutcome?.({
+          source: 'kafka',
+          matchId: match?.id,
+          candidateId: String(src.id || ''),
+          stage: 'resolve',
+          reason: String(outcome || 'empty_streams')
+        });
+      } catch (_) {}
+    },
     onResolveFailure: (err) => {
       try { opts?.onResolveFailure?.(err); } catch (_) {}
       const classified = classifyKafkaFailureReason(err, null, 'resolve');
+      try {
+        opts?.onCandidateOutcome?.({
+          source: 'kafka',
+          matchId: match?.id,
+          candidateId: String(src.id || ''),
+          stage: 'resolve',
+          reason: classified.reason
+        });
+      } catch (_) {}
       if (classified.retryable) {
         const reason = classified.reason === 'capacity'
           ? 'capacity'
@@ -1731,6 +1752,15 @@ async function mintVerifiedSources(src, match, config, cacheKey, opts = {}) {
     },
     onVerifyFailure: (reason, retryable) => {
       try { opts?.onVerifyFailure?.(reason, retryable); } catch (_) {}
+      try {
+        opts?.onCandidateOutcome?.({
+          source: 'kafka',
+          matchId: match?.id,
+          candidateId: String(src.id || ''),
+          stage: 'verify',
+          reason: String(reason || 'playlist_invalid')
+        });
+      } catch (_) {}
       if (retryable) {
         const mapped = reason === 'capacity'
           ? 'capacity'
@@ -2018,6 +2048,9 @@ function createFixtureTraceSink(matchId, userCallback) {
     if (emitted >= MAX_EVENT_TRACE_EVENTS) return;
     emitted += 1;
     const event = {
+      pid: process.pid,
+      source: String(rawEvent.source || 'kafka'),
+      matchId: String(rawEvent.matchId || rawEvent.fixtureId || matchId || ''),
       fixtureId: String(rawEvent.fixtureId || matchId || ''),
       candidateId: String(rawEvent.candidateId),
       stage: String(rawEvent.stage || ''),
@@ -2228,10 +2261,12 @@ async function handleStream(type, id, config) {
     const state = {
       key,
       source: src.source,
+      srcId: src.id,
       eventDiscovery: Boolean(src.kafkaFixtureEvents),
       isChannelSource: isChannelFallbackSource(src),
       isPriority1,
       wasWarm,
+      wasDeferred: !src.kafkaFixtureEvents && Boolean(resolveCache.isDeferred?.(key)),
       promise: null,
       settled: false,
       value: [],
@@ -2256,6 +2291,7 @@ async function handleStream(type, id, config) {
           onInconclusive() { state.inconclusive = true; }
         })
       : resolveCache.getOrCreate(key, () => mintVerifiedSources(src, match, config, key, {
+          ...(traceSink ? { onCandidateOutcome: traceSink.emit } : {}),
           onInconclusive() { state.inconclusive = true; }
         }), timingStream))
       .then((minted) => {
@@ -2266,6 +2302,33 @@ async function handleStream(type, id, config) {
           (!hasResults && state.inconclusive);
         state.value = rows.map((st) => cloneProgressStream(st, key));
         state.settled = true;
+        if (traceSink && !src.kafkaFixtureEvents) {
+          if (hasResults) {
+            traceSink.emit({
+              source: src.source,
+              matchId: match.id,
+              candidateId: String(src.id || key),
+              stage: 'publish',
+              reason: state.wasWarm ? 'published_cached' : 'published'
+            });
+          } else if (state.wasDeferred) {
+            traceSink.emit({
+              source: src.source,
+              matchId: match.id,
+              candidateId: String(src.id || key),
+              stage: 'cache',
+              reason: 'deferred_hit'
+            });
+          } else if (!resolveCache.isDeferred?.(key) && resolveCache.entries?.get(key)?.status === 'failed') {
+            traceSink.emit({
+              source: src.source,
+              matchId: match.id,
+              candidateId: String(src.id || key),
+              stage: 'cache',
+              reason: 'failed_hit'
+            });
+          }
+        }
         return state.value;
       })
       .catch(() => { state.settled = true; return []; });
@@ -2455,6 +2518,19 @@ async function handleStream(type, id, config) {
       lateCount = inFlight.filter(f => !f.settled || (f.eventDiscovery && f.inconclusive)).length;
     } else if (lateCount > 0) {
       console.log(`[streams.js] Early return for ${matchId}: ${lateCount} source(s) still resolving (will be cached)`);
+    }
+    if (traceSink) {
+      for (const f of inFlight) {
+        if (!f.settled && !f.eventDiscovery) {
+          traceSink.emit({
+            source: f.source,
+            matchId: match.id,
+            candidateId: String(f.srcId || f.key),
+            stage: 'deadline',
+            reason: 'deadline_cutoff'
+          });
+        }
+      }
     }
     if (timingStream) {
       const unsettled = inFlight.filter(f => !f.settled || (f.eventDiscovery && f.inconclusive)).length;

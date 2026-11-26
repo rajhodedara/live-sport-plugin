@@ -374,6 +374,7 @@ describe('handleStream event-first regression', () => {
     global.fetch = jest.fn(async () => ({ ok: false, status: 502, headers: { get: () => null }, body: { cancel: async () => {} } }));
     savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]));
     process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    process.env.DONATION_URL = 'disabled';
     process.env.KAFKA_ENABLED = 'true';
     process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
     process.env.KAFKA_EVENT_SEARCH_ENABLED = 'true';
@@ -1689,6 +1690,7 @@ describe('Kafka channel temporary failure preservation', () => {
   const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:6.0,\nseg100.ts\n';
 
   function createChannelMintHarness() {
+    process.env.DONATION_URL = 'disabled';
     process.env.KAFKA_ENABLED = 'true';
     process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
     process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
@@ -2008,4 +2010,325 @@ describe('Kafka channel temporary failure preservation', () => {
     expect(harness.l2Posts).toEqual([]);
   });
 });
+
+describe('Kafka channel recovery across workers, cache churn, and trace attribution', () => {
+  const LIVE_PLAYLIST = '#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:6\n#EXT-X-MEDIA-SEQUENCE:100\n#EXTINF:6.0,\nseg100.ts\n';
+
+  function createSharedL2Harness(onOutcomeA, onOutcomeB) {
+    const store = new Map();
+    const claims = new Map();
+    let revSeq = 1;
+    const makeShared = () => ({
+      available: () => true,
+      request: jest.fn(async (raw, opts = {}) => {
+        const url = new URL(raw);
+        const key = decodeURIComponent(url.pathname.replace('/api/cache/', ''));
+        if (url.pathname === '/api/cache/prune') return { ok: true, json: async () => ({ ok: true }) };
+        if (url.searchParams.get('claim') === '1') {
+          const existing = store.get(key);
+          if (existing && existing.expiresAt > Date.now()) {
+            return { ok: true, json: async () => ({ ok: false, reason: 'already-cached' }) };
+          }
+          if (claims.has(key)) {
+            return { ok: true, json: async () => ({ ok: false, reason: 'claimed' }) };
+          }
+          const ownerToken = `11111111-1111-4111-8111-${String(revSeq++).padStart(12, '0')}`;
+          claims.set(key, ownerToken);
+          return { ok: true, json: async () => ({ ok: true, ownerToken, supportsVacantClaim: true }) };
+        }
+        if (opts.method === 'POST') {
+          const body = JSON.parse(opts.body);
+          if (claims.get(key) !== body.ownerToken) {
+            return { ok: true, json: async () => ({ ok: false, reason: 'stale-owner' }) };
+          }
+          claims.delete(key);
+          const revision = `22222222-2222-4222-8222-${String(revSeq++).padStart(12, '0')}`;
+          store.set(key, {
+            status: body.status,
+            streams: body.streams,
+            expiresAt: Date.now() + body.ttlMs,
+            revision
+          });
+          return { ok: true, json: async () => ({ ok: true, revision }) };
+        }
+        if (opts.method === 'DELETE') {
+          const token = url.searchParams.get('ownerToken');
+          if (claims.get(key) === token) claims.delete(key);
+          return { ok: true, json: async () => ({ ok: true }) };
+        }
+        if (opts.method === 'PATCH') {
+          const rev = url.searchParams.get('revision');
+          const cur = store.get(key);
+          if (cur && cur.revision === rev) store.delete(key);
+          return { ok: true, json: async () => ({ ok: true }) };
+        }
+        const entry = store.get(key);
+        if (entry && entry.expiresAt > Date.now()) return { ok: true, json: async () => entry };
+        if (claims.has(key)) return { ok: true, json: async () => ({ status: 'minting' }) };
+        return { ok: true, json: async () => ({ status: 'miss' }) };
+      })
+    });
+
+    const cacheA = new StreamResolveCache({ sharedResolver: makeShared(), onResolveOutcome: onOutcomeA });
+    const cacheB = new StreamResolveCache({ sharedResolver: makeShared(), onResolveOutcome: onOutcomeB });
+    return { cacheA, cacheB, store };
+  }
+
+  let origEnv;
+  let origResolve;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date('2026-11-27T02:30:00Z'));
+    origEnv = { ...process.env };
+    origResolve = container.resolve;
+    process.env.DONATION_URL = 'disabled';
+    process.env.KAFKA_ENABLED = 'true';
+    process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    process.env.STREAM_SOFT_DEADLINE_MS = '6000';
+    process.env.STREAM_HARD_DEADLINE_MS = '15000';
+    safeFetch.mockReset();
+    streamingFetch.mockReset().mockResolvedValue({
+      ok: true,
+      status: 206,
+      headers: { get: () => 'video/mp2t' },
+      body: { getReader: () => { let sent = false; return { read: async () => (sent ? { done: true } : (sent = true, { done: false, value: new Uint8Array(64) })), cancel: async () => {}, releaseLock: () => {} }; } }
+    });
+    for (const name of ['log', 'warn', 'error', 'info']) jest.spyOn(console, name).mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    container.resolve = origResolve;
+    jest.clearAllTimers();
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    process.env = origEnv;
+  });
+
+  async function runWithTimers(fn) {
+    let settled = false;
+    const p = Promise.resolve().then(fn).finally(() => { settled = true; });
+    for (let i = 0; i < 200 && !settled; i += 1) {
+      await jest.advanceTimersByTimeAsync(100);
+    }
+    return p;
+  }
+
+  test('five-source Sky Sports F1 replay recovers all 5 feeds on both workers despite temporary failures and 201-key LRU churn', async () => {
+    const f1Ids = ['1641637', '1905859', '691271', '691270', '317780'];
+    const match = {
+      id: 'cdn_ch_xx_sky-sports-f1',
+      title: 'Sky Sports F1',
+      category: 'motorsport',
+      sources: f1Ids.map((id, i) => ({
+        source: 'kafka',
+        id: `trex:${id}`,
+        channelName: `UK| SKY SPORTS F1 ${i + 1}`,
+        country: 'UK',
+        language: 'English',
+        matchMode: 'label'
+      }))
+    };
+
+    const outcomesA = [];
+    const { cacheA, cacheB } = createSharedL2Harness((ev) => outcomesA.push(ev));
+    const providerA = new KafkaProvider({});
+    const providerB = new KafkaProvider({});
+    const m3u8Parser = new M3U8ParserService();
+    const streamScorer = new StreamScoringService();
+
+    let transientActive = true;
+    let releaseSlowBackground;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        if (transientActive && id === 'trex:1905859') {
+          return { ok: false, status: 503 };
+        }
+        if (transientActive && id === 'trex:317780') {
+          await new Promise((resolve) => { releaseSlowBackground = resolve; });
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            streams: [{ name: '▶ Watch Live', title: `F1 ${id}`, url: `https://cdn.invalid/f1/${encodeURIComponent(id)}.m3u8` }]
+          })
+        };
+      }
+      if (transientActive && target.includes('691271')) {
+        return { status: 503, text: async () => 'Edge 503' };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const traceEvents = [];
+    const cfg = { liveSources: 'kafka', _onCandidateOutcome: (e) => traceEvents.push(e) };
+    const servicesA = { cacheService: { findMatch: () => match }, kafkaProvider: providerA, streamResolveCache: cacheA, m3u8Parser, streamScorer };
+    const servicesB = { cacheService: { findMatch: () => match }, kafkaProvider: providerB, streamResolveCache: cacheB, m3u8Parser, streamScorer };
+
+    container.resolve = (n) => servicesA[n] || origResolve.call(container, n);
+    const firstResp = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, cfg));
+    expect(firstResp.streams.length).toBeGreaterThanOrEqual(2);
+    expect(firstResp.streams.length).toBeLessThan(5);
+    expect(firstResp).toMatchObject({ cacheMaxAge: 2, staleRevalidate: 0, staleError: 0 });
+    expect(JSON.stringify(firstResp)).not.toContain('_nuvioDirectRetry');
+
+    // Churn 201 unrelated media keys in cacheA while background work completes.
+    await Promise.all(Array.from({ length: 201 }, (_, idx) =>
+      cacheA.getOrCreate(`kafka:churn-${idx}:ch-${idx}`, async () => [{
+        title: `Churn ${idx}`,
+        url: `https://cdn.invalid/churn/${idx}.m3u8`
+      }])
+    ));
+    expect(cacheA.entries.size).toBeLessThanOrEqual(200);
+    expect(outcomesA.some(e => e.reason === 'lru_evicted' && e.stage === 'cache')).toBe(true);
+
+    // Clear transient failures, release slow background source, and advance past 2000ms cooldown.
+    transientActive = false;
+    if (releaseSlowBackground) releaseSlowBackground();
+    await jest.advanceTimersByTimeAsync(2500);
+
+    container.resolve = (n) => servicesA[n] || origResolve.call(container, n);
+    await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, cfg));
+    // Allow any background retry mint started during recovery to settle, then verify both workers.
+    await jest.advanceTimersByTimeAsync(500);
+
+    const warmA = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, cfg));
+    expect(warmA.streams).toHaveLength(5);
+    expect(warmA).toMatchObject({ cacheMaxAge: 30, staleRevalidate: 30, staleError: 60 });
+
+    container.resolve = (n) => servicesB[n] || origResolve.call(container, n);
+    const warmB = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, cfg));
+    expect(warmB.streams).toHaveLength(5);
+    expect(warmB).toMatchObject({ cacheMaxAge: 30, staleRevalidate: 30, staleError: 60 });
+
+    // Trace attribution checks: resolve/verify failures and published sources are distinct and redacted.
+    expect(traceEvents.some(e => e.stage === 'resolve' && e.reason === 'http_5xx')).toBe(true);
+    expect(traceEvents.some(e => e.stage === 'verify' && e.reason === 'http_5xx')).toBe(true);
+    expect(traceEvents.some(e => e.stage === 'publish' && e.reason === 'published')).toBe(true);
+    expect(traceEvents.every(e => Number.isInteger(e.pid) && e.source === 'kafka' && e.matchId === match.id)).toBe(true);
+  });
+
+  test('channel-plus-event fixture retains both Kafka event and channel feeds after recovery without non-Kafka suppression', async () => {
+    const KICKOFF = Date.UTC(2026, 10, 27, 2, 30);
+    jest.setSystemTime(KICKOFF);
+    const match = {
+      id: 'mixed-f1-fx',
+      title: 'Team Alpha vs Team Beta',
+      category: 'basketball',
+      league: 'NBA',
+      date: String(KICKOFF),
+      team1: { name: 'Team Alpha' },
+      team2: { name: 'Team Beta' },
+      sources: [
+        { source: 'kafka', id: 'trex:1641637', channelName: 'UK| SKY SPORTS F1', country: 'UK', matchMode: 'label' },
+        { source: 'daddylive', id: 'dl-ev-1', channelName: 'Event Feed' }
+      ]
+    };
+    const channels = [
+      { id: 'trex:9001', name: 'LIVE | Team Alpha vs Team Beta Main Feed', grp: 'SPORTS' },
+      { id: 'trex:1641637', name: 'UK| SKY SPORTS F1' }
+    ];
+
+    const { cacheA } = createSharedL2Harness();
+    const provider = new KafkaProvider({
+      catalogStore: {
+        isReady: () => true,
+        findEvents: () => [{ id: 'trex:9001', name: 'LIVE | Team Alpha vs Team Beta Main Feed', score: 9000 }],
+        findChannel: () => [],
+        findTeam: () => []
+      },
+      eventSearch: { cachedFor: () => [], findForFixture: async () => [], isInWindow: () => true }
+    });
+    const m3u8Parser = new M3U8ParserService();
+    const streamScorer = new StreamScoringService();
+    const daddyLiveProvider = {
+      resolveStream: jest.fn(async () => [{ name: 'DaddyLive', title: 'Event Feed', url: 'https://dl.invalid/ev.m3u8' }])
+    };
+
+    let channelDown = true;
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        const id = decodeURIComponent(target.split('/stream/tv/')[1].replace(/\.json$/, ''));
+        if (channelDown && id === 'trex:1641637') return { ok: false, status: 503 };
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ streams: [{ name: '▶ Watch Live', url: `https://cdn.invalid/mixed/${encodeURIComponent(id)}.m3u8` }] })
+        };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const services = {
+      cacheService: { findMatch: () => match },
+      kafkaProvider: provider,
+      daddyLiveProvider,
+      streamResolveCache: cacheA,
+      m3u8Parser,
+      streamScorer
+    };
+    container.resolve = (n) => services[n] || origResolve.call(container, n);
+
+    const first = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(first.streams.some(s => s._kafkaMatchMode === 'event')).toBe(true);
+
+    channelDown = false;
+    await jest.advanceTimersByTimeAsync(2500);
+
+    const recovered = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(recovered.streams.some(s => s._source === 'kafka' && s._kafkaMatchMode === 'event')).toBe(true);
+    expect(recovered.streams.some(s => s._source === 'kafka' && s._kafkaMatchMode === 'label')).toBe(true);
+  });
+
+  test('KAFKA_EVENT_TRACE_FIXTURE_ID bounds channel trace events at 200 and omits URLs, tokens, headers, and exceptions', async () => {
+    process.env.KAFKA_EVENT_TRACE_FIXTURE_ID = 'trace-bounded-ch';
+    const match = {
+      id: 'trace-bounded-ch',
+      title: 'Sky Sports F1',
+      category: 'motorsport',
+      sources: Array.from({ length: 250 }, (_, i) => ({
+        source: 'kafka',
+        id: `trex:ch-${i}`,
+        channelName: `F1 ${i}`,
+        matchMode: 'label'
+      }))
+    };
+
+    const { cacheA } = createSharedL2Harness();
+    const provider = new KafkaProvider({});
+    const services = {
+      cacheService: { findMatch: () => match },
+      kafkaProvider: provider,
+      streamResolveCache: cacheA,
+      m3u8Parser: new M3U8ParserService(),
+      streamScorer: new StreamScoringService()
+    };
+    container.resolve = (n) => services[n] || origResolve.call(container, n);
+
+    safeFetch.mockImplementation(async (url) => {
+      const target = String(url);
+      if (target.includes('/stream/tv/')) {
+        return { ok: false, status: 503 };
+      }
+      return { status: 200, text: async () => LIVE_PLAYLIST };
+    });
+
+    const infoSpy = jest.spyOn(console, 'info').mockImplementation(() => {});
+    await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, { liveSources: 'kafka' }));
+
+    const traceCalls = infoSpy.mock.calls.filter(c => c[0] === '[KafkaEventTrace]');
+    expect(traceCalls.length).toBeLessThanOrEqual(200);
+    expect(traceCalls.length).toBeGreaterThan(0);
+    const serialized = traceCalls.map(c => c[1]).join('\n');
+    expect(serialized).not.toContain('https://');
+    expect(serialized).not.toContain('Authorization');
+    expect(serialized).not.toContain('ownerToken');
+  });
+});
+
 
