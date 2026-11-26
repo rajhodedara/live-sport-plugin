@@ -377,16 +377,23 @@ describe('handleStream event-first regression', () => {
     }
   });
 
-  test('Dallas-Denver +57m: drops 502 and ended seq-0, suppresses channel fallbacks once event verifies on cold and warm requests', async () => {
+  test('Dallas-Denver +57m: drops 502 and ended seq-0, publishes mixed event and channel feeds on cold and warm requests', async () => {
     const match = buildFixture();
     const { healthService, fetchImpl } = setupHarness({ match });
 
     const cold = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
-    expect(cold.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
-      'kafka:event'
-    ]);
-    expect(cold.streams[0].url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
-    expect(cold.streams[0].title).toContain('Dallas @ Denver');
+    expect(cold.streams.map(s => s._kafkaMatchMode).filter(Boolean)).toEqual(
+      expect.arrayContaining(['event', 'label', 'team'])
+    );
+    expect(cold.streams.some(s => s._source === 'daddylive')).toBe(true);
+    const eventRow = cold.streams.find(s => s._kafkaMatchMode === 'event');
+    const labelRow = cold.streams.find(s => s._kafkaMatchMode === 'label');
+    const teamRow = cold.streams.find(s => s._kafkaMatchMode === 'team');
+    expect(eventRow.url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+    expect(eventRow.title).toContain('Kafka · Event');
+    expect(eventRow.title).toContain('Dallas @ Denver');
+    expect(labelRow.title).toContain('Kafka · Channel');
+    expect(teamRow.title).toContain('Kafka · Channel');
 
     const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
     expect(kafkaHealth.eventPlayback).toMatchObject({
@@ -403,16 +410,19 @@ describe('handleStream event-first regression', () => {
     fetchImpl.mockClear();
 
     const warm = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
-    expect(warm.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
-      'kafka:event'
-    ]);
-    expect(warm.streams[0].url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+    expect(warm.streams.map(s => s._kafkaMatchMode).filter(Boolean)).toEqual(
+      expect.arrayContaining(['event', 'label', 'team'])
+    );
+    expect(warm.streams.some(s => s._source === 'daddylive')).toBe(true);
+    expect(warm.streams.find(s => s._kafkaMatchMode === 'event').url).toContain(encodeURIComponent('https://cdn.invalid/trex:ev3.m3u8'));
+    expect(warm.streams.find(s => s._kafkaMatchMode === 'event').title).toContain('Kafka · Event');
+    expect(warm.streams.find(s => s._kafkaMatchMode === 'label').title).toContain('Kafka · Channel');
     expect(safeFetch).not.toHaveBeenCalled();
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(jest.getTimerCount()).toBe(0);
   });
 
-  test('dedupes duplicate playback URLs while keeping strongest match mode and suppressing channel copies', async () => {
+  test('dedupes identical playback URLs preferring event while keeping eligible channels and blocked-event fallbacks', async () => {
     const match = buildFixture();
     const channels = [
       { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | 8K | US: PPV 1' },
@@ -446,14 +456,47 @@ describe('handleStream event-first regression', () => {
     });
 
     const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
-    const sharedMatches = res.streams.filter((s) => s.url.includes(encodeURIComponent('https://cdn.invalid/shared-mirror.m3u8')));
-    expect(sharedMatches).toHaveLength(1);
-    expect(sharedMatches[0]._kafkaMatchMode).toBe('event');
+    const copies = res.streams.filter((s) => s.url.includes(encodeURIComponent('https://cdn.invalid/shared-mirror.m3u8')));
+    expect(copies.map(s => s._kafkaMatchMode)).toEqual(['event']);
 
     const eventUrls = res.streams.filter((s) => s._kafkaMatchMode === 'event').map((s) => s.url);
     expect(eventUrls).toHaveLength(2);
     expect(eventUrls.some((u) => u.includes('distinct-ev3.m3u8'))).toBe(true);
-    expect(res.streams.every((s) => s._source === 'kafka' && s._kafkaMatchMode === 'event')).toBe(true);
+    expect(res.streams.some((s) => s._source === 'daddylive')).toBe(true);
+
+    // A blocked event copy with the same playback URL must not suppress an eligible channel copy.
+    const blockedCopyMatch = buildFixture({
+      id: 'blocked-copy-ev',
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' }]
+    });
+    const sharedBlockedUrl = 'https://cdn.invalid/shared-blocked-check.m3u8';
+    const wrappedBlockedUrl = `http://127.0.0.1:7000/api/manifest?url=${encodeURIComponent(sharedBlockedUrl)}`;
+    const { resolveCache } = setupHarness({ match: blockedCopyMatch, channels: [] });
+    resolveCache.getOrCreate = jest.fn(async (key) => {
+      if (key.includes('fixture-events-')) {
+        return [{
+          name: 'Kafka',
+          title: 'Blocked Event',
+          url: wrappedBlockedUrl,
+          clearkey: { k: 'v' },
+          _source: 'kafka',
+          _kafkaMatchMode: 'event'
+        }];
+      }
+      if (key.includes('trex:label')) {
+        return [{
+          name: 'Kafka',
+          title: 'NBA TV HD',
+          url: wrappedBlockedUrl,
+          _source: 'kafka',
+          _kafkaMatchMode: 'label'
+        }];
+      }
+      return [];
+    });
+    const blockedCopyRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${blockedCopyMatch.id}`, {}));
+    expect(blockedCopyRes.streams.map(s => `${s._source}:${s._kafkaMatchMode}`)).toEqual(['kafka:label']);
+    expect(blockedCopyRes.streams[0].url).toContain(encodeURIComponent(sharedBlockedUrl));
   });
 
   test('discovers event feeds via bounded upstream search when match has zero pre-attached Kafka sources', async () => {
@@ -473,7 +516,8 @@ describe('handleStream event-first regression', () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2); // nicknames 'nuggets' (<6 hits) then 'denver nuggets'
     expect(res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
       'kafka:event',
-      'kafka:event'
+      'kafka:event',
+      'daddylive:none'
     ]);
 
     const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
@@ -490,7 +534,7 @@ describe('handleStream event-first regression', () => {
     });
   });
 
-  test('suppresses channel rows even with explicit language preferences while preserving non-channel matchup feeds', async () => {
+  test('preserves explicit language preferences across mixed Kafka channels, events, and non-Kafka feeds', async () => {
     const match = buildFixture({
       sources: [
         { source: 'kafka', id: 'trex:label', channelName: 'NBA TV ES', country: 'Spain', language: 'Spanish', matchMode: 'label' },
@@ -517,7 +561,9 @@ describe('handleStream event-first regression', () => {
 
     const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, { languages: 'Spanish' }));
     expect(res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}:${s.language || 'none'}`)).toEqual([
+      'kafka:label:Spanish',
       'ppvst:none:Spanish',
+      'daddylive:none:Spanish',
       'kafka:event:none'
     ]);
   });
@@ -533,11 +579,14 @@ describe('handleStream event-first regression', () => {
     expect(res.streams.map((s) => s._source)).toEqual(['daddylive']);
   });
 
-  test('returns available fallback streams when event discovery exceeds the hard deadline', async () => {
+  test('returns ready Kafka channel at soft deadline while stalled event probe completes later, and handles slow channel + quick event', async () => {
     process.env.STREAM_SOFT_DEADLINE_MS = '100';
     process.env.STREAM_HARD_DEADLINE_MS = '200';
     const match = buildFixture();
-    const { healthService } = setupHarness({
+    let releaseSlowEvent;
+    const slowEvent = new Promise((r) => { releaseSlowEvent = r; });
+
+    setupHarness({
       match,
       channels: [
         { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV 1' },
@@ -546,7 +595,7 @@ describe('handleStream event-first regression', () => {
       ],
       playlistHandler: async (target) => {
         if (target.includes('trex:ev1')) {
-          return new Promise(() => {}); // stalls past deadline
+          await slowEvent;
         }
         return { status: 200, text: async () => LIVE_PLAYLIST };
       }
@@ -554,19 +603,93 @@ describe('handleStream event-first regression', () => {
 
     let response;
     const req = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((val) => { response = val; });
-    await jest.advanceTimersByTimeAsync(200);
+    await jest.advanceTimersByTimeAsync(110);
     await req;
 
     expect(response).toBeDefined();
     expect(response.cacheMaxAge).toBe(2);
-    expect(response.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
-      'kafka:label',
-      'kafka:team',
-      'daddylive:none'
-    ]);
+    expect(response.streams).toContainEqual(expect.objectContaining({ _kafkaMatchMode: 'label' }));
+    const initialSnapshot = response.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`);
+    expect(initialSnapshot).not.toContain('kafka:event');
+
+    releaseSlowEvent();
+    await jest.advanceTimersByTimeAsync(2100);
+    const refreshed = await runWithTimers(() => handleStream('tv', `nuvio_sport_${match.id}`, {}));
+    expect(refreshed.streams.map(s => s._kafkaMatchMode).filter(Boolean)).toEqual(
+      expect.arrayContaining(['event', 'label', 'team'])
+    );
+    expect(refreshed.cacheMaxAge).toBe(30);
+    // Original response remains unchanged after late event arrival.
+    expect(response.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual(initialSnapshot);
+
+    // Reversed case: slow channel and quick event.
+    const slowChanMatch = buildFixture({
+      id: 'slow-chan-ev',
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' }]
+    });
+    let releaseSlowChan;
+    const slowChan = new Promise((r) => { releaseSlowChan = r; });
+    setupHarness({
+      match: slowChanMatch,
+      channels: [
+        { id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV 1' },
+        { id: 'trex:label', name: 'US| NBA TV HD' }
+      ],
+      playlistHandler: async (target) => {
+        if (target.includes('trex:label')) {
+          await slowChan;
+        }
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    let revResponse;
+    const revReq = handleStream('tv', `nuvio_sport_${slowChanMatch.id}`, {}).then((val) => { revResponse = val; });
+    await jest.advanceTimersByTimeAsync(110);
+    await revReq;
+
+    expect(revResponse).toBeDefined();
+    expect(revResponse.cacheMaxAge).toBe(2);
+    expect(revResponse.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual(['kafka:event']);
+
+    releaseSlowChan();
+    await jest.advanceTimersByTimeAsync(2100);
+    const revRefreshed = await runWithTimers(() => handleStream('tv', `nuvio_sport_${slowChanMatch.id}`, {}));
+    expect(revRefreshed.streams.map(s => s._kafkaMatchMode).filter(Boolean)).toEqual(
+      expect.arrayContaining(['event', 'label'])
+    );
+    expect(revRefreshed.cacheMaxAge).toBe(30);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('waits to hard deadline when no ready Kafka row exists and event discovery stalls', async () => {
+    process.env.STREAM_SOFT_DEADLINE_MS = '100';
+    process.env.STREAM_HARD_DEADLINE_MS = '200';
+    const match = buildFixture({
+      id: 'no-kafka-ready',
+      sources: [{ source: 'daddylive', id: 'dl1', channelName: 'NBA TV', country: 'USA' }]
+    });
+    const { healthService } = setupHarness({
+      match,
+      channels: [{ id: 'trex:ev1', name: 'Live | Mavericks vs. Nuggets | all | 8K EXCLUSIVE | US: PPV 1' }],
+      playlistHandler: async (target) => {
+        if (target.includes('trex:ev1')) return new Promise(() => {});
+        return { status: 200, text: async () => LIVE_PLAYLIST };
+      }
+    });
+
+    let response;
+    const req = handleStream('tv', `nuvio_sport_${match.id}`, {}).then((val) => { response = val; });
+    await jest.advanceTimersByTimeAsync(110);
+    expect(response).toBeUndefined();
+    await jest.advanceTimersByTimeAsync(90);
+    await req;
+
+    expect(response).toBeDefined();
+    expect(response.cacheMaxAge).toBe(2);
+    expect(response.streams.map((s) => s._source)).toEqual(['daddylive']);
     const kafkaHealth = healthService.snapshot().providers.find((p) => p.id === 'kafka');
     expect(kafkaHealth.eventPlayback.stops.deadline).toBe(1);
-    // Allow the background probe's verification retry budget (9000ms) to settle cleanly.
     await jest.advanceTimersByTimeAsync(10000);
     expect(jest.getTimerCount()).toBe(0);
   });
@@ -686,7 +809,7 @@ describe('handleStream event-first regression', () => {
     expect(res.streams.every((s) => s._kafkaMatchMode === undefined)).toBe(true);
   });
 
-  test('resolves live UCL soccer fixture via SQLite x/STAN events and suppresses channel fallbacks while keeping event-only output', async () => {
+  test('resolves live UCL soccer fixture via SQLite x/STAN events and publishes mixed event, channel, and non-Kafka feeds', async () => {
     const soccerKickoff = Date.UTC(2026, 10, 25, 19, 45);
     const soccerNow = soccerKickoff + 57 * 60000;
     jest.setSystemTime(soccerNow);
@@ -750,12 +873,12 @@ describe('handleStream event-first regression', () => {
     const res = await runWithTimers(() => handleStream('tv', `nuvio_sport_${baseMatch.id}`, {}));
     const keys = res.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`);
     expect(keys).toContain('kafka:event');
+    expect(keys).toContain('kafka:label');
+    expect(keys).toContain('kafka:team');
     expect(keys).toContain('ppvst:none');
     expect(keys).toContain('scorezone:none');
-    expect(keys).not.toContain('kafka:label');
-    expect(keys).not.toContain('kafka:team');
-    expect(keys).not.toContain('daddylive:none');
-    expect(res.streams.some((s) => s.url.includes('sz_iptv_gb-tnt1'))).toBe(false);
+    expect(keys).toContain('daddylive:none');
+    expect(res.streams.some((s) => s.url.includes('sz_iptv_gb-tnt1'))).toBe(true);
     expect(res.streams.some((s) => s.url.includes('eyJoIjoiSW50ZXIiLCJhIjoiU3R1dHRnYXJ0In0.sig'))).toBe(true);
     expect(res.streams.some((s) => s.url.includes('trex:u19'))).toBe(false);
     expect(res.streams.some((s) => s.url.includes('trex:tv-inter'))).toBe(false);
@@ -789,7 +912,7 @@ describe('handleStream event-first regression', () => {
     const noKafka = await runWithTimers(() => handleStream('tv', `nuvio_sport_${blockedMatch.id}`, { liveSources: 'daddylive' }));
     expect(noKafka.streams.map((s) => s._source)).toEqual(['daddylive']);
 
-    // Standalone 24/7 TV channel card keeps channel feeds
+    // Standalone 24/7 TV channel card keeps channel feeds and existing title formatting
     const chCard = buildFixture({
       id: 'dlv_ch_123_nbatv',
       title: 'NBA TV',
@@ -797,14 +920,19 @@ describe('handleStream event-first regression', () => {
       date: '0',
       team1: null,
       team2: null,
-      sources: [{ source: 'daddylive', id: 'dl1', channelName: 'NBA TV' }]
+      sources: [
+        { source: 'kafka', id: 'trex:label', channelName: 'NBA TV HD', country: 'USA', matchMode: 'label' },
+        { source: 'daddylive', id: 'dl1', channelName: 'NBA TV' }
+      ]
     });
     setupHarness({ match: chCard, channels: [{ id: 'trex:label', name: 'US| NBA TV HD' }] });
     const chRes = await runWithTimers(() => handleStream('tv', `nuvio_sport_${chCard.id}`, {}));
-    expect(chRes.streams.map((s) => s._source)).toEqual(['daddylive']);
+    expect(chRes.streams.map((s) => s._source)).toEqual(['kafka', 'daddylive']);
+    expect(chRes.streams[0].title).toContain('Kafka |');
+    expect(chRes.streams[0].title).not.toContain('Kafka ·');
   });
 
-  test('publishes fast verified event at soft deadline without waiting for hard deadline while slow probe completes in background', async () => {
+  test('publishes fast verified event and ready channel at soft deadline while slow probe completes in background', async () => {
     process.env.STREAM_SOFT_DEADLINE_MS = '100';
     process.env.STREAM_HARD_DEADLINE_MS = '5000';
     const match = buildFixture({ id: 'slow-bg-ev' });
@@ -838,7 +966,12 @@ describe('handleStream event-first regression', () => {
 
     expect(firstRes).toBeDefined();
     expect(firstRes.cacheMaxAge).toBe(2);
-    expect(firstRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual(['kafka:event']);
+    expect(firstRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
+      'kafka:event',
+      'kafka:label',
+      'kafka:team',
+      'daddylive:none'
+    ]);
     expect(firstRes.streams[0].url).toContain('trex%3Afast');
 
     // Complete slow probe after initial response and advance past partial TTL.
@@ -849,7 +982,10 @@ describe('handleStream event-first regression', () => {
     expect(secondRes.cacheMaxAge).toBe(30);
     expect(secondRes.streams.map((s) => `${s._source}:${s._kafkaMatchMode || 'none'}`)).toEqual([
       'kafka:event',
-      'kafka:event'
+      'kafka:event',
+      'kafka:label',
+      'kafka:team',
+      'daddylive:none'
     ]);
     expect(secondRes.streams.some((s) => s.url.includes('trex%3Afast'))).toBe(true);
     expect(secondRes.streams.some((s) => s.url.includes('trex%3Aslow'))).toBe(true);

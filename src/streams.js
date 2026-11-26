@@ -60,6 +60,39 @@ function isChannelFallbackStream(stream) {
   return CHANNEL_FALLBACK_SOURCES.has(source);
 }
 
+function playbackIdentity(row) {
+  if (!row) return null;
+  if (row.ytId) return 'yt:' + row.ytId;
+  if (row.url) return 'url:' + row.url;
+  if (row.externalUrl) return 'ext:' + row.externalUrl;
+  return null;
+}
+
+function dedupeByPlaybackIdentity(rows, { preferEvent = false, keepUnkeyed = false } = {}) {
+  const out = [];
+  const seen = new Map();
+  for (const row of rows) {
+    if (!row) continue;
+    const identity = playbackIdentity(row);
+    if (!identity) {
+      if (keepUnkeyed) out.push(row);
+      continue;
+    }
+    if (!seen.has(identity)) {
+      seen.set(identity, out.length);
+      out.push(row);
+      continue;
+    }
+    if (preferEvent) {
+      const idx = seen.get(identity);
+      if (kafkaPlaybackRank(row) < kafkaPlaybackRank(out[idx])) {
+        out[idx] = row;
+      }
+    }
+  }
+  return out;
+}
+
 function applyFixtureChannelFallback(streams, match) {
   if (process.env.KAFKA_EVENT_FIRST_ENABLED !== 'true') return streams;
   if (!Array.isArray(streams) || streams.length === 0 || !match) return streams;
@@ -1575,9 +1608,11 @@ async function handleStream(type, id, config) {
 
   // When match is a replay, strictly restrict to replay-capable providers
   // (Prevents live feeds or test/demo streams from masquerading as replays)
+  let isReplayCard = false;
   try {
     const { isReplayMatch } = require('./catalog');
     if (isReplayMatch(match)) {
+      isReplayCard = true;
       const REPLAY_SOURCES = new Set(['replayzone', 'livetv', 'soccerfull', 'basketballvideo', 'nflvideo', 'fullraces', 'hockeyreplays', 'mlblive']);
       const replaySources = candidateSources.filter(s => s && REPLAY_SOURCES.has(s.source));
       if (replaySources.length > 0) {
@@ -1587,6 +1622,25 @@ async function handleStream(type, id, config) {
   } catch (_) {}
 
   const activeSources = selectSources(candidateSources, config, match);
+  const isChannelCard = Boolean(
+    match ? (
+      match.category === 'networks' ||
+      match.rawCategory === '24/7 TV Channels' ||
+      match.isChannel ||
+      String(match.date) === '0' ||
+      match.kickoff === 0 ||
+      String(match.id || '').includes('_ch_') ||
+      String(id || '').includes('_ch_')
+    ) : (
+      String(id || '').includes('_ch_') ||
+      String(id || '').includes('channel')
+    )
+  );
+  const isTvChannel = Boolean((type === 'tv' || type === 'channel') && isChannelCard);
+  const mixedKafkaFixture = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' &&
+    !isChannelCard &&
+    !isReplayCard &&
+    activeSources.some(s => s && s.source === 'kafka');
   const streamScorer = container.resolve('streamScorer');
 
   const resolveCache = container.resolve('streamResolveCache');
@@ -1637,7 +1691,11 @@ async function handleStream(type, id, config) {
     };
     const pushProgress = (rows) => {
       if (!Array.isArray(rows) || state.settled) return;
-      state.eventProgress = rows.map(st => ({ ...st, _cacheKey: key }));
+      state.eventProgress = rows.map(st => ({
+        ...st,
+        ...(st?.behaviorHints && typeof st.behaviorHints === 'object' ? { behaviorHints: { ...st.behaviorHints } } : {}),
+        _cacheKey: key
+      }));
       for (const fn of state.listeners) fn();
     };
     if (state.eventDiscovery && kafkaProviderInstance) {
@@ -1680,26 +1738,23 @@ async function handleStream(type, id, config) {
       (typeof row.url === 'string' && row.url.length > 0 && !row.externalUrl && row.name !== 'Nuvio Web Player');
     const hasVerifiedKafkaEvent = (rows) => process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' &&
       rows.some(row => row && row._source === 'kafka' && row._kafkaMatchMode === 'event' && isDirectRow(row));
+    const hasKafkaDirect = (rows) => mixedKafkaFixture &&
+      rows.some(row => row && (row._source === 'kafka' || row.sourceName === 'kafka') && isDirectRow(row));
     const publicationRows = () => {
       const current = inFlight.flatMap(f => {
         const rows = f.settled ? f.value : f.eventProgress;
         return Array.isArray(rows) ? rows : [];
       });
-      if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' && current.length > 1) {
-        current.sort((a, b) => kafkaPlaybackRank(a) - kafkaPlaybackRank(b));
-      }
       const prematch = suppressPreMatchTeamChannels(current, match);
-      const seen = new Set();
-      const filtered = prematch.filter(row => {
-        if (!row) return false;
-        const identity = row.ytId ? 'yt:' + row.ytId :
-          (row.url ? 'url:' + row.url : (row.externalUrl ? 'ext:' + row.externalUrl : null));
-        if (!identity || seen.has(identity)) return false;
-        seen.add(identity);
+      const eligible = prematch.filter(row => {
+        if (!row || !playbackIdentity(row)) return false;
         if (isBlockedStream(row)) return false;
         return !config || config.webStreams !== 'disabled' || isDirectRow(row);
       });
-      return applyFixtureChannelFallback(filtered, match);
+      const deduped = dedupeByPlaybackIdentity(eligible, {
+        preferEvent: process.env.KAFKA_EVENT_FIRST_ENABLED === 'true'
+      });
+      return mixedKafkaFixture ? deduped : applyFixtureChannelFallback(deduped, match);
     };
     const priority1Keys = new Set(inFlight.filter(f => f.isPriority1).map(f => f.key));
     const totalPriority1 = inFlight.filter(f => f.isPriority1).length;
@@ -1736,6 +1791,10 @@ async function handleStream(type, id, config) {
       const warm = observeUntil(() => {
         if (inFlight.every(f => f.settled)) return true;
         const eligible = publicationRows();
+        if (mixedKafkaFixture) {
+          if (inFlight.some(f => f.eventDiscovery && !f.settled) && !hasKafkaDirect(eligible)) return false;
+          return priority1ReadyCount(eligible) >= targetP1Quorum;
+        }
         const hasEventProgress = hasVerifiedKafkaEvent(eligible);
         if (inFlight.some(f => f.eventDiscovery && !f.settled) && !hasEventProgress) return false;
         const effectiveP1Keys = hasEventProgress
@@ -1764,30 +1823,31 @@ async function handleStream(type, id, config) {
     // sources succeeded, retain the bounded hard-window wait. Unsettled mirrors
     // cannot stall a normal event once a playable Priority-1 quorum is ready.
     const TV_CHANNEL_QUORUM = Number(process.env.TV_CHANNEL_QUORUM || 5);
-    const isTvChannel = Boolean(
-      (type === 'tv' || type === 'channel') &&
-      (match ? (
-        match.category === 'networks' ||
-        match.isChannel ||
-        String(match.date) === '0' ||
-        match.kickoff === 0 ||
-        String(match.id || '').includes('_ch_') ||
-        String(id || '').includes('_ch_')
-      ) : (
-        String(id || '').includes('_ch_') ||
-        String(id || '').includes('channel')
-      ))
-    );
     const hasEventDiscovery = inFlight.some(f => f.eventDiscovery);
     const readyToRespond = () => {
       if (inFlight.every(f => f.settled)) return true;
       const eligible = publicationRows();
-      const hasEventProgress = hasVerifiedKafkaEvent(eligible);
+      if (eligible.length === 0) return false;
       const withinSoftDeadline = (Date.now() - resolutionStartedAt) < SOFT_DEADLINE_MS;
+      if (mixedKafkaFixture) {
+        if (hasKafkaDirect(eligible)) {
+          if (!withinSoftDeadline) return true;
+          if (priority1ReadyCount(eligible) >= targetP1Quorum) return true;
+        }
+        if (inFlight.some(f => f.eventDiscovery && !f.settled)) return false;
+        const priority1Pending = inFlight.some(f => f.isPriority1 && !f.settled);
+        if (targetP1Quorum > 0 && priority1Pending && priority1ReadyCount(eligible) < targetP1Quorum) return false;
+        const inFlightSourceByKey = new Map(inFlight.map(f => [f.key, f.source]));
+        const getRowSource = (row) => row.source || row._source || row.sourceName || inFlightSourceByKey.get(row._cacheKey);
+        const hasHigherTierResolved = eligible.some(row => (SOURCE_PRIORITY[getRowSource(row)] || 99) <= 4);
+        const higherTierPending = inFlight.some(f => (SOURCE_PRIORITY[f.source] || 99) <= 4 && !f.settled);
+        if (!hasHigherTierResolved && higherTierPending && withinSoftDeadline) return false;
+        return !isTvChannel || eligible.filter(isDirectRow).length >= TV_CHANNEL_QUORUM;
+      }
+      const hasEventProgress = hasVerifiedKafkaEvent(eligible);
       if (inFlight.some(f => f.eventDiscovery && !f.settled)) {
         if (!hasEventProgress || withinSoftDeadline) return false;
       }
-      if (eligible.length === 0) return false;
       const effectiveP1Keys = hasEventProgress
         ? new Set(inFlight.filter(f => f.isPriority1 && !f.isChannelSource).map(f => f.key))
         : priority1Keys;
@@ -1816,7 +1876,7 @@ async function handleStream(type, id, config) {
         const wait = observeUntil(readyToRespond);
         const softRemaining = Math.max(0, (resolutionStartedAt + SOFT_DEADLINE_MS) - Date.now());
         let waited = null;
-        if (hasEventDiscovery && softRemaining > 0 && softRemaining < remaining) {
+        if ((hasEventDiscovery || mixedKafkaFixture) && softRemaining > 0 && softRemaining < remaining) {
           waited = await settleBefore(wait.promise, softRemaining, null);
           if (waited === null && !readyToRespond()) {
             remaining = remainingBudget();
@@ -1861,34 +1921,6 @@ async function handleStream(type, id, config) {
     streams.push(...playableStreams);
   }
 
-  // Collapse duplicate streams that arise when several sources of one match
-  // resolve to the same underlying clip (e.g. LiveTV's "Other Videos" siblings
-  // are re-listed by every clip page). Keyed on the playable identity so real
-  // multi-part streams are preserved.
-  if (streams.length > 1) {
-    if (process.env.KAFKA_EVENT_FIRST_ENABLED === 'true') {
-      streams.sort((a, b) => kafkaPlaybackRank(a) - kafkaPlaybackRank(b));
-    }
-    const seenStreamKeys = new Set();
-    const dedupedStreams = streams.filter((s) => {
-      const key = s.ytId ? 'yt:' + s.ytId : (s.url ? 'url:' + s.url : (s.externalUrl ? 'ext:' + s.externalUrl : null));
-      if (!key) return true;
-      if (seenStreamKeys.has(key)) return false;
-      seenStreamKeys.add(key);
-      return true;
-    });
-    if (dedupedStreams.length !== streams.length) {
-      console.log(`[streams.js] Dropped ${streams.length - dedupedStreams.length} duplicate stream(s) for ${matchId}`);
-      streams.length = 0;
-      streams.push(...dedupedStreams);
-    }
-  }
-
-  // --- Inject relevant 24/7 channels based on category ---
-
-  // Standardize Stream Labels
-  const icon = STREAM_SPORT_ICONS[match.category] || '📡';
-
   // ─── Bandwidth policy: no relayed DASH, no DASH at all ────────────────
   // ClearKey DASH can only play through /api/dash, which pulls every segment
   // through this addon (≈3.74 GB per viewer-hour at 1080p, measured). Policy:
@@ -1903,11 +1935,33 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Dropped ${beforeDashPolicy - policyAllowed.length} DASH stream(s) by bandwidth policy for ${matchId}`);
   }
 
-  const eventFiltered = applyFixtureChannelFallback(streams, match);
-  if (eventFiltered !== streams) {
-    streams.length = 0;
-    streams.push(...eventFiltered);
+  // Collapse duplicate streams that arise when several sources of one match
+  // resolve to the same underlying clip (e.g. LiveTV's "Other Videos" siblings
+  // are re-listed by every clip page). Keyed on the playable identity so real
+  // multi-part streams are preserved. Policy eligibility runs first so a blocked
+  // copy cannot suppress an eligible copy with the same playback identity.
+  if (streams.length > 1) {
+    const dedupedStreams = dedupeByPlaybackIdentity(streams, {
+      preferEvent: process.env.KAFKA_EVENT_FIRST_ENABLED === 'true',
+      keepUnkeyed: true
+    });
+    if (dedupedStreams.length !== streams.length) {
+      console.log(`[streams.js] Dropped ${streams.length - dedupedStreams.length} duplicate stream(s) for ${matchId}`);
+      streams.length = 0;
+      streams.push(...dedupedStreams);
+    }
   }
+
+  if (!mixedKafkaFixture) {
+    const eventFiltered = applyFixtureChannelFallback(streams, match);
+    if (eventFiltered !== streams) {
+      streams.length = 0;
+      streams.push(...eventFiltered);
+    }
+  }
+
+  // Standardize Stream Labels
+  const icon = STREAM_SPORT_ICONS[match.category] || '📡';
 
   streams.forEach(s => {
     // Tag proxied manifest URLs with their resolve-cache key (see withResolveKey).
@@ -2006,10 +2060,10 @@ async function handleStream(type, id, config) {
       s.name = isWeb ? '🌐 Web Stream' : '⚡ Direct Stream';
     }
     
-    const isChannelCard = Boolean(match && (match.category === 'networks' || match.isChannel || match.date === '0' || String(match.id || '').includes('_ch_')));
-    if (isChannelCard && s.canonicalChannel) {
+    const isChannelCardTitle = Boolean(match && isChannelCard);
+    if (isChannelCardTitle && s.canonicalChannel) {
       channelName = s.canonicalChannel;
-    } else if (!channelName && isChannelCard) {
+    } else if (!channelName && isChannelCardTitle) {
       channelName = s.canonicalChannel || s.channelName || (match && match.title) || '';
     }
 
@@ -2046,7 +2100,7 @@ async function handleStream(type, id, config) {
 
     // Do not mislabel an event as its broadcaster. Retain the real fixture
     // text in the event card, not on every alternative playback row.
-    if (!isChannelCard && match?.title && channelName.toLowerCase() === match.title.trim().toLowerCase()) {
+    if (!isChannelCardTitle && match?.title && channelName.toLowerCase() === match.title.trim().toLowerCase()) {
       channelName = '';
     }
     if (channelName) {
@@ -2081,7 +2135,7 @@ async function handleStream(type, id, config) {
       partLabel = partMatch[1].trim();
     }
     if (channelName && (channelName.toLowerCase() === 'direct' || channelName.toLowerCase() === 'browser' || channelName.toLowerCase() === 'ok.ru' || channelName.toLowerCase() === partLabel.toLowerCase())) {
-      channelName = isChannelCard ? (s.canonicalChannel || (match && match.title) || '') : '';
+      channelName = isChannelCardTitle ? (s.canonicalChannel || (match && match.title) || '') : '';
     }
 
     let serverBadge = '';
@@ -2105,7 +2159,10 @@ async function handleStream(type, id, config) {
 
     const partDisplay = partLabel ? ` | 🎬 ${partLabel}` : '';
     const channelDisplay = channelName ? ` | 📺 ${channelName}${countryTag}${backupTag}${timeshiftTag}` : `${backupTag}${timeshiftTag}`;
-    s.title = `${icon} ${providerName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
+    const displayProviderName = (mixedKafkaFixture && (s._source === 'kafka' || s.sourceName === 'kafka'))
+      ? (s._kafkaMatchMode === 'event' ? 'Kafka · Event' : 'Kafka · Channel')
+      : providerName;
+    s.title = `${icon} ${displayProviderName}${serverBadge}${partDisplay}${channelDisplay}\n📺 Quality: ${quality}${bitrateText}${viewersText}${speedText}`;
     
     // Add behaviorHints to group streams and handle CORS for direct streams
     s.behaviorHints = s.behaviorHints || {};

@@ -327,3 +327,62 @@ test('incomplete event discovery uses short freshness, keeps background probes s
     if (c === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = c;
   }
 });
+
+test('mixed fixture returns ready Kafka channel at soft deadline with short freshness and merges arriving events later', async () => {
+  const prevFlags = [process.env.KAFKA_EVENT_FIRST_ENABLED, process.env.KAFKA_ENABLED, process.env.KAFKA_MANIFEST_URL];
+  process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+  process.env.KAFKA_ENABLED = 'true';
+  process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+  const KafkaProvider = require('../src/providers/KafkaProvider');
+
+  try {
+    let releaseEvent;
+    const kafkaProvider = new KafkaProvider({
+      catalogStore: {
+        isReady: () => true,
+        findEvents: () => [{ id: 'trex:ev1', name: 'Live | Team A vs Team B | Feed 1', score: 9000 }],
+        findChannel: () => [],
+        findTeam: () => []
+      },
+      eventSearch: { cachedFor: () => [], findForFixture: async () => [], isInWindow: () => true }
+    });
+    kafkaProvider.resolveStream = jest.fn(async (id, _cat, _title, src) => {
+      if (id === 'trex:ev1') await new Promise(r => { releaseEvent = r; });
+      return [{ name: 'Kafka', title: id, url: `https://cdn.fixture.test/${id}.m3u8`, _kafkaMatchMode: src?.matchMode || 'label' }];
+    });
+
+    const eventMatch = {
+      id: 'partial-mixed',
+      title: 'Team A vs Team B',
+      category: 'football',
+      date: Date.now(),
+      team1: 'Team A',
+      team2: 'Team B',
+      sources: [{ source: 'kafka', id: 'trex:label', channelName: 'TNT Sports 1', matchMode: 'label' }]
+    };
+    services.kafkaProvider = kafkaProvider;
+    services.cacheService = { findMatch: () => eventMatch };
+
+    let first;
+    const req = handleStream('tv', 'nuvio_sport_partial-mixed', {}).then(v => { first = v; });
+    await jest.advanceTimersByTimeAsync(110);
+    await req;
+
+    expect(first.cacheMaxAge).toBe(2);
+    expect(first.streams).toHaveLength(1);
+    expect(first.streams[0]._kafkaMatchMode).toBe('label');
+
+    releaseEvent();
+    await jest.advanceTimersByTimeAsync(2000);
+
+    const refreshed = await handleStream('tv', 'nuvio_sport_partial-mixed', {});
+    expect(refreshed.cacheMaxAge).toBe(30);
+    expect(refreshed.streams.map(s => s._kafkaMatchMode)).toEqual(expect.arrayContaining(['event', 'label']));
+    expect(first.streams).toHaveLength(1);
+  } finally {
+    const [a, b, c] = prevFlags;
+    if (a === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = a;
+    if (b === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = b;
+    if (c === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = c;
+  }
+});

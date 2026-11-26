@@ -212,7 +212,7 @@ describe('handleStream hard response deadline', () => {
     }
   });
 
-  test('waits past soft deadline to hard deadline while event discovery is pending with no verified event yet', async () => {
+  test('waits past soft deadline to hard deadline while event discovery is pending with no ready Kafka row yet', async () => {
     const prevEventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED;
     const prevEnabled = process.env.KAFKA_ENABLED;
     const prevManifest = process.env.KAFKA_MANIFEST_URL;
@@ -256,6 +256,57 @@ describe('handleStream hard response deadline', () => {
       expect(response).toBeDefined();
       expect(response.streams.map(s => s.url)).toEqual(['https://cdn.example/dl.m3u8']);
       expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 1, 'hard_wait_expired');
+    } finally {
+      if (prevEventFirst === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = prevEventFirst;
+      if (prevEnabled === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = prevEnabled;
+      if (prevManifest === undefined) delete process.env.KAFKA_MANIFEST_URL; else process.env.KAFKA_MANIFEST_URL = prevManifest;
+    }
+  });
+
+  test('returns ready Kafka channel at soft deadline while event discovery is pending', async () => {
+    const prevEventFirst = process.env.KAFKA_EVENT_FIRST_ENABLED;
+    const prevEnabled = process.env.KAFKA_ENABLED;
+    const prevManifest = process.env.KAFKA_MANIFEST_URL;
+    process.env.KAFKA_EVENT_FIRST_ENABLED = 'true';
+    process.env.KAFKA_ENABLED = 'true';
+    process.env.KAFKA_MANIFEST_URL = 'https://trex.invalid/manifest.json';
+
+    try {
+      const eventMatch = {
+        id: 'ev-soft-chan',
+        title: 'Team A vs Team B',
+        category: 'football',
+        date: Date.now(),
+        team1: 'Team A',
+        team2: 'Team B',
+        sources: [{ source: 'kafka', id: 'trex:label', channelName: 'TNT Sports 1', matchMode: 'label' }]
+      };
+      const eventDeferred = deferred();
+      const channelDeferred = deferred();
+      const kp = {
+        configured: true,
+        isEventFixtureEligible: () => true
+      };
+      const services = {
+        cacheService: { findMatch: () => eventMatch },
+        streamResolveCache: {
+          getOrCreate: jest.fn(key => (key.includes('fixture-events-') ? eventDeferred.promise : channelDeferred.promise))
+        },
+        streamScorer: { calculateScore: () => 1 },
+        kafkaProvider: kp
+      };
+      container.resolve.mockImplementation(name => services[name]);
+
+      let response;
+      handleStream('tv', 'nuvio_sport_ev-soft-chan').then(value => { response = value; });
+      channelDeferred.resolve([{ url: 'https://cdn.example/kafka-chan.m3u8', _source: 'kafka', _kafkaMatchMode: 'label', channelName: 'TNT Sports 1' }]);
+      await jest.advanceTimersByTimeAsync(99);
+      expect(response).toBeUndefined();
+      await jest.advanceTimersByTimeAsync(11);
+      expect(response).toBeDefined();
+      expect(response.cacheMaxAge).toBe(2);
+      expect(response.streams).toContainEqual(expect.objectContaining({ _kafkaMatchMode: 'label' }));
+      expect(relations.endWindow).toHaveBeenCalledWith(expect.anything(), 2, 1, 'early_return');
     } finally {
       if (prevEventFirst === undefined) delete process.env.KAFKA_EVENT_FIRST_ENABLED; else process.env.KAFKA_EVENT_FIRST_ENABLED = prevEventFirst;
       if (prevEnabled === undefined) delete process.env.KAFKA_ENABLED; else process.env.KAFKA_ENABLED = prevEnabled;
