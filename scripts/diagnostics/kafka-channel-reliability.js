@@ -47,19 +47,21 @@ function parseArgs(argv) {
   return args;
 }
 
-function requestJsonWithAgent(urlString, agent) {
+function requestJsonWithAgent(urlString, agent, timeoutMs = REQUEST_TIMEOUT_MS) {
   return new Promise((resolve, reject) => {
     const url = new URL(urlString);
     const mod = url.protocol === 'https:' ? https : http;
-    const req = mod.request(url, { method: 'GET', agent, timeout: REQUEST_TIMEOUT_MS }, (res) => {
+    let settled = false;
+    let timer = null;
+    const finish = (fn, value) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      fn(value);
+    };
+    const req = mod.request(url, { method: 'GET', agent }, (res) => {
       const chunks = [];
       let bytes = 0;
-      let settled = false;
-      const finish = (fn, value) => {
-        if (settled) return;
-        settled = true;
-        fn(value);
-      };
       res.on('data', (chunk) => {
         bytes += chunk.length;
         if (bytes > MAX_RESPONSE_BYTES) {
@@ -80,10 +82,8 @@ function requestJsonWithAgent(urlString, agent) {
       });
       res.on('error', (err) => finish(reject, err));
     });
-    req.on('timeout', () => {
-      req.destroy(new Error('Request timed out'));
-    });
-    req.on('error', (err) => reject(err));
+    timer = setTimeout(() => req.destroy(new Error('Request timed out')), timeoutMs);
+    req.on('error', (err) => finish(reject, err));
     req.end();
   });
 }
@@ -254,4 +254,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseArgs, parseLoopbackOrigin, extractCandidateIds, diffWorkerCache };
+module.exports = { parseArgs, parseLoopbackOrigin, requestJsonWithAgent, extractCandidateIds, diffWorkerCache };

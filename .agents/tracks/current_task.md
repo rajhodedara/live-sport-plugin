@@ -81,3 +81,8 @@
 ### Immediate Next Steps for Next Chat
 1. Build, push, and deploy the reviewed reliability commits only through the manual staged workflow; do not run npm install, match sync, SQLite reindex, or a catalog reset.
 2. Use the loopback-only sampler and selected F1 trace on both PM2 workers to collect post-deploy evidence before considering the separate top-two channel-coverage change.
+
+### Follow-up: sampler deadline correction
+- The reviewed reliability commit `f21838b` was pushed and deployed through a staged bundle swap with the VPS project-local IANA 2026f timezone data. No dependency install, match sync, SQLite maintenance, or catalog reset was run.
+- A live two-sample diagnostic exposed that Node's request `timeout` is inactivity-based, so the sampler did not enforce its documented 22-second wall-clock limit under a slow active response. The sampler now owns an absolute timer which destroys the request and releases it at the deadline; the regression test uses a loopback server that keeps sending bytes without completing.
+- The correction must be committed, pushed, and deployed before further live Kafka sampling. After its rolling reload, verify `/health` first; do not repeat the two-sample F1 diagnostic while the host is under load.
