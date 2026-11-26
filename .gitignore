@@ -117,3 +117,32 @@ public/*.json
 /tools/cenc-harness/app/build/
 /tools/cenc-harness/.gradle/
 /tools/cenc-harness/build/
+
+# --- Reverse-engineering lab (lives outside repo in ../nuvio-re-lab/) ------
+# Keep APK extractions, disassemblies, raw captures, and draft scratch out of the codebase.
+/assets/
+/lib/
+/scorezone_src/
+/poster-drafts/
+/research/
+AndroidManifest.xml
+androguard.db
+*.raw
+*.cs3
+*.cs3.zip
+*_disasm.txt
+*_asm.txt
+/dex_all_strings.txt
+/disasm.txt
+/primary.txt
+/sxr_*.txt
+/Lcom_*.txt
+/sportzx_*.txt
+*_provider_plan_v*.md
+/trex_channels.csv
+/events.json
+/events_fresh.json
+/events_new.json
+/decrypted_output.json
+/pr81_meta.json
+/chunks_efto5Wzn.js
