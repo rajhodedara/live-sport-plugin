@@ -1220,6 +1220,7 @@
       ['portuguese', 'Portuguese'], ['pt', 'Portuguese'], ['pt br', 'Portuguese'], ['por', 'Portuguese'],
       ['hindi', 'Hindi'], ['hi', 'Hindi'], ['hin', 'Hindi']
     ]);
+    const knownSupportedLanguages = new Set(['English']);
     let supportedLanguages = ['English'];
     let selectedLiveLanguages = ['English'];
 
@@ -1263,20 +1264,20 @@
       return out;
     }
 
-    function mergeSupportedLanguages(langs) {
-      const seen = new Set();
-      const next = [];
-      const pushUnique = (name) => {
-        const label = displayLangName(name);
-        const key = foldLang(label);
-        if (!key || seen.has(key)) return;
-        seen.add(key);
-        next.push(label);
-      };
-      pushUnique('English');
-      (Array.isArray(langs) ? langs : []).forEach(pushUnique);
-      selectedLiveLanguages.forEach(pushUnique);
-      supportedLanguages = next;
+    function refreshSupportedLanguages(langs) {
+      if (Array.isArray(langs)) {
+        langs.forEach(l => {
+          const label = displayLangName(l);
+          if (label) knownSupportedLanguages.add(label);
+        });
+      }
+      selectedLiveLanguages.forEach(l => {
+        const label = displayLangName(l);
+        if (label) knownSupportedLanguages.add(label);
+      });
+      const all = Array.from(knownSupportedLanguages);
+      const nonEnglish = all.filter(l => foldLang(l) !== 'english').sort();
+      supportedLanguages = ['English', ...nonEnglish];
     }
 
     function setLiveLangFeedback(msg, isError) {
@@ -1371,7 +1372,7 @@
       langModeAll.checked = true;
       if (langModeOnly) langModeOnly.checked = false;
     }
-    mergeSupportedLanguages([]);
+    refreshSupportedLanguages([]);
     renderLiveLanguageChips();
 
     if (replayFilterSelect) {
@@ -1791,7 +1792,6 @@
       liveLangEnglishOnlyBtn.addEventListener('click', () => {
         liveLangDirty = true;
         selectedLiveLanguages = ['English'];
-        mergeSupportedLanguages([]);
         renderLiveLanguageChips();
         setLiveLangFeedback('', false);
         updateLink();
@@ -1829,7 +1829,7 @@
       const already = selectedLiveLanguages.some(item => foldLang(item) === key);
       if (!already) {
         selectedLiveLanguages.push(resolved);
-        mergeSupportedLanguages([]);
+        refreshSupportedLanguages([resolved]);
         renderLiveLanguageChips();
         setLiveLangFeedback('Added ' + resolved + '.', false);
       } else {
@@ -2226,7 +2226,7 @@
         }
 
         const langs = Array.isArray(data.languages) ? data.languages : [];
-        mergeSupportedLanguages(langs);
+        refreshSupportedLanguages(langs);
         renderLiveLanguageChips();
         optionsStatus = 'ready';
 
