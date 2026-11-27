@@ -155,6 +155,34 @@ describe('service, store and device middleware', () => {
     expect(() => service.updateDevice(other.id, tv.id, { name: 'x' })).toThrow();
   });
 
+  test('device settings round-trip liveLanguages and languageFilter and clear restrictive mode', () => {
+    const u = service.signInWithIdentity({ provider: 'google', subject: 'live-lang-1', email: 'lang@x.co' });
+    const tv = service.createDeviceToken(u.id, 'Living Room TV');
+
+    service.updateDevice(u.id, tv.id, {
+      config: { liveLanguages: 'Spanish', languageFilter: 'only', languages: 'Arabic, Spanish' },
+    });
+    expect(service.getDevice(u.id, tv.id).config).toEqual({
+      liveLanguages: 'Spanish',
+      languageFilter: 'only',
+      languages: 'Arabic, Spanish',
+    });
+    expect(service.authenticateDeviceToken(tv.token).config).toEqual({
+      liveLanguages: 'Spanish',
+      languageFilter: 'only',
+      languages: 'Arabic, Spanish',
+    });
+
+    // Switching back to Show all languages removes languageFilter while keeping legacy languages intact.
+    service.updateDevice(u.id, tv.id, {
+      config: { liveLanguages: 'English,Spanish', languages: 'Arabic, Spanish' },
+    });
+    expect(service.getDevice(u.id, tv.id).config).toEqual({
+      liveLanguages: 'English,Spanish',
+      languages: 'Arabic, Spanish',
+    });
+  });
+
   async function withServer(app, fn) {
     const server = http.createServer(app);
     await new Promise((r) => server.listen(0, '127.0.0.1', r));

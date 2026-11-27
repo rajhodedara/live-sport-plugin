@@ -86,3 +86,59 @@
 - The reviewed reliability commit `f21838b` was pushed and deployed through a staged bundle swap with the VPS project-local IANA 2026f timezone data. No dependency install, match sync, SQLite maintenance, or catalog reset was run.
 - A live two-sample diagnostic exposed that Node's request `timeout` is inactivity-based, so the sampler did not enforce its documented 22-second wall-clock limit under a slow active response. The sampler now owns an absolute timer which destroys the request and releases it at the deadline; the regression test uses a loopback server that keeps sending bytes without completing.
 - The correction must be committed, pushed, and deployed before further live Kafka sampling. After its rolling reload, verify `/health` first; do not repeat the two-sample F1 diagnostic while the host is under load.
+
+# Session Checkpoint: Discord `/token` Sign-In
+**Date**: 2026-11-27
+**Status**: Completed locally on `auth` (production deployment deferred to separate request)
+
+### What Was Completed
+- **SQLite token store & atomic redemption** (`src/auth/AuthStore.js`, `src/auth/AuthService.js`):
+  - Added migration v2 (`discord_access_tokens` with unique `interaction_id`, hashed token `token_hash`, `expires_at`, `retain_until`, `redeemed_at`), opportunistic deletion of rows past `retain_until`, and `500 ms` lock wait bound on issuance (`storage_busy` on contention).
+  - Implemented `AuthService.issueDiscordAccessToken` (`nt_` + 24 bytes, 5-minute TTL, interaction deduplication through `Math.max(signedAtMs, issuedAtMs) + 300_000`, no early identity creation) and `AuthService.redeemDiscordAccessToken` (trims whitespace, single SQLite write transaction claiming unexpired token, resolving/creating `discord` identity with empty email, checking `disabled_at`, and inserting browser session).
+- **Config, Discord webhook & redemption routes** (`src/auth/authConfig.js`, `src/auth/index.js`, `src/auth/discordInteractions.js`, `src/routes/auth.js`, `src/index.js`):
+  - Added strict validation for `AUTH_DISCORD_APPLICATION_ID`, `AUTH_DISCORD_PUBLIC_KEY` (32-byte Ed25519 hex), `AUTH_DISCORD_GUILD_ID`, optional `AUTH_DISCORD_ROLE_ID` (fail-closed if invalid), and canonical `ADDON_URL`.
+  - Added `hasSignInMethods({ config, service })` in `src/auth/index.js` and wired it into both page gating and `/configure` in `src/index.js`; extended `GET /api/auth/providers` with `accessTokenEnabled`.
+  - Mounted `POST /api/auth/discord/interactions` (raw 16 KiB JSON body, Ed25519 verification before JSON parse, 5-minute timestamp window, <=30s command future skew, app/guild/role/`/token` checks, ephemeral `flags: 64` replies, 2.5 s response deadline) and `POST /api/auth/access-token/redeem` (exact canonical `Origin` check before touching token, trusted-proxy per-IP rate limit, normalized same-origin non-`/api` `redirectTo`, `nuvio_session` cookie).
+- **Account UI & docs** (`public/account.html`, `.env.example`, `docs/DISCORD_TOKEN_SETUP.md`, `.agents/context/ARCHITECTURE.md`, `tests/discordTokenAuth.test.js`):
+  - Added left-aligned Nuvio-styled **Google** / **Access token** accessible tabs (when both methods are enabled), single-method direct views, keyboard navigation (`ArrowLeft`/`ArrowRight`/`Home`/`End`), `Open Nuvio Discord` invite link (no Discord OAuth button), method-specific privacy text, inline validation, duplicate-submit protection, and `320 px` / desktop light & dark theme support.
+  - Verified in Jest (`tests/authSso.test.js`, `tests/discordTokenAuth.test.js`, `tests/localRequest.test.js`), `node --check`, and real Chrome (desktop 1280x800 + 320x640, light + dark, signed Discord `/token` interaction -> paste -> redeem -> `/configure` -> device creation -> manifest resolution).
+
+### Current Blockers / Open Questions
+- Live Discord Developer Portal verification (setting `Interactions Endpoint URL`, registering guild `/token` command, and live production deployment) depends on owner credentials and HTTPS origin.
+
+### Immediate Next Steps for Next Chat
+1. Follow [docs/DISCORD_TOKEN_SETUP.md](file:///C:/Users/odeda/Desktop/Projects/Nuvio%20Live%20Sports%20Plugin/docs/DISCORD_TOKEN_SETUP.md) to test `/token` live via an HTTPS tunnel or staging host, then deploy when explicitly requested.
+
+
+# Session Checkpoint: Live Commentary Language Customization
+**Date**: 2026-11-27
+**Status**: Completed locally on `auth`
+
+### What Was Completed
+- **Language selection & normalization** (`src/services/LanguagePriorityService.js`):
+  - Added `parseSelectedLanguages(value)` preserving first-seen user order and deduplicating aliases (including English) while returning `[]` for absent, malformed, `'none'`, or unsupported input.
+  - Retained `parseLanguagePriority` and `compareStreams` contracts.
+- **Stream resolution readiness & filtering** (`src/streams.js`):
+  - Added `resolveRowLanguageContext()` with request-local `WeakMap` cache.
+  - Applied `liveLanguages` / `languageFilter` to live fixtures and 24/7 channels across both `publicationRows()` readiness quorum and final stream filtering (ahead of deduplication, fixture fallback, and web fallback suppression; emitting `language_excluded` in candidate tracing).
+  - Ensured faster excluded streams cannot satisfy readiness while an eligible stream is pending within the deadline.
+  - Bypassed live language filtering for `isReplayCard` and `isHubEpisode` requests to preserve legacy replay ordering and behavior.
+- **Config & device persistence** (`src/manifest.js`, `src/auth/AuthService.js`, `src/index.js`):
+  - Added `liveLanguages` and `languageFilter` to `manifest.config` and `SETTINGS_KEYS`.
+  - Extended `/api/options` with `languageAliases` from `LanguagePriorityService`.
+  - Carried forward legacy `languages` setting verbatim for existing installs.
+  - Omitted `liveLanguages` and `languageFilter` from Collections Copy and Download URLs (`0` characters added).
+- **Configure UI** (`public/configure.html`):
+  - Added **Live commentary languages** fieldset with **Show all languages** and **Only selected languages** native radios.
+  - Rendered English immediately and merged supported options from `/api/options` into a responsive chip grid.
+  - Added **English only**, **Clear selection**, empty-selection notice (`No languages selected. Showing all languages.`), and **Add a language** field with alias validation.
+  - Applied `ui-ux-pro-max` guidance: `>= 44px` touch targets, visible keyboard focus outlines, clean wrapping, and `scroll-padding-bottom` offset for sticky action bar.
+- **Tests & Verification**:
+  - Added unit/integration coverage in `tests/languagePriority.test.js`, `tests/authSso.test.js`, `tests/streamPriorityQuorum.test.js`, and `tests/channelLanguageRegression.test.js`.
+  - Re-verified all 7 suites (`134/134` tests passed), syntax checks, collections filter size baseline (18,657 characters, 0 added), and browser QA at 1280px and 320px.
+
+### Current Blockers / Open Questions
+- Pre-existing collections size assertion in `tests/collectionsFilter.test.js` remains at 18,657 characters vs `< 18650`.
+
+### Immediate Next Steps for Next Chat
+- Deploy to staging/production when authorized.

@@ -7,7 +7,7 @@ const { probeBitrate } = require('./services/StreamBitrateProbe');
 const { createDeferredResolution, inconclusiveErrorReason, markInconclusiveStreams,
   inconclusiveStreamsReason, markPartialStreams } = require('./services/StreamResolutionOutcome');
 const { resolveSegmentUrl } = require('./services/HlsRewriteService');
-const { parseLanguagePriority, compareStreams, canonicalLanguage, kafkaPlaybackRank, hasExplicitLanguage } = require('./services/LanguagePriorityService');
+const { ENGLISH, parseSelectedLanguages, parseLanguagePriority, compareStreams, canonicalLanguage, kafkaPlaybackRank, hasExplicitLanguage } = require('./services/LanguagePriorityService');
 const { BASE_URL } = require('./config');
 const { performance } = require('perf_hooks');
 const SkTechCrypto = require('./resolver/sktech/SkTechCrypto');
@@ -25,6 +25,66 @@ const {
 // Source selection (shared by handleStream and prewarmMatch)
 function detectChannelCountry(channelName) {
   return ChannelCountryService.detectChannelCountry(channelName);
+}
+
+function resolveRowLanguageContext(row, match, isChannelCard) {
+  if (!row || typeof row !== 'object') {
+    return { channelName: '', countryInfo: null, canonicalLang: '' };
+  }
+  const originalTitle = row.title || '';
+  const explicitChannel = [row.canonicalChannel, row.channelName]
+    .find(value => typeof value === 'string' && value.trim() &&
+      ![match?.title, match?.baseTitle].some(event => typeof event === 'string' &&
+        event.trim().toLowerCase() === value.trim().toLowerCase())) || '';
+  let channelName = explicitChannel.trim();
+  if (originalTitle && !channelName) {
+    const titleChannelMatch = originalTitle.match(/\(([^)]+)\)/);
+    if (titleChannelMatch && titleChannelMatch[1]) {
+      const inner = titleChannelMatch[1];
+      if (!/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k|live\s+event|event|live\s+stream|stream\s*\d*)$/i.test(inner) && inner !== 'Auto' && !inner.toLowerCase().startsWith('stream')) {
+        channelName = inner;
+      } else {
+        const bracketName = originalTitle.match(/^\s*\[([^\]]{2,40})\]/);
+        if (bracketName && bracketName[1] &&
+            !/^(?:\d{3,4}p\d{0,2}|sd|hd|fhd|uhd|4k(?:\s+uhd)?|8k)$/i.test(bracketName[1].trim())) {
+          channelName = bracketName[1].trim();
+        }
+      }
+    } else if (!originalTitle.includes('Stream') && !originalTitle.includes('Auto')) {
+      channelName = originalTitle;
+    }
+  }
+  const isChannelCardTitle = Boolean(match && isChannelCard);
+  if (isChannelCardTitle && row.canonicalChannel) {
+    channelName = row.canonicalChannel;
+  } else if (!channelName && isChannelCardTitle) {
+    channelName = row.canonicalChannel || row.channelName || (match && match.title) || '';
+  }
+
+  let countryInfo = null;
+  if (row.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(String(row.group).trim())) {
+    countryInfo = detectChannelCountry(row.group);
+  }
+  if (!countryInfo && row.country) {
+    countryInfo = detectChannelCountry(row.country);
+  }
+  if (!countryInfo && row.channelName) {
+    countryInfo = detectChannelCountry(row.channelName);
+  }
+  if (!countryInfo && channelName) {
+    channelName = channelName.trim();
+    countryInfo = detectChannelCountry(channelName);
+  }
+  if (!countryInfo) {
+    const fallbackChannel = row.canonicalChannel || row.channelName || (match && match.title) || '';
+    if (fallbackChannel) {
+      countryInfo = detectChannelCountry(fallbackChannel);
+    }
+  }
+
+  const rawLang = row.language || (countryInfo && countryInfo.language) || '';
+  const canonicalLang = canonicalLanguage(rawLang);
+  return { channelName, countryInfo, canonicalLang };
 }
 
 function isEventStreamSource(src) {
@@ -2193,6 +2253,41 @@ async function handleStream(type, id, config) {
     )
   );
   const isTvChannel = Boolean((type === 'tv' || type === 'channel') && isChannelCard);
+  const isReplayRequest = isReplayCard || isHubEpisode;
+  const hasLiveLanguagesConfig = Boolean(config && config.liveLanguages !== undefined && config.liveLanguages !== null);
+  const liveSelectedLanguages = !isReplayRequest
+    ? parseSelectedLanguages(hasLiveLanguagesConfig ? config.liveLanguages : config?.languages)
+    : [];
+  const strictLanguageSet = (!isReplayRequest && config?.languageFilter === 'only' && liveSelectedLanguages.length > 0)
+    ? new Set(liveSelectedLanguages)
+    : null;
+  const languagePriorities = isReplayRequest
+    ? parseLanguagePriority(config)
+    : (hasLiveLanguagesConfig
+        ? liveSelectedLanguages.filter(lang => lang !== ENGLISH)
+        : parseLanguagePriority(config));
+  const explicitLanguagePreference = isReplayRequest
+    ? hasExplicitLanguage(config)
+    : (hasLiveLanguagesConfig
+        ? liveSelectedLanguages.length > 0
+        : hasExplicitLanguage(config));
+
+  const rowLanguageCache = new WeakMap();
+  const getRowLanguageContext = (row) => {
+    if (!row || typeof row !== 'object') return { channelName: '', countryInfo: null, canonicalLang: '' };
+    let cached = rowLanguageCache.get(row);
+    if (!cached) {
+      cached = resolveRowLanguageContext(row, match, isChannelCard);
+      rowLanguageCache.set(row, cached);
+    }
+    return cached;
+  };
+  const isLanguageEligible = (row) => {
+    if (!strictLanguageSet) return true;
+    const { canonicalLang } = getRowLanguageContext(row);
+    if (!canonicalLang) return true;
+    return strictLanguageSet.has(canonicalLang);
+  };
   const mixedKafkaFixture = process.env.KAFKA_EVENT_FIRST_ENABLED === 'true' &&
     !isChannelCard &&
     !isReplayCard &&
@@ -2369,6 +2464,7 @@ async function handleStream(type, id, config) {
       const eligible = prematch.filter(row => {
         if (!row || !playbackIdentity(row)) return false;
         if (isBlockedStream(row)) return false;
+        if (!isLanguageEligible(row)) return false;
         return !config || config.webStreams !== 'disabled' || isDirectRow(row);
       });
       const deduped = dedupeByPlaybackIdentity(eligible, {
@@ -2572,6 +2668,31 @@ async function handleStream(type, id, config) {
     console.log(`[streams.js] Dropped ${beforeDashPolicy - policyAllowed.length} DASH stream(s) by bandwidth policy for ${matchId}`);
   }
 
+  if (strictLanguageSet) {
+    const languageAllowed = streams.filter((s) => isLanguageEligible(s));
+    if (languageAllowed.length !== streams.length) {
+      const droppedCount = streams.length - languageAllowed.length;
+      if (traceSink) {
+        for (const s of streams) {
+          if (s && s._kafkaCandidateId && !isLanguageEligible(s)) {
+            const cid = String(s._kafkaCandidateId);
+            const latest = traceSink.latestByCandidate.get(cid);
+            traceSink.emit({
+              fixtureId: match.id,
+              candidateId: cid,
+              stage: 'rejected',
+              reason: 'language_excluded',
+              attempt: latest?.attempt || 0
+            });
+          }
+        }
+      }
+      streams.length = 0;
+      streams.push(...languageAllowed);
+      console.log(`[streams.js] Dropped ${droppedCount} stream(s) by language filter for ${matchId}`);
+    }
+  }
+
   const verifiedCandidateIds = new Set(
     streams.map(s => s && s._kafkaCandidateId).filter(Boolean).map(String)
   );
@@ -2707,29 +2828,8 @@ async function handleStream(type, id, config) {
       channelName = s.canonicalChannel || s.channelName || (match && match.title) || '';
     }
 
-    let countryInfo = null;
-    // 1. If stream already has group or explicit country metadata, detect country from it FIRST!
-    if (s.group && !/^(?:live tv|general|channels|networks|other|multi-region)$/i.test(String(s.group).trim())) {
-      countryInfo = detectChannelCountry(s.group);
-    }
-    if (!countryInfo && s.country) {
-      countryInfo = detectChannelCountry(s.country);
-    }
-    // 2. Fall back to stream's specific channelName if available
-    if (!countryInfo && s.channelName) {
-      countryInfo = detectChannelCountry(s.channelName);
-    }
-    // 3. Fall back to normalized channelName / card title
-    if (!countryInfo && channelName) {
-      channelName = channelName.trim();
-      countryInfo = detectChannelCountry(channelName);
-    }
-    if (!countryInfo) {
-      const fallbackChannel = s.canonicalChannel || s.channelName || (match && match.title) || '';
-      if (fallbackChannel) {
-        countryInfo = detectChannelCountry(fallbackChannel);
-      }
-    }
+    const rowLangCtx = getRowLanguageContext(s);
+    const countryInfo = rowLangCtx.countryInfo;
 
     if (countryInfo) {
       if (!s.language) s.language = countryInfo.language;
@@ -2904,12 +3004,10 @@ async function handleStream(type, id, config) {
 
   // Ordering is: direct stream, then language rank, then rankScore.
   // Language rank is English (always first) -> the languages the user listed in
-  // config.languages, in order -> unknown -> other known languages. With no
-  // config that is exactly the old English -> unknown -> other ordering; see
-  // LanguagePriorityService for the ranking and the alias handling.
-  const languagePriorities = parseLanguagePriority(config);
-
-  streams.sort((a, b) => compareStreams(a, b, languagePriorities, hasExplicitLanguage(config), { mixedKafkaFixture }));
+  // config.liveLanguages (or legacy config.languages), in order -> unknown ->
+  // other known languages. With no config that is exactly the old
+  // English -> unknown -> other ordering; see LanguagePriorityService.
+  streams.sort((a, b) => compareStreams(a, b, languagePriorities, explicitLanguagePreference, { mixedKafkaFixture }));
 
   if (traceSink) {
     const publishedCandidateIds = new Set(

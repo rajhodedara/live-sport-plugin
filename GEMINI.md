@@ -12,7 +12,8 @@ Never explore blindly; read the index, then open only target files.
 
 1. **First read:** `.agents/context/ARCHITECTURE.md` - topology, lifecycle, entry points, state,
    gotchas.
-2. **Before starting:** `.agents/tracks/current_task.md` - open checkpoint and handoff notes.
+2. **When resuming prior work:** `.agents/tracks/current_task.md` - open checkpoint and handoff
+   notes (skip for general questions, new ideas, or unrelated tasks).
 3. **Before changing behaviour:** `.agents/context/DECISIONS.md` - settled owner decisions.
 4. **Then** open task files only; per-directory `GEMINI.md` (§2) holds local rules.
 5. **RE & captures live outside the repo:** write APK dumps, disassemblies, raw captures, and draft

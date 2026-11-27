@@ -91,8 +91,9 @@ In order (each step is load-bearing; reordering breaks routes):
 3. Global `unhandledRejection` / `uncaughtException` handlers (`:38`, `:44`).
 4. Handlers bound onto the SDK builder: catalog, meta, stream.
 5. `express()`; `app.set('trust proxy', true)`; `cors()`.
-6. Static roots: `/posters`, then `public/`, `src/public`, `cwd/public`.
-7. Landing/config/donate HTML: `/`, `/configure`, `/:config/configure`, `/donate`.
+6. Page sign-in gate (`hasSignInMethods` from `src/auth/index.js`): when `AUTH_TOKEN_PEPPER` / `AUTH_ENCRYPTION_KEY` and at least one sign-in method (Google OAuth or Discord `/token`) are enabled, `GET`/`HEAD` requests for `/`, `/configure`, `/status` redirect unauthenticated visitors to `/account?next=…`; addon/API URLs stay open.
+7. Static roots: `/posters`, then `public/`, `src/public`, `cwd/public`.
+8. Landing/config/donate HTML & account routes: `/`, `/api/auth/*` (mounted ahead of `deviceConfigMiddleware` and the `/api` resolver proxy), `/account`, `/login`, `deviceConfigMiddleware` (`/<deviceConfig>/…`), `/configure`, `/:config/configure` (adds `class="accounts"` when `hasSignInMethods` is true), `/status`, `/donate`.
 8. `/collections.json` (Nuvio Collections export).
 9. **Internal `/api/*` JSON routes**: `/api/collections/download`, `/api/server-info`,
    `/api/options`, `/api/provider-health`, `/api/worker-budget`, `/api/matches`.
@@ -288,6 +289,7 @@ Caller-supplied dispatchers cannot supply an alternate dial — that is the poin
 | Native transport slots | `NativeGuardedSlot` pool, `MAX_SLOTS = 4` | Process | Capacity exhaustion → `ERR_OUTBOUND_CAPACITY` (503). |
 | Resolver conflict flag | `ResolverConflictState` (`globalThis` symbol) | Process, permanent | Set on child exit 98; `/api` stays 503. |
 | Timing telemetry | `TimingRuntime.relations` | Process | **`null` unless `STREAM_TIMING_EXPERIMENT=true`.** |
+| Accounts, sessions, devices & Discord tokens | `data/accounts.sqlite` (`AUTH_DB_PATH`) | Process + disk (WAL) | Built-in `node:sqlite`. Stores `users`, `identities`, `browser_sessions`, `device_tokens`, and single-use 5-minute `discord_access_tokens` (HMAC-hashed; `interaction_id` retained across 5-minute window). **Gitignored.** |
 | Static catalog data | `src/data/*.json` (`vavoo_channels.json` 1.95 MB, `tv_logos_map.json` 1.23 MB, …) | Tracked | Shipped assets, not caches. |
 
 ### Write path (sync)
@@ -344,6 +346,10 @@ that can produce duplicate cards, and duplication is preferred over cross-source
 | `/api/clearkey/license`, `/api/license` | `routes/manifest.js` | ClearKey licence passthrough |
 | `/watch` | `routes/watch.js` | Player HTML page |
 | `/health` | `routes/health.js` | Status JSON |
+| `/account`, `/login` | `public/account.html` | Sign-in (Google / Access token) & device manager |
+| `/api/auth/providers`, `/me`, `/logout`, `/devices*`, `/:provider/*` | `routes/auth.js` | Account status, Google OAuth + PKCE, device CRUD (`Cache-Control: no-store`) |
+| `/api/auth/discord/interactions` | `routes/auth.js` + `auth/discordInteractions.js` | Ed25519-verified Discord `PING` & `/token` issuance (500 ms SQLite busy cap, 2.5 s deadline) |
+| `/api/auth/access-token/redeem` | `routes/auth.js` | Canonical-origin, rate-limited single-use Discord token redemption -> `nuvio_session` cookie |
 
 Then, for anything left: `PublicResolverApiGate` (allowlist) → `ResolverTrustPolicy` (503 unless
 transport configured) → `ResolverConflictGate` (503 on conflict) → proxy to the resolver.
@@ -482,7 +488,8 @@ no lint** — it builds on the VPS and gates on `node --check dist.next/index.js
 | `src/` (root files) | Entry, DI, manifest, catalog, streams, config | this file |
 | `src/providers/` | 20+ scrapers (`BaseProvider` contract) + WASM decryptors | `src/providers/GEMINI.md` |
 | `src/services/` | Aggregation, **guarded egress**, caching, rewriting, artwork, timing | `src/services/GEMINI.md` |
-| `src/routes/` | HTTP proxy/rewrite layer (byte vs text) | `src/routes/GEMINI.md` |
+| `src/routes/` | HTTP proxy/rewrite layer (byte vs text) and `/api/auth` | `src/routes/GEMINI.md` |
+| `src/auth/` | Optional account SSO, Discord `/token` interaction & token redemption, device tokens (`node:sqlite`) | `docs/GOOGLE_SSO_SETUP.md`, `docs/DISCORD_TOKEN_SETUP.md` |
 | `src/domain/` | `MatchEntity`, `StreamEntity` | `src/services/GEMINI.md` |
 | `src/data/` | Tracked seed/asset JSON — **not** runtime cache | `src/services/GEMINI.md` |
 | `tests/` | 284 Jest suites | `tests/GEMINI.md` |

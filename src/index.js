@@ -66,15 +66,16 @@ app.use((req, _res, next) => {
 });
 
 // ─── Sign-in gate for the web pages ──────────────────────────────────────────
-// When accounts and at least one OAuth provider are configured, the dashboard,
+// When accounts and at least one sign-in method are configured, the dashboard,
 // configure and status pages need a signed-in session. Addon/API URLs
 // (manifest, catalog, stream, /api/*) stay open so installed devices keep
 // working. Runs before express.static.
 {
-  const gateAuth = require('./auth').getAuth();
-  const hasAuthProviders = Boolean(gateAuth.service && gateAuth.service.providers.list().length > 0);
+  const authModule = require('./auth');
+  const gateAuth = authModule.getAuth();
+  const hasAuthProviders = authModule.hasSignInMethods(gateAuth);
   if (gateAuth.service && !hasAuthProviders) {
-    console.warn('[auth] AUTH_TOKEN_PEPPER/AUTH_ENCRYPTION_KEY are set, but no OAuth provider is configured; page sign-in gate stays off.');
+    console.warn('[auth] AUTH_TOKEN_PEPPER/AUTH_ENCRYPTION_KEY are set, but no sign-in method is configured; page sign-in gate stays off.');
   }
   const PAGE = /^\/(?:index\.html|configure(?:\.html)?|status(?:\.html)?)?$|^\/[^/]+\/configure$/;
   app.use((req, res, next) => {
@@ -127,8 +128,9 @@ app.get('/', (req, res) => {
 
 // ─── Accounts / SSO ──────────────────────────────────────────────────────────
 // Must stay above the /api resolver proxy so the OAuth callback is not swallowed.
-const auth = require('./auth').getAuth();
-const hasAuthProviders = Boolean(auth.service && auth.service.providers.list().length > 0);
+const authModule = require('./auth');
+const auth = authModule.getAuth();
+const hasAuthProviders = authModule.hasSignInMethods(auth);
 app.use('/api/auth', require('./routes/auth').createAuthRouter({
   service: auth.service || { providers: { list: () => [], get: () => null } },
   config: auth.config,
@@ -324,8 +326,15 @@ app.get('/api/options', (req, res) => {
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'public, max-age=3600');
+  let languageAliases = {};
+  try {
+    languageAliases = require('./services/LanguagePriorityService').LANGUAGE_ALIASES || {};
+  } catch (_) {
+    languageAliases = {};
+  }
   res.json({
     languages,
+    languageAliases,
     teams,
     englishAlwaysFirst: true,
     replayFilters: [

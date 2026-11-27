@@ -3,8 +3,10 @@
 const crypto = require('./AuthCrypto');
 
 const MAX_DEVICES = 20;
-const SETTINGS_KEYS = ['teams', 'timezone', 'languages', 'replayFilter', 'webStreams', 'sports', 'liveSources', 'replaySources', 'liveLeagues'];
+const SETTINGS_KEYS = ['teams', 'timezone', 'languages', 'liveLanguages', 'languageFilter', 'replayFilter', 'webStreams', 'sports', 'liveSources', 'replaySources', 'liveLeagues'];
 const DEVICE_CACHE_MS = 30000;
+const DISCORD_ACCESS_TOKEN_TTL_MS = 5 * 60 * 1000;
+const DISCORD_ACCESS_TOKEN_RE = /^nt_[A-Za-z0-9_-]{32}$/;
 
 function cleanStringList(list, maxLen, fieldName) {
   if (!Array.isArray(list) || list.length > maxLen) {
@@ -56,10 +58,11 @@ class AuthError extends Error {
 }
 
 class AuthService {
-  constructor({ store, config, providers }) {
+  constructor({ store, config, providers, now = () => Date.now() }) {
     this.store = store;
     this.config = config;
     this.providers = providers;
+    this.now = typeof now === 'function' ? now : () => Date.now();
     this._deviceCache = new Map();
   }
 
@@ -72,17 +75,82 @@ class AuthService {
   }
 
   createSession(userId) {
+    const now = this.now();
     const token = crypto.createOpaqueToken('ns');
     this.store.createSession({
-      tokenHash: crypto.hashOpaqueToken(token, this.config.pepper), userId, expiresAt: Date.now() + this.config.sessionTtlMs,
+      tokenHash: crypto.hashOpaqueToken(token, this.config.pepper), userId, expiresAt: now + this.config.sessionTtlMs, now,
     });
     return token;
   }
 
   getSessionUser(token) {
     if (!token || typeof token !== 'string') return null;
-    const s = this.store.findSession(crypto.hashOpaqueToken(token, this.config.pepper));
+    const s = this.store.findSession(crypto.hashOpaqueToken(token, this.config.pepper), this.now());
     return s ? this.store.getUser(s.user_id) : null;
+  }
+
+  /**
+   * Issues a permanent, reusable private Discord access token keyed by interaction ID.
+   * Returns `{ token, expiresAt: null }`, or `null` when the interaction ID was already issued.
+   */
+  issueDiscordAccessToken({ interactionId, subject, name, signedAtMs } = {}) {
+    const iid = typeof interactionId === 'string' ? interactionId.trim() : '';
+    const sub = typeof subject === 'string' ? subject.trim() : '';
+    if (!iid || !sub) throw new AuthError('invalid_interaction', 400);
+    const now = this.now();
+    const effectiveSignedAt = Number.isFinite(signedAtMs) ? signedAtMs : now;
+    const retainUntil = Math.max(effectiveSignedAt, now) + DISCORD_ACCESS_TOKEN_TTL_MS;
+    const token = crypto.createOpaqueToken('nt', 24);
+    const tokenHash = crypto.hashOpaqueToken(token, this.config.pepper);
+    const cleanName = String(name || '').trim().slice(0, 80);
+
+    let inserted;
+    try {
+      inserted = this.store.issueDiscordAccessToken({
+        interactionId: iid,
+        tokenHash,
+        subject: sub,
+        name: cleanName,
+        expiresAt: 0,
+        retainUntil,
+        now,
+      });
+    } catch (err) {
+      if (err && err.errcode === 5) throw new AuthError('storage_busy', 503, 'Temporary storage contention');
+      throw err;
+    }
+    return inserted ? { token, expiresAt: null } : null;
+  }
+
+  /**
+   * Atomically redeems a Discord access token, creating the Discord identity if needed
+   * and issuing a browser session token.
+   */
+  redeemDiscordAccessToken(rawToken) {
+    if (typeof rawToken !== 'string') throw new AuthError('invalid_access_token', 401);
+    const token = rawToken.trim();
+    if (!DISCORD_ACCESS_TOKEN_RE.test(token)) throw new AuthError('invalid_access_token', 401);
+
+    const now = this.now();
+    const tokenHash = crypto.hashOpaqueToken(token, this.config.pepper);
+    const sessionToken = crypto.createOpaqueToken('ns');
+    const sessionTokenHash = crypto.hashOpaqueToken(sessionToken, this.config.pepper);
+    const sessionExpiresAt = now + this.config.sessionTtlMs;
+
+    let result;
+    try {
+      result = this.store.redeemDiscordAccessToken({
+        tokenHash,
+        sessionTokenHash,
+        sessionExpiresAt,
+        now,
+      });
+    } catch (err) {
+      if (err && err.code === 'account_disabled') throw new AuthError('invalid_access_token', 401);
+      throw err;
+    }
+    if (!result || result.status !== 'ok') throw new AuthError('invalid_access_token', 401);
+    return { sessionToken };
   }
 
   destroySession(token) {

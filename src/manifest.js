@@ -74,6 +74,8 @@ const manifest = {
     // ("Spanish, Arabic, Hindi", "es, ar, hi"); English is always ranked first
   // regardless.
     { key: 'languages', title: 'Preferred Languages (comma separated, English always first)', type: 'text' },
+    { key: 'liveLanguages', title: 'Live Commentary Languages (comma separated)', type: 'text' },
+    { key: 'languageFilter', title: 'Live Language Filter (all or only)', type: 'text', default: 'all' },
     // 'all' (default) lists every replay; 'mainstream' hides niche and
     // lower-division fixtures from the replay catalogs and hubs.
     { key: 'replayFilter', title: 'Replay Catalog (all or mainstream)', type: 'text', default: 'all' },

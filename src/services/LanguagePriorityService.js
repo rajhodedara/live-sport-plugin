@@ -187,14 +187,18 @@ function isEnglish(value) {
  * Tokens that name nothing we know, duplicates, blanks and malformed input are
  * all dropped silently — a config typo must never break the stream list.
  */
-function parseLanguagePriority(config) {
+/**
+ * Normalizes the raw config value into an ordered list of canonical language
+ * keys, keeping English and deduplicating in first-seen order.
+ *
+ * Returns [] for absent, malformed, or unsupported input (including 'none').
+ */
+function parseSelectedLanguages(value) {
   try {
-    const raw = typeof config === 'string'
-      ? config
-      : (config && typeof config === 'object' ? config.languages : null);
+    const raw = typeof value === 'string'
+      ? value
+      : (value && typeof value === 'object' && !Array.isArray(value) ? value.liveLanguages ?? value.languages : value);
 
-    // Tolerate a client that sends a JSON array instead of the documented
-    // comma-separated string.
     const tokens = Array.isArray(raw)
       ? raw
       : (typeof raw === 'string' ? raw.split(',') : []);
@@ -203,13 +207,23 @@ function parseLanguagePriority(config) {
     const seen = new Set();
     for (const token of tokens) {
       const canonical = canonicalLanguage(token);
-      if (!canonical) continue;      // unknown token — ignore harmlessly
-      if (canonical === ENGLISH) continue; // English is always ranked first anyway
-      if (seen.has(canonical)) continue;   // keep the FIRST mention's position
+      if (!canonical) continue;
+      if (seen.has(canonical)) continue;
       seen.add(canonical);
       ordered.push(canonical);
     }
     return ordered;
+  } catch (_) {
+    return [];
+  }
+}
+
+function parseLanguagePriority(config) {
+  try {
+    const raw = typeof config === 'string'
+      ? config
+      : (config && typeof config === 'object' ? config.languages : null);
+    return parseSelectedLanguages(raw).filter(canonical => canonical !== ENGLISH);
   } catch (_) {
     return [];
   }
@@ -466,6 +480,7 @@ module.exports = {
   ENGLISH,
   DIRECT_STREAM_NAME,
   LANGUAGE_ALIASES,
+  parseSelectedLanguages,
   parseLanguagePriority,
   languageRank,
   canonicalLanguage,

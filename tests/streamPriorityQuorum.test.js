@@ -272,4 +272,97 @@ describe('verified Priority-1 quorum response window', () => {
     await jest.advanceTimersByTimeAsync(0);
     expect((await pending).streams.map(row => row.url)).toEqual(['https://cdn.fixture.test/secondary.mp4']);
   });
+
+  test('Spanish-only keeps Spanish and unknown streams and prevents excluded English direct from hiding Spanish web fallback', async () => {
+    const sources = [
+      { source: 'scorezone', id: 'en' },
+      { source: 'scorezone', id: 'es' },
+    ];
+    const { id } = cachedFixture({
+      en: { ...feed('en'), language: 'English', title: 'English Direct' },
+      es: { title: 'Spanish Web', externalUrl: '/watch?url=https%3A%2F%2Fplayer.fixture.test%2Fes-web', language: 'Spanish' },
+    }, { sources });
+
+    const result = await handleStream('tv', id, { liveLanguages: 'Spanish', languageFilter: 'only' });
+    const urls = result.streams.map(s => s.url || s.externalUrl);
+    expect(urls).toEqual([
+      expect.stringContaining('player.fixture.test%2Fes-web'),
+    ]);
+
+    const mixedSources = [
+      { source: 'scorezone', id: 'en' },
+      { source: 'scorezone', id: 'es' },
+      { source: 'scorezone', id: 'unk' },
+    ];
+    const mixed = cachedFixture({
+      en: { ...feed('en'), language: 'English', title: 'English Direct' },
+      es: { ...feed('es'), language: 'Spanish', title: 'Spanish Direct' },
+      unk: { ...feed('unk'), title: 'Unlabeled Feed' },
+    }, { sources: mixedSources });
+    const mixedResult = await handleStream('tv', mixed.id, { liveLanguages: 'Spanish', languageFilter: 'only' });
+    expect(mixedResult.streams.map(s => s.url)).toEqual([
+      'https://cdn.fixture.test/es.mp4',
+      'https://cdn.fixture.test/unk.mp4',
+    ]);
+  });
+
+  test('faster excluded English results do not satisfy readiness while an eligible Spanish stream is pending', async () => {
+    const sources = ['a', 'b', 'c', 'd'].map(id => ({ source: 'scorezone', id }));
+    const { id, controls } = cachedFixture({
+      a: { ...feed('a'), language: 'English' },
+      b: { ...feed('b'), language: 'English' },
+      c: { ...feed('c'), language: 'English' },
+    }, { sources });
+
+    let response;
+    const pending = handleStream('tv', id, { liveLanguages: 'Spanish', languageFilter: 'only' }).then(v => { response = v; return v; });
+    await jest.advanceTimersByTimeAsync(110);
+    expect(response).toBeUndefined();
+    controls.d.resolve([{ ...feed('d-es'), language: 'Spanish' }]);
+    await jest.advanceTimersByTimeAsync(0);
+    const settled = await pending;
+    expect(settled.streams.map(s => s.url)).toEqual(['https://cdn.fixture.test/d-es.mp4']);
+  });
+
+  test('24/7 channels apply liveLanguages strict filtering', async () => {
+    const sources = [
+      { source: 'vavoo', id: 'en-ch' },
+      { source: 'vavoo', id: 'es-ch' },
+    ];
+    const { id } = cachedFixture({
+      'en-ch': { ...feed('en-ch'), language: 'English', title: 'Sky Sports' },
+      'es-ch': { ...feed('es-ch'), language: 'Spanish', title: 'Movistar' },
+    }, { sources, match: { category: 'networks', isChannel: true, id: 'vavoo_ch_1' } });
+
+    const result = await handleStream('channel', id, { liveLanguages: 'Spanish', languageFilter: 'only' });
+    expect(result.streams.map(s => s.url)).toEqual(['https://cdn.fixture.test/es-ch.mp4']);
+  });
+
+  test('replay cards, hub episodes, and multipart replays ignore liveLanguages and languageFilter', async () => {
+    const sources = [
+      { source: 'replayzone', id: 'en-rep', name: 'Part 1', url: 'https://replay.test/1' },
+      { source: 'replayzone', id: 'es-rep', name: 'Part 2', url: 'https://replay.test/2' },
+    ];
+    const replayMatch = { category: 'football', status: 'finished', date: String(Date.now() - 48 * 3600 * 1000) };
+    const { id } = cachedFixture({
+      'en-rep': { ...feed('en-rep'), _source: 'replayzone', language: 'English', score: 80 },
+      'es-rep': { ...feed('es-rep'), _source: 'replayzone', language: 'Spanish', score: 90 },
+    }, { sources, match: replayMatch });
+
+    const baseline = await handleStream('tv', id, { languages: 'Spanish' });
+    const withLive = await handleStream('tv', id, { languages: 'Spanish', liveLanguages: 'French', languageFilter: 'only' });
+    expect(withLive.streams.map(s => s.url)).toEqual(baseline.streams.map(s => s.url));
+    expect(withLive.streams.map(s => s.url)).toEqual([
+      'https://cdn.fixture.test/en-rep.mp4',
+      'https://cdn.fixture.test/es-rep.mp4',
+    ]);
+
+    const hubBaseline = await handleStream('series', `${id}:hub_football:1`, { languages: 'Spanish' });
+    const hubWithLive = await handleStream('series', `${id}:hub_football:1`, { languages: 'Spanish', liveLanguages: 'French', languageFilter: 'only' });
+    expect(hubWithLive.streams.map(s => s.url)).toEqual(hubBaseline.streams.map(s => s.url));
+
+    const multiBaseline = await handleStream('series', `${id}:1:1`, { languages: 'Spanish' });
+    const multiWithLive = await handleStream('series', `${id}:1:1`, { languages: 'Spanish', liveLanguages: 'French', languageFilter: 'only' });
+    expect(multiWithLive.streams.map(s => s.url)).toEqual(multiBaseline.streams.map(s => s.url));
+  });
 });

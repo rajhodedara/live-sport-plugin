@@ -8,6 +8,7 @@
 // (see ChannelCountryService): Spanish, Arabic, Hindi, German, French.
 
 const {
+  parseSelectedLanguages,
   parseLanguagePriority,
   languageRank,
   compareStreams,
@@ -363,5 +364,26 @@ describe('helpers', () => {
   it('streamRankScore is the documented blend', () => {
     expect(streamRankScore({ score: 100, speedScore: 0 })).toBe(80);
     expect(streamRankScore({ score: 0, speedScore: 100 })).toBe(20);
+  });
+});
+
+describe('parseSelectedLanguages', () => {
+  it('preserves first-seen order and deduplicates aliases including English', () => {
+    expect(parseSelectedLanguages('es, English, Spanish, ar, Arabic')).toEqual(['spanish', 'english', 'arabic']);
+    expect(parseSelectedLanguages('Arabic, Spanish')).toEqual(['arabic', 'spanish']);
+  });
+
+  it('keeps explicit English when selected alone', () => {
+    expect(parseSelectedLanguages('English')).toEqual(['english']);
+    expect(parseSelectedLanguages({ liveLanguages: 'en' })).toEqual(['english']);
+  });
+
+  it('returns [] for none, absent, malformed, or unsupported input', () => {
+    expect(parseSelectedLanguages('none')).toEqual([]);
+    expect(parseSelectedLanguages('')).toEqual([]);
+    expect(parseSelectedLanguages(null)).toEqual([]);
+    expect(parseSelectedLanguages(undefined)).toEqual([]);
+    expect(parseSelectedLanguages(42)).toEqual([]);
+    expect(parseSelectedLanguages('Klingon, xx')).toEqual([]);
   });
 });
