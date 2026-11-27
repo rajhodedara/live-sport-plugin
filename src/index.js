@@ -1180,7 +1180,7 @@ function decodeConfigSegment(configStr) {
   }
 }
 app.get('/:config?/manifest.json', (req, res, next) => {
-  const { manifest } = require('./manifest');
+  const { manifest, filterCatalogsBySports } = require('./manifest');
   let parsedConfig = {};
   if (req.params.config) {
     parsedConfig = decodeConfigSegment(req.params.config);
@@ -1213,29 +1213,7 @@ app.get('/:config?/manifest.json', (req, res, next) => {
     if (!newManifest.catalogs.some((c) => c.id === extra.id)) newManifest.catalogs.push(extra);
   }
   
-  if (typeof parsedConfig.sports === 'string' && parsedConfig.sports !== 'all') {
-    const enabledSports = parsedConfig.sports.split(',');
-    
-    // General catalogs to always keep (Your Teams leads first)
-    const keepCatalogs = ['nuvio_sports_teams', 'nuvio_sports_live', 'nuvio_sports_upcoming', 'nuvio_sports_networks', 'nuvio_sports_replays'];
-    
-    // Add specific catalogs based on selection
-    const sportCatalogs = ['football', 'cricket', 'basketball', 'motorsport', 'hockey', 'baseball', 'mma', 'golf', 'tennis', 'rugby', 'american_football', 'darts'];
-    for (const sport of sportCatalogs) {
-      if (enabledSports.includes(sport)) {
-        keepCatalogs.push(`nuvio_sports_${sport}`);
-      }
-    }
-    if (enabledSports.includes('other')) keepCatalogs.push('nuvio_sports_other');
-    
-    newManifest.catalogs = newManifest.catalogs.filter(c => {
-      if (keepCatalogs.includes(c.id)) return true;
-      if (c.id.startsWith('nuvio_sports_replays_')) {
-        return enabledSports.some(sport => c.id.startsWith(`nuvio_sports_replays_${sport}`));
-      }
-      return false;
-    });
-  }
+  newManifest.catalogs = filterCatalogsBySports(newManifest.catalogs, parsedConfig.sports);
   
   // Remove teams catalog if the user hasn't configured any teams
   if (typeof parsedConfig.teams !== 'string' || parsedConfig.teams.trim() === '') {

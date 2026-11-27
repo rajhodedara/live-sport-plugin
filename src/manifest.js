@@ -100,5 +100,37 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-module.exports = { builder, manifest };
+const ALWAYS_KEEP_CATALOGS = new Set([
+  'nuvio_sports_teams',
+  'nuvio_sports_live',
+  'nuvio_sports_upcoming',
+  'nuvio_sports_networks',
+  'nuvio_sports_replays'
+]);
+
+/**
+ * Filters manifest catalogs when `sports` is an explicit comma-separated list
+ * (anything other than `'all'`). Derives sport names from `nuvio_sports_*`
+ * catalog IDs so newly added sport catalogs stay selectable automatically.
+ */
+function filterCatalogsBySports(catalogs, sports) {
+  if (typeof sports !== 'string' || sports === 'all') return catalogs;
+  const enabledSports = new Set(sports.split(',').map(s => s.trim()).filter(Boolean));
+  return catalogs.filter((c) => {
+    if (ALWAYS_KEEP_CATALOGS.has(c.id)) return true;
+    if (c.id.startsWith('nuvio_sports_replays_')) {
+      for (const sport of enabledSports) {
+        if (c.id.startsWith(`nuvio_sports_replays_${sport}`)) return true;
+      }
+      return false;
+    }
+    if (c.id.startsWith('nuvio_sports_')) {
+      const sport = c.id.slice('nuvio_sports_'.length);
+      return enabledSports.has(sport);
+    }
+    return false;
+  });
+}
+
+module.exports = { builder, manifest, filterCatalogsBySports };
 
