@@ -28,6 +28,7 @@ module.exports = {
         // until the next sync lands.
         MATCHES_CACHE_PATH: '/root/nuvio-live-sports/data/matches_cache.json',
         LIVE_OVERLAY_FILE: '/root/nuvio-live-sports/data/live_overlay.json',
+        AUTH_DB_PATH: '/root/nuvio-live-sports/data/accounts.sqlite',
         MALLOC_ARENA_MAX: '2',
         MALLOC_CONF: 'narenas:2,dirty_decay_ms:5000,muzzy_decay_ms:5000',
         LD_PRELOAD: '/usr/lib/x86_64-linux-gnu/libjemalloc.so.2',

@@ -128,6 +128,7 @@
     @media (max-width: 1179px) { .topnav a { padding: 0 12px; } .topnav .nav-label { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; } }
     @media (max-width: 480px) {
       .topbar { gap: var(--space-1); padding: 0 var(--space-3); }
+      .topnav a[target="_blank"] { display: none; } /* Discord/GitHub: keep room for the account and sign-out icons */
       .brand { display: none; }
       .topnav { margin-left: 0; gap: 0; }
       .topnav a { padding: 0 9px; }
