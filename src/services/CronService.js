@@ -125,9 +125,14 @@ class CronService {
       }
     });
 
-    // Run first sync in background on boot so the catalog and all providers (including replays) are fresh immediately
+    // Run startup sync only when the persisted catalog is missing or stale.
+    // Skipping when fresh avoids hammering all providers + spiking RAM on every PM2 reload.
     setImmediate(async () => {
       try {
+        if (this.cacheService && !this.cacheService.isStale(REVALIDATE_AFTER_MS)) {
+          console.log('[CronService] Catalog cache is fresh on boot; skipping startup match sync.');
+          return;
+        }
         console.log('[CronService] Initiating startup match sync...');
         await this.runSync();
       } catch (err) {
@@ -148,16 +153,6 @@ class CronService {
         }
       });
     }
-
-    // Run first sync immediately on boot
-    setTimeout(async () => {
-      try {
-        console.log('[CronService] Running initial match sync...');
-        await this.runSync();
-      } catch(e) {
-        console.error('[CronService] Match sync failed:', e.message);
-      }
-    }, 1000);
   }
 
   /** Drop stream-cache entries for matches that are no longer active. */
