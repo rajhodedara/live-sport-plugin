@@ -142,3 +142,48 @@
 
 ### Immediate Next Steps for Next Chat
 - Deploy to staging/production when authorized.
+
+# Session Checkpoint: Motorsport Session Identity
+**Date**: 2026-11-27
+**Status**: Draft implementation plan ready for review
+
+### What Was Completed
+- Reproduced the split F1 Qatar and MotoGP Valencia candidate pairs in the public catalog and confirmed the current matcher rejects both. Saved the design and plan in `../nuvio-re-lab/motorsport-identity/HANDOFF.md` and its linked plan.
+
+### Current Blockers / Open Questions
+- Public catalog timestamps and titles support both proposed pairs, but do not establish individual stream contents. Confirm kickoff provenance before allowing incomplete claims to merge.
+
+### Immediate Next Steps for Next Chat
+1. If implementation is requested, follow the linked plan and record the baseline before making code changes.
+
+# Session Checkpoint: Configure Device Prerequisite
+**Date**: 2026-11-27
+**Status**: Design approved; implementation plan completed, product code unchanged
+
+### What Was Completed
+- Investigated `public/configure.html` account bootstrap and confirmed the source permits generic link generation before asynchronous `__accountsOn` initialization despite server-rendered `html.accounts`.
+- Owner approved gating Steps 2 onward until a selected device's stored manifest URL loads and requested ui-ux-pro-max in the plan. Applied its disabled-state guidance with readable prerequisite copy, keyboard semantics and an active recovery action.
+- Saved design/evidence to `../nuvio-re-lab/configure-device-gate/HANDOFF.md` and implementation plan to `../nuvio-re-lab/configure-device-gate/2026-11-27-configure-device-gate-plan.md`.
+
+### Current Blockers / Open Questions
+- Planning baseline `npm test -- tests/configurePageWiring.test.js`: 5 failed / 13 passed. Failures assert removed legacy languages controls; preserve separately from feature acceptance. Existing browser verification script has the same legacy assumption.
+
+### Immediate Next Steps for Next Chat
+1. If implementation is requested, read the external HANDOFF and plan; implement synchronous account readiness, link/action guards, then accessible downstream locking/navigation.
+2. Run the new focused behavior suite and real-browser pending/error/success, keyboard, wizard, mobile and light/dark checks specified in the plan.
+
+### Follow-up: Implementation & Verification Completed
+**Date**: 2026-11-27
+**Status**: Completed locally on `auth` (not deployed or pushed)
+
+- **Implementation (`public/configure.html`)**:
+  - Initialized `window.__accountsOn` synchronously from `document.documentElement.classList.contains('accounts')` before the first `updateLink()`, and added `isDeviceSetupReady()` (`!window.__accountsOn || !!window.__deviceUrl`).
+  - Gated `updateLink()`, `configIssues()`, `applyValidity()`, `renderProgress()`, `openInstallDialog()`, `openInstall`, `copyBtn`, `barCopy`, `finishCopy`, `copyCollectionsBtn`, `downloadCollectionsBtn`, and `[btn, barInstall, wizInstall]` so no generic/base64 URL is exposed and no clipboard/download/dialog/autosave/install action runs while locked.
+  - Added `syncDeviceSetupGate()` and `focusDeviceStep()`, wrapped downstream panel bodies (`.panel-body`) in `inert` + native `disabled` state preservation (`data-gate-prev-disabled`), added the visible `#deviceGateNotice` (`Add or choose a device to continue.` + `Go to Step 1` >=44px button) outside inert regions, and guarded `go(i)`, sidebar links, support shortcuts, and `window.nuvioGoTo` to route locked attempts to `sec-device`.
+  - Updated Step 1 bootstrap to show `Loading your device…` synchronously in account mode, display clear error messages with `/account` recovery on providers/devices/detail failures or missing `manifestUrl`, and preserve single-device/config-restore redirects, autosave, and account-disabled self-hosted behavior.
+- **Tests & Browser Verification**:
+  - `npm test -- tests/configureDeviceGate.test.js`: **9 passed, 9 total** (1 passed suite).
+  - `npm test -- tests/configurePageWiring.test.js`: **5 failed, 13 passed, 18 total** (matches pre-existing baseline; all 5 failures reference removed legacy `languages` controls).
+  - Playwright (headless Edge): verified slow bootstrap, no devices, multiple devices/no selection, stale 404 device, missing `manifestUrl`, network error, valid device unlock (preserving focus in all-steps), account-disabled self-hosted mode, wizard/sidebar/hash navigation guards, 320px & 1280px widths in light & dark themes, no horizontal overflow, and >=44px recovery targets (`ALL_BROWSER_CHECKS_PASSED`).
+- **Docs**:
+  - Updated `.agents/context/ARCHITECTURE.md` with the configure device prerequisite lifecycle.

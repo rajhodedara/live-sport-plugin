@@ -93,7 +93,7 @@ In order (each step is load-bearing; reordering breaks routes):
 5. `express()`; `app.set('trust proxy', true)`; `cors()`.
 6. Page sign-in gate (`hasSignInMethods` from `src/auth/index.js`): when `AUTH_TOKEN_PEPPER` / `AUTH_ENCRYPTION_KEY` and at least one sign-in method (Google OAuth or Discord `/token`) are enabled, `GET`/`HEAD` requests for `/`, `/configure`, `/status` redirect unauthenticated visitors to `/account?next=…`; addon/API URLs stay open.
 7. Static roots: `/posters`, then `public/`, `src/public`, `cwd/public`.
-8. Landing/config/donate HTML & account routes: `/`, `/api/auth/*` (mounted ahead of `deviceConfigMiddleware` and the `/api` resolver proxy), `/account`, `/login`, `deviceConfigMiddleware` (`/<deviceConfig>/…`), `/configure`, `/:config/configure` (adds `class="accounts"` when `hasSignInMethods` is true), `/status`, `/donate`.
+8. Landing/config/donate HTML & account routes: `/`, `/api/auth/*` (mounted ahead of `deviceConfigMiddleware` and the `/api` resolver proxy), `/account`, `/login`, `deviceConfigMiddleware` (`/<deviceConfig>/…`), `/configure`, `/:config/configure` (adds `class="accounts"` when `hasSignInMethods` is true; `public/configure.html` initializes `window.__accountsOn` synchronously from `html.accounts` and gates Steps 2+, URL publication, install/copy/download handlers, and wizard/sidebar navigation via `isDeviceSetupReady()` / `syncDeviceSetupGate()` until `loadDevice()` confirms a stored `manifestUrl`), `/status`, `/donate`.
 8. `/collections.json` (Nuvio Collections export).
 9. **Internal `/api/*` JSON routes**: `/api/collections/download`, `/api/server-info`,
    `/api/options`, `/api/provider-health`, `/api/worker-budget`, `/api/matches`.
