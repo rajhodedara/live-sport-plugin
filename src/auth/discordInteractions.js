@@ -30,25 +30,49 @@ function verifyDiscordSignature({ publicKey, timestamp, rawBody, signatureHex })
   }
 }
 
-function ephemeralReply(content) {
+function ephemeralReply(content, components) {
+  const data = {
+    flags: EPHEMERAL_FLAG,
+    allowed_mentions: { parse: [] },
+    content,
+  };
+  if (Array.isArray(components) && components.length > 0) {
+    data.components = components;
+  }
   return {
     type: 4,
-    data: {
-      flags: EPHEMERAL_FLAG,
-      allowed_mentions: { parse: [] },
-      content,
-    },
+    data,
   };
+}
+
+function buildTokenComponents(token, canonicalOrigin) {
+  const buttons = [
+    {
+      type: 2,
+      style: 2,
+      label: 'Token only (for mobile copy)',
+      custom_id: `raw_token:${token}`,
+    },
+  ];
+  if (canonicalOrigin && /^https?:\/\//i.test(canonicalOrigin)) {
+    buttons.push({
+      type: 2,
+      style: 5,
+      label: 'Open Account Page',
+      url: `${canonicalOrigin}/account`,
+    });
+  }
+  return [{ type: 1, components: buttons }];
 }
 
 function formatTokenReply(token, canonicalOrigin) {
   const accountUrl = canonicalOrigin ? `${canonicalOrigin}/account` : '/account';
   return [
-    'Your private Nuvio sign-in token (reusable, does not expire):',
+    'Your private Nuvio sign-in token:',
     '```',
     token,
     '```',
-    `Open ${accountUrl}, choose **Access token**, and paste it. Keep this token private — anyone with it can sign in to your account.`,
+    `Open ${accountUrl}, choose **Access token**, and paste it.`,
   ].join('\n');
 }
 
@@ -118,7 +142,7 @@ function createDiscordInteractionHandler({ service, config, now = () => Date.now
       return res.status(200).json({ type: 1 });
     }
 
-    if (interaction.type !== 2) {
+    if (interaction.type !== 2 && interaction.type !== 3) {
       return res.status(400).json({ error: 'unsupported_interaction' });
     }
 
@@ -128,6 +152,17 @@ function createDiscordInteractionHandler({ service, config, now = () => Date.now
 
     if (String(interaction.guild_id || '') !== discordConfig.guildId) {
       return res.status(200).json(ephemeralReply('Run `/token` inside the Nuvio Discord server.'));
+    }
+
+    if (interaction.type === 3) {
+      const customId = interaction.data && typeof interaction.data.custom_id === 'string'
+        ? interaction.data.custom_id
+        : '';
+      const rawMatch = customId.match(/^raw_token:(nt_[A-Za-z0-9_-]{32})$/);
+      if (!rawMatch) {
+        return res.status(200).json(ephemeralReply('Unknown action. Run `/token` to get a sign-in token.'));
+      }
+      return res.status(200).json(ephemeralReply(rawMatch[1]));
     }
 
     const cmd = interaction.data;
@@ -176,7 +211,10 @@ function createDiscordInteractionHandler({ service, config, now = () => Date.now
       return res.status(200).json(ephemeralReply('A token was already issued for this command. Run `/token` again if you need a new one.'));
     }
 
-    return res.status(200).json(ephemeralReply(formatTokenReply(issued.token, discordConfig.canonicalOrigin)));
+    return res.status(200).json(ephemeralReply(
+      formatTokenReply(issued.token, discordConfig.canonicalOrigin),
+      buildTokenComponents(issued.token, discordConfig.canonicalOrigin)
+    ));
   };
 }
 

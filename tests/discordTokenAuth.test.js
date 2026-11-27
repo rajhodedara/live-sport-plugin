@@ -538,7 +538,41 @@ describe('Discord auth configuration, sign-in availability, interactions, and br
         expect(okJson.data.flags).toBe(64);
         const match = okJson.data.content.match(/nt_[A-Za-z0-9_-]{32}/);
         expect(match).not.toBeNull();
+        expect(okJson.data.components).toEqual([
+          {
+            type: 1,
+            components: [
+              {
+                type: 2,
+                style: 2,
+                label: 'Token only (for mobile copy)',
+                custom_id: `raw_token:${match[0]}`,
+              },
+              {
+                type: 2,
+                style: 5,
+                label: 'Open Account Page',
+                url: `${CANONICAL_ORIGIN}/account`,
+              },
+            ],
+          },
+        ]);
         expect(store.db.prepare('SELECT COUNT(*) AS c FROM discord_access_tokens').get().c).toBe(1);
+
+        // 4b. Tapping the "Token only (for mobile copy)" button returns only the raw token ephemerally
+        const rawBtnRes = await sendInteraction({
+          id: 'int-btn-1',
+          application_id: APP_ID,
+          guild_id: GUILD_ID,
+          type: 3,
+          data: { component_type: 2, custom_id: `raw_token:${match[0]}` },
+          member: { roles: [ROLE_ID], user: { id: MEMBER_ID, username: 'alice' } },
+        });
+        expect(rawBtnRes.status).toBe(200);
+        const rawBtnJson = await rawBtnRes.json();
+        expect(rawBtnJson.type).toBe(4);
+        expect(rawBtnJson.data.flags).toBe(64);
+        expect(rawBtnJson.data.content).toBe(match[0]);
 
         // 5. Duplicate interaction ID returns private notice without minting a second token
         const dupRes = await sendInteraction(okPayload, { tsSec: skewedTs });

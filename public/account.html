@@ -364,6 +364,8 @@
       if (tokenSubmitting) return;
       var inp = $('accessTokenInput'), btn = $('tokenSubmitBtn');
       var rawToken = inp.value || '';
+      var extractedToken = rawToken.match(/nt_[A-Za-z0-9_-]{32}/);
+      var tokenToRedeem = extractedToken ? extractedToken[0] : rawToken;
       setTokenError('');
       if (!rawToken.trim()) {
         setTokenError('Paste your access token from Discord first.');
@@ -375,7 +377,7 @@
       btn.textContent = 'Signing in...';
       $('tokenForm').setAttribute('aria-busy', 'true');
       setTokenStatus('Checking access token...');
-      api('/access-token/redeem', { method: 'POST', body: { token: rawToken, returnTo: next || '/account' } })
+      api('/access-token/redeem', { method: 'POST', body: { token: tokenToRedeem, returnTo: next || '/account' } })
         .then(function (r) {
           inp.value = '';
           inp.removeAttribute('aria-invalid');
