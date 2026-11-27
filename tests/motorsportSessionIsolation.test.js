@@ -847,5 +847,43 @@ describe('Motorsport Session & Series Deduplication Isolation Suite', () => {
       expect(barberCard.sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
       expect(barberCard.title).toMatch(/Practice 1/i);
     });
+
+    test('merges third provider with explicit series/session and slight kickoff offset into resolved Valencia FP1 card', async () => {
+      const kickoff = futureIso(22);
+      const offsetKickoff = new Date(Date.parse(kickoff) + 15 * 60 * 1000).toISOString();
+
+      const cdn = new MatchEntity({
+        id: 'cdn_2568496',
+        title: 'Valencia Free Practice 1',
+        category: 'motorsport',
+        timestamp: kickoff,
+        sources: [{ source: 'cdnlive', id: '2568496' }]
+      });
+      const sportzx = new MatchEntity({
+        id: 'sportzx_valencia_gp',
+        title: 'Gran Premio de la Comunitat Valenciana',
+        category: 'motorsport',
+        league: 'MotoGP',
+        timestamp: kickoff,
+        sources: [{ source: 'sportzx', id: 'szx_v1' }]
+      });
+      const daddylive = new MatchEntity({
+        id: 'dlv_valencia_fp1',
+        title: 'Round 22 | Valencia Practice 1',
+        category: 'motorsport',
+        league: '️ MotoGP',
+        timestamp: offsetKickoff,
+        sources: [{ source: 'daddylive', id: 'dlv_v1' }]
+      });
+
+      const { results } = await runSyncWithProviders([
+        { sourceName: 'cdnlive', matches: [cdn] },
+        { sourceName: 'sportzx', matches: [sportzx] },
+        { sourceName: 'daddylive', matches: [daddylive] }
+      ]);
+
+      expect(results.length).toBe(1);
+      expect(results[0].sources.map(s => s.source).sort()).toEqual(['cdnlive', 'daddylive', 'sportzx']);
+    });
   });
 });

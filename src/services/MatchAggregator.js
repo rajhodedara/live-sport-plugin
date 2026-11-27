@@ -1575,15 +1575,19 @@ class MatchAggregator {
         // Never overwrite motorsport titles with incoming secondary titles,
         // except when an inferred motorsport merge promotes a session-specific
         // title over one without an explicit session.
-        if (pre.resolvedMotorsport && finalPres[idx].resolvedMotorsport &&
-            !finalPres[idx].motorsportClaim?.session && pre.motorsportClaim?.session) {
-          existing.title = match.title;
-          if (!existing.league && match.league) existing.league = match.league;
-          finalPres[idx] = {
-            ...pre,
-            id: existing.id,
-            date: _parseEventDate(existing.date) || pre.date
-          };
+        if (pre.resolvedMotorsport && finalPres[idx].resolvedMotorsport) {
+          if (!finalPres[idx].motorsportClaim?.session && pre.motorsportClaim?.session) {
+            existing.title = match.title;
+            if (!existing.league && match.league) existing.league = match.league;
+            finalPres[idx] = {
+              ...pre,
+              id: existing.id,
+              date: _parseEventDate(existing.date) || pre.date
+            };
+          }
+          if (finalPres[idx].motorsportSeries === 'other' && pre.resolvedMotorsport.series) {
+            finalPres[idx].motorsportSeries = pre.resolvedMotorsport.series;
+          }
         } else if (!existing._titleIsFixture && pre.teams && pre.motorsportSeries === 'other' && existing.category !== 'motorsport') {
           existing.title = match.title;
           existing._titleIsFixture = true;
