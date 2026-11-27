@@ -26,7 +26,16 @@ const MIGRATIONS = [
      addon_config_json TEXT NOT NULL DEFAULT '{}', token_encrypted TEXT
    );
    CREATE INDEX device_tokens_user ON device_tokens(user_id);`,
+  `CREATE TABLE discord_access_tokens (
+     id TEXT PRIMARY KEY, interaction_id TEXT NOT NULL UNIQUE, token_hash TEXT NOT NULL UNIQUE,
+     subject TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL,
+     retain_until INTEGER NOT NULL, redeemed_at INTEGER, created_at INTEGER NOT NULL
+   );
+   CREATE INDEX discord_access_tokens_retain ON discord_access_tokens(retain_until);`,
 ];
+
+const DEFAULT_BUSY_TIMEOUT_MS = 5000;
+const ISSUANCE_BUSY_TIMEOUT_MS = 500;
 
 /** SQLite persistence on the built-in node:sqlite (no native dependency). */
 class AuthStore {
@@ -34,8 +43,32 @@ class AuthStore {
     const { DatabaseSync } = require('node:sqlite');
     if (dbPath !== ':memory:') fs.mkdirSync(path.dirname(path.resolve(dbPath)), { recursive: true });
     this.db = new DatabaseSync(dbPath);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    this.busyTimeoutMs = DEFAULT_BUSY_TIMEOUT_MS;
+    this.db.exec(`PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = ${this.busyTimeoutMs};`);
     this._migrate();
+  }
+
+  _withWriteTransaction(fn, { busyTimeoutMs } = {}) {
+    const overrideTimeout = busyTimeoutMs !== undefined;
+    if (overrideTimeout) this.db.exec(`PRAGMA busy_timeout = ${Number(busyTimeoutMs)}`);
+    let inTx = false;
+    try {
+      this.db.exec('BEGIN IMMEDIATE');
+      inTx = true;
+      const result = fn();
+      this.db.exec('COMMIT');
+      inTx = false;
+      return result;
+    } catch (err) {
+      if (inTx) {
+        try { this.db.exec('ROLLBACK'); } catch (_) { /* ignore rollback after aborted tx */ }
+      }
+      throw err;
+    } finally {
+      if (overrideTimeout) {
+        try { this.db.exec(`PRAGMA busy_timeout = ${this.busyTimeoutMs}`); } catch (_) { /* ignore if closed */ }
+      }
+    }
   }
 
   _migrate() {
@@ -70,38 +103,82 @@ class AuthStore {
     return this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) || null;
   }
 
-  createUserWithIdentity({ provider, subject, email, name }) {
-    const now = Date.now();
+  _insertUserWithIdentity({ provider, subject, email, name, now = Date.now() }) {
     const userId = crypto.randomUUID();
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
-      this.db.prepare('INSERT INTO users (id, display_name, email, created_at) VALUES (?, ?, ?, ?)').run(userId, name || '', email || '', now);
-      this.db.prepare('INSERT INTO identities (id, user_id, provider, provider_subject, email, created_at) VALUES (?, ?, ?, ?, ?, ?)')
-        .run(crypto.randomUUID(), userId, provider, subject, email || '', now);
-      this.db.exec('COMMIT');
-    } catch (err) {
-      this.db.exec('ROLLBACK');
-      throw err;
-    }
+    this.db.prepare('INSERT INTO users (id, display_name, email, created_at) VALUES (?, ?, ?, ?)').run(userId, name || '', email || '', now);
+    this.db.prepare('INSERT INTO identities (id, user_id, provider, provider_subject, email, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(crypto.randomUUID(), userId, provider, subject, email || '', now);
     return this.getUser(userId);
+  }
+
+  createUserWithIdentity({ provider, subject, email, name }) {
+    return this._withWriteTransaction(() => this._insertUserWithIdentity({ provider, subject, email, name }));
   }
 
   listIdentities(userId) {
     return this.db.prepare('SELECT provider, email, created_at FROM identities WHERE user_id = ? ORDER BY created_at').all(userId);
   }
 
-  createSession({ tokenHash, userId, expiresAt }) {
-    const now = Date.now();
+  _insertSession({ tokenHash, userId, expiresAt, now = Date.now() }) {
     this.db.prepare('DELETE FROM browser_sessions WHERE expires_at <= ?').run(now);
     this.db.prepare('INSERT INTO browser_sessions (id, token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(crypto.randomUUID(), tokenHash, userId, expiresAt, now);
   }
 
-  findSession(tokenHash) {
+  createSession({ tokenHash, userId, expiresAt, now = Date.now() }) {
+    this._withWriteTransaction(() => this._insertSession({ tokenHash, userId, expiresAt, now }));
+  }
+
+  findSession(tokenHash, now = Date.now()) {
     return this.db.prepare(
       `SELECT s.id, s.user_id, s.expires_at FROM browser_sessions s JOIN users u ON u.id = s.user_id
        WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL`
-    ).get(tokenHash, Date.now()) || null;
+    ).get(tokenHash, now) || null;
+  }
+
+  issueDiscordAccessToken({ interactionId, tokenHash, subject, name, expiresAt = 0, retainUntil, now = Date.now(), busyTimeoutMs = ISSUANCE_BUSY_TIMEOUT_MS }) {
+    return this._withWriteTransaction(() => {
+      const res = this.db.prepare(
+        `INSERT OR IGNORE INTO discord_access_tokens
+           (id, interaction_id, token_hash, subject, display_name, expires_at, retain_until, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(crypto.randomUUID(), interactionId, tokenHash, subject, name || '', expiresAt || 0, retainUntil, now);
+      return res.changes > 0;
+    }, { busyTimeoutMs });
+  }
+
+  redeemDiscordAccessToken({ tokenHash, sessionTokenHash, sessionExpiresAt, now = Date.now() }) {
+    return this._withWriteTransaction(() => {
+      const claimed = this.db.prepare(
+        `UPDATE discord_access_tokens
+         SET redeemed_at = ?
+         WHERE token_hash = ? AND (expires_at = 0 OR expires_at > ?)
+         RETURNING subject, display_name`
+      ).get(now, tokenHash, now);
+      if (!claimed) return { status: 'invalid' };
+      let user = this.findUserByIdentity('discord', claimed.subject);
+      if (!user) {
+        user = this._insertUserWithIdentity({
+          provider: 'discord',
+          subject: claimed.subject,
+          email: '',
+          name: claimed.display_name || '',
+          now,
+        });
+      }
+      if (user.disabled_at) {
+        const err = new Error('account_disabled');
+        err.code = 'account_disabled';
+        throw err;
+      }
+      this._insertSession({
+        tokenHash: sessionTokenHash,
+        userId: user.id,
+        expiresAt: sessionExpiresAt,
+        now,
+      });
+      return { status: 'ok', user };
+    });
   }
 
   deleteSession(tokenHash) {

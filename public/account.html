@@ -34,20 +34,38 @@
     .devices li { flex-wrap: wrap; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); }
     .devices .meta { color: var(--muted); font-size: 14px; }
     .url-box { padding: var(--space-3) var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-2); font: 13px/1.5 var(--font-mono); overflow-wrap: anywhere; user-select: all; }
-    /* Signed-out: a focused sign-in page (no app navigation, centred card). */
+    /* Signed-out: a focused sign-in page (no app navigation, left-aligned card content). */
     .auth-pending .topnav, .auth-pending #navToggle, .auth-pending .topbar .btn, .auth-pending #signOutBtn { visibility: hidden; }
     .auth-pending .topbar { visibility: hidden; }
     .is-out .topbar { display: none; }
-    .is-out .layout { min-height: 100vh; align-items: center; padding-top: var(--space-6); padding-bottom: var(--space-6); }
+    .is-out .layout { min-height: 100vh; align-items: center; padding-top: var(--space-5); padding-bottom: var(--space-5); }
+    .is-out #pageMsg { max-width: 440px; margin: 0 auto var(--space-4); }
     .card-theme { display: none; }
     .is-out .card-theme { display: inline-flex; position: absolute; top: var(--space-4); right: var(--space-4); }
-    .is-out #signedOut { position: relative; }
-    .is-out #signedOut { max-width: 440px; margin: 0 auto; padding: var(--space-8) var(--space-6); text-align: center; box-shadow: var(--shadow-card); }
-    .is-out #signedOut .signin-title { font-size: 28px; line-height: 34px; }
-    .signin-logo { display: block; width: 64px; height: 64px; margin: 0 auto var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-md); object-fit: cover; }
-    .signin-sub { margin: 0 0 var(--space-6); }
-    .signin-fine { margin: var(--space-4) 0 0; font-size: 13px; color: var(--faint); }
-    @media (max-width: 560px) { .is-out #signedOut { padding: var(--space-6) var(--space-4); } }
+    .is-out #signedOut { position: relative; max-width: 440px; margin: 0 auto; padding: var(--space-7, 28px) var(--space-6); text-align: left; box-shadow: var(--shadow-card); }
+    .is-out #signedOut .signin-title { font-size: 26px; line-height: 32px; padding-right: 48px; }
+    .signin-logo { display: block; width: 52px; height: 52px; margin: 0 0 var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-md); object-fit: cover; }
+    .signin-sub { margin: 0 0 var(--space-4); }
+    .signin-fine { margin: var(--space-3) 0 0; font-size: 13px; color: var(--faint); }
+    .method-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); margin: 0 0 var(--space-4); border-bottom: 1px solid var(--line); }
+    .method-tab { appearance: none; -webkit-appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-width: 44px; min-height: 44px; padding: 10px var(--space-2); border: 0; border-radius: var(--radius-sm) var(--radius-sm) 0 0; background: transparent; color: var(--muted); font: 600 15px/1.25 var(--font-sans); text-align: center; cursor: pointer; }
+    .method-tab:hover { color: var(--text); }
+    .method-tab[aria-selected="true"] { color: var(--text); font-weight: 700; box-shadow: inset 0 -3px 0 var(--accent-fill); }
+    .method-tab:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+    .method-panel { display: grid; gap: var(--space-3); }
+    .method-panel .signin-fine { margin-top: 0; }
+    .token-guide { margin: 0; color: var(--muted); }
+    .inline-code { padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--text); font: 600 0.92em/1.4 var(--font-mono); }
+    .discord-invite-row { display: flex; align-items: center; margin: -6px 0 -2px; }
+    .discord-invite-link { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; padding: 6px 2px; color: var(--accent); font: 600 14px/1.3 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; }
+    .discord-invite-link:hover { color: var(--text); }
+    .discord-invite-link svg { width: 15px; height: 15px; flex: none; }
+    .field input.token-input { min-width: 0; font: 400 16px/1.4 var(--font-mono); }
+    .field input[aria-invalid="true"] { border-color: var(--danger); }
+    .field-error { margin: var(--space-1) 0 0; min-height: 0; font-size: 14px; font-weight: 600; color: var(--danger); }
+    .token-status { margin: 0; min-height: 0; font-size: 14px; color: var(--muted); }
+    .btn[disabled] { opacity: 0.7; cursor: wait; }
+    @media (max-width: 560px) { .is-out #signedOut { padding: var(--space-5) var(--space-4); } }
     .signin-title { margin: 0 0 var(--space-2); font: 700 32px/38px var(--font-display); letter-spacing: -0.02em; }
     .card .eyebrow { margin-bottom: var(--space-1); }
     .prov-logo { display: inline-flex; width: 20px; height: 20px; flex: none; }
@@ -107,11 +125,34 @@
           <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
           <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
         </button>
-        <img class="signin-logo" src="/logo-icon.webp" alt="" width="64" height="64">
+        <img class="signin-logo" src="/logo-icon.webp" alt="" width="56" height="56">
         <h1 class="signin-title">Sign in to Nuvio Live Sports</h1>
         <p class="signin-sub">Set up your sports and install the add-on on your devices.</p>
-        <div class="stack" id="providers"></div>
-        <p class="signin-fine">We only store your name, email and your provider's account ID.</p>
+        <div class="method-tabs" id="methodTabs" role="tablist" aria-label="Sign-in method" hidden>
+          <button type="button" class="method-tab" id="tabGoogle" role="tab" aria-selected="true" aria-controls="panelGoogle" tabindex="0">Google</button>
+          <button type="button" class="method-tab" id="tabToken" role="tab" aria-selected="false" aria-controls="panelToken" tabindex="-1">Access token</button>
+        </div>
+        <div class="method-panel" id="panelGoogle" role="tabpanel" aria-labelledby="tabGoogle" hidden>
+          <div class="stack" id="providers"></div>
+          <p class="signin-fine">We only store your name, email, and Google account ID.</p>
+        </div>
+        <div class="method-panel" id="panelToken" role="tabpanel" aria-labelledby="tabToken" hidden>
+          <p class="token-guide">Run <code class="inline-code">/token</code> in the Nuvio Discord server, then paste the token here. It does not expire and can be reused on your devices.</p>
+          <div class="discord-invite-row">
+            <a class="discord-invite-link" href="https://discord.gg/24BAkjSfSe" target="_blank" rel="noopener noreferrer">Open Nuvio Discord<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8"/></svg><span class="sr-only"> (opens in a new tab)</span></a>
+          </div>
+          <form class="stack" id="tokenForm" novalidate>
+            <div class="field">
+              <label for="accessTokenInput">Access token</label>
+              <input id="accessTokenInput" class="token-input" name="token" type="text" autocomplete="one-time-code" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="nt_..." aria-describedby="tokenHint tokenError">
+              <p class="hint" id="tokenHint">Paste your private token shown in Discord. Keep it secret.</p>
+              <p class="msg field-error" id="tokenError" role="alert" hidden></p>
+            </div>
+            <button type="submit" class="btn btn-primary btn-block" id="tokenSubmitBtn">Sign in with token</button>
+            <p class="msg token-status" id="tokenStatus" role="status" aria-live="polite" hidden></p>
+          </form>
+          <p class="signin-fine">We only store your Discord display name and Discord user ID. No email address is stored.</p>
+        </div>
         <p class="msg" id="noProviders" hidden>Sign-in is not available on this server yet.</p>
       </section>
 
@@ -149,6 +190,9 @@
       sign_in_cancelled: 'Sign-in was cancelled.', invalid_state: 'That sign-in expired. Please try again.',
       sign_in_failed: 'Sign-in failed. Please try again.', account_disabled: 'This account is disabled.',
       email_not_verified: 'Your provider has not verified this email address.', unknown_provider: 'Unknown sign-in provider.',
+      invalid_access_token: 'This token is invalid or disabled. Run /token in Discord to get a new one.',
+      rate_limited: 'Too many sign-in attempts. Please wait a minute and try again.',
+      cross_origin: 'Sign-in was blocked because the request origin did not match this site.',
       device_limit: 'Too many devices. Revoke one first.',
       unauthenticated: 'Please sign in again.'
     };
@@ -228,6 +272,30 @@
     }
     function loadDevices() { return api('/devices').then(function (r) { renderDevices(r.devices || []); }); }
 
+    function setTokenError(text) {
+      var err = $('tokenError'), inp = $('accessTokenInput');
+      err.textContent = text || '';
+      err.hidden = !text;
+      if (text) inp.setAttribute('aria-invalid', 'true');
+      else inp.removeAttribute('aria-invalid');
+    }
+    function setTokenStatus(text) {
+      var el = $('tokenStatus');
+      el.textContent = text || '';
+      el.hidden = !text;
+    }
+    function activateMethodTab(method, moveFocus) {
+      var isToken = method === 'token';
+      var tabG = $('tabGoogle'), tabT = $('tabToken');
+      var panG = $('panelGoogle'), panT = $('panelToken');
+      tabG.setAttribute('aria-selected', isToken ? 'false' : 'true');
+      tabT.setAttribute('aria-selected', isToken ? 'true' : 'false');
+      tabG.setAttribute('tabindex', isToken ? '-1' : '0');
+      tabT.setAttribute('tabindex', isToken ? '0' : '-1');
+      panG.hidden = isToken;
+      panT.hidden = !isToken;
+      if (moveFocus) (isToken ? tabT : tabG).focus();
+    }
     function showSignedIn(me) {
       $('signedOut').hidden = true; $('signedIn').hidden = false;
       var who = [(me.user && me.user.name) || '', (me.user && me.user.email) || ''].filter(Boolean).join(' \u00b7 ');
@@ -238,7 +306,9 @@
       $('signedIn').hidden = true; $('signedOut').hidden = false;
       var box = $('providers'); box.textContent = '';
       var list = (info && info.providers) || [];
-      $('noProviders').hidden = list.length > 0;
+      var hasGoogle = list.length > 0;
+      var hasToken = Boolean(info && info.accessTokenEnabled);
+      $('noProviders').hidden = hasGoogle || hasToken;
       list.forEach(function (p) {
         var a = document.createElement('a'); a.className = 'link-btn';
         a.href = '/api/auth/' + encodeURIComponent(p.id) + '/start?return=' + encodeURIComponent(next || '/account');
@@ -246,10 +316,92 @@
         a.appendChild(document.createTextNode('Continue with ' + p.label));
         box.appendChild(a);
       });
+      var tabs = $('methodTabs'), panG = $('panelGoogle'), panT = $('panelToken');
+      if (hasGoogle && hasToken) {
+        tabs.hidden = false;
+        panG.setAttribute('role', 'tabpanel');
+        panG.setAttribute('aria-labelledby', 'tabGoogle');
+        panT.setAttribute('role', 'tabpanel');
+        panT.setAttribute('aria-labelledby', 'tabToken');
+        activateMethodTab('google', false);
+      } else {
+        tabs.hidden = true;
+        panG.removeAttribute('role');
+        panG.removeAttribute('aria-labelledby');
+        panT.removeAttribute('role');
+        panT.removeAttribute('aria-labelledby');
+        panG.hidden = !hasGoogle;
+        panT.hidden = !hasToken;
+      }
     }
 
+    $('methodTabs').addEventListener('click', function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest('[role="tab"]') : null;
+      if (!btn) return;
+      activateMethodTab(btn.id === 'tabToken' ? 'token' : 'google', false);
+    });
+    $('methodTabs').addEventListener('keydown', function (ev) {
+      var btn = ev.target && ev.target.closest ? ev.target.closest('[role="tab"]') : null;
+      if (!btn) return;
+      if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') {
+        ev.preventDefault();
+        activateMethodTab(btn.id === 'tabGoogle' ? 'token' : 'google', true);
+      } else if (ev.key === 'Home') {
+        ev.preventDefault();
+        activateMethodTab('google', true);
+      } else if (ev.key === 'End') {
+        ev.preventDefault();
+        activateMethodTab('token', true);
+      }
+    });
+
+    var tokenSubmitting = false;
+    $('accessTokenInput').addEventListener('input', function () {
+      if ($('accessTokenInput').hasAttribute('aria-invalid')) setTokenError('');
+    });
+    $('tokenForm').addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (tokenSubmitting) return;
+      var inp = $('accessTokenInput'), btn = $('tokenSubmitBtn');
+      var rawToken = inp.value || '';
+      setTokenError('');
+      if (!rawToken.trim()) {
+        setTokenError('Paste your access token from Discord first.');
+        inp.focus();
+        return;
+      }
+      tokenSubmitting = true;
+      btn.disabled = true;
+      btn.textContent = 'Signing in...';
+      $('tokenForm').setAttribute('aria-busy', 'true');
+      setTokenStatus('Checking access token...');
+      api('/access-token/redeem', { method: 'POST', body: { token: rawToken, returnTo: next || '/account' } })
+        .then(function (r) {
+          inp.value = '';
+          inp.removeAttribute('aria-invalid');
+          setTokenStatus('Signed in. Redirecting...');
+          var dest = typeof r.redirectTo === 'string' && /^\/(?!\/|api\/)[A-Za-z0-9\-._~\/%?=&#]*$/.test(r.redirectTo)
+            ? r.redirectTo
+            : '/account';
+          location.replace(dest);
+        })
+        .catch(function (e) {
+          tokenSubmitting = false;
+          btn.disabled = false;
+          btn.textContent = 'Sign in with token';
+          $('tokenForm').removeAttribute('aria-busy');
+          setTokenStatus('');
+          var msg = (e && (e.code || e.detail))
+            ? errText(e)
+            : 'Could not reach the server. Please check your connection and try again.';
+          setTokenError(msg);
+          inp.focus();
+        });
+    });
+
     Promise.all([api('/providers'), api('/me').catch(function () { return { authenticated: false }; })]).then(function (r) {
-      setNav(r[1].authenticated ? 'in' : (r[0].enabled ? 'out' : 'off'));
+      var hasMethods = r[0].enabled && (((r[0].providers || []).length > 0) || Boolean(r[0].accessTokenEnabled));
+      setNav(r[1].authenticated ? 'in' : (hasMethods ? 'out' : 'off'));
       if (r[1].authenticated) { if (next) { location.replace(next); return; } showSignedIn(r[1]); } else showSignedOut(r[0]);
     }).catch(function () { setNav('out'); say($('pageMsg'), 'Could not reach the server.', 'error'); });
 

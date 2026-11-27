@@ -7,6 +7,17 @@ const { createProviderRegistry } = require('./providers');
 
 let singleton;
 
+function hasSignInMethods({ config, service } = {}) {
+  if (!config || !config.enabled || !service) return false;
+  const oauthEnabled = Boolean(
+    service.providers
+    && typeof service.providers.list === 'function'
+    && service.providers.list().length > 0
+  );
+  const discordEnabled = Boolean(config.discord && config.discord.enabled);
+  return oauthEnabled || discordEnabled;
+}
+
 /** Lazily-built shared auth context; `service` is null when accounts are not configured. */
 function getAuth(env = process.env) {
   if (singleton) return singleton;
@@ -22,4 +33,4 @@ function getAuth(env = process.env) {
   return singleton;
 }
 
-module.exports = { getAuth };
+module.exports = { getAuth, hasSignInMethods };
