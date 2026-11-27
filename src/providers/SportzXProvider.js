@@ -25,20 +25,30 @@ class SportzXProvider extends BaseProvider {
    * Parse SportzX start time format:
    * e.g. "2026/11/22 13:00:00 +0000", epoch seconds, or epoch ms.
    */
-  _parseStartTime(val) {
-    if (!val) return Date.now();
+  _parseStartTimeWithProvenance(val) {
+    if (!val) return { ms: Date.now(), verified: false };
     if (typeof val === 'number') {
-      return val > 1e11 ? val : val * 1000;
+      if (!Number.isFinite(val) || val <= 0) return { ms: Date.now(), verified: false };
+      return { ms: val > 1e11 ? val : val * 1000, verified: true };
     }
     if (typeof val === 'string') {
-      const parsed = Date.parse(val.replace(/\//g, '-'));
-      if (!Number.isNaN(parsed)) return parsed;
-      const num = Number(val);
+      const trimmed = val.trim();
+      if (!trimmed) return { ms: Date.now(), verified: false };
+      const isDateOnly = /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(trimmed);
+      const parsed = Date.parse(trimmed.replace(/\//g, '-'));
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        return { ms: parsed, verified: !isDateOnly && /\d{1,2}:\d{2}/.test(trimmed) };
+      }
+      const num = Number(trimmed);
       if (!Number.isNaN(num) && num > 0) {
-        return num > 1e11 ? num : num * 1000;
+        return { ms: num > 1e11 ? num : num * 1000, verified: true };
       }
     }
-    return Date.now();
+    return { ms: Date.now(), verified: false };
+  }
+
+  _parseStartTime(val) {
+    return this._parseStartTimeWithProvenance(val).ms;
   }
 
   /**
@@ -161,7 +171,7 @@ class SportzXProvider extends BaseProvider {
       if (!item) continue;
 
       const info = (item.eventInfo && typeof item.eventInfo === 'object') ? item.eventInfo : {};
-      const startTime = this._parseStartTime(info.startTime || item.startTime);
+      const { ms: startTime, verified: kickoffVerified } = this._parseStartTimeWithProvenance(info.startTime || item.startTime);
       const rawTitle = (info.eventName && info.eventName !== 'null' ? info.eventName : '') ||
                        (item.eventName && item.eventName !== 'null' ? item.eventName : '') ||
                        (item.title && item.title !== 'null' ? item.title : '') ||
@@ -212,6 +222,7 @@ class SportzXProvider extends BaseProvider {
         title: rawTitle,
         category,
         timestamp: startTime,
+        kickoffVerified,
         status: item.status || 'LIVE',
         popular: item.isPopular || item.popular || (info.isHot === '1' || info.isHot === 1),
         team1: (info.teamA && info.teamA !== 'null') ? info.teamA : (item.teamA || null),

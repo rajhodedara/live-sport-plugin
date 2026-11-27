@@ -1,6 +1,9 @@
 'use strict';
 
 const MatchAggregator = require('../src/services/MatchAggregator');
+const CacheService = require('../src/services/CacheService');
+const MatchEntity = require('../src/domain/MatchEntity');
+const { getScheduledMotorsportClaim } = require('../src/services/MotorsportIdentity');
 
 describe('Motorsport Session & Series Deduplication Isolation Suite', () => {
   let agg;
@@ -377,6 +380,472 @@ describe('Motorsport Session & Series Deduplication Isolation Suite', () => {
       expect(results.length).toBe(1);
       expect(results[0].title).toBe('RACE - F1 2026 - Miami Grand Prix - Full Race Replay - May 3, 2026 - Formula 1');
       expect(results[0].sources.length).toBe(2);
+    });
+  });
+
+  describe('Scheduled Motorsport Claim Extraction (MotorsportIdentity)', () => {
+    test('extracts observed F1 Qatar pair claims with shared venueKey and f1 series', () => {
+      const kickoffIso = '2026-11-27T13:30:00Z';
+      const expectedMs = Date.parse(kickoffIso);
+
+      const withSession = getScheduledMotorsportClaim({
+        title: 'Formula 1 Qatar Airways Qatar Grand Prix - Practice 1',
+        league: 'Formula 1',
+        category: 'motorsport',
+        date: kickoffIso
+      });
+      const withoutSession = getScheduledMotorsportClaim({
+        title: 'Formula 1 Qatar Grand Prix',
+        league: 'Formula 1',
+        category: 'motorsport',
+        date: kickoffIso
+      });
+
+      expect(withSession).toEqual({
+        series: 'f1',
+        session: 'p1',
+        venueKey: 'qatar',
+        kickoffMs: expectedMs
+      });
+      expect(withoutSession).toEqual({
+        series: 'f1',
+        session: null,
+        venueKey: 'qatar',
+        kickoffMs: expectedMs
+      });
+    });
+
+    test('extracts observed MotoGP Valencia pair claims with complementary series and session', () => {
+      const kickoffIso = '2026-11-27T09:45:00Z';
+      const expectedMs = Date.parse(kickoffIso);
+
+      const cdnRow = getScheduledMotorsportClaim({
+        title: 'Ricardo Tormo FP1',
+        league: '',
+        category: 'motorsport',
+        date: kickoffIso
+      });
+      const sportzxRow = getScheduledMotorsportClaim({
+        title: 'Gran Premio de la Comunitat Valenciana',
+        league: 'MotoGP',
+        category: 'motorsport',
+        date: kickoffIso
+      });
+
+      expect(cdnRow).toEqual({
+        series: null,
+        session: 'p1',
+        venueKey: 'valencia',
+        kickoffMs: expectedMs
+      });
+      expect(sportzxRow).toEqual({
+        series: 'motogp',
+        session: null,
+        venueKey: 'valencia',
+        kickoffMs: expectedMs
+      });
+      expect(cdnRow.venueKey).toBe(sportzxRow.venueKey);
+    });
+
+    test('distinguishes explicit race, q1, q2, sprint qualifying and sprint', () => {
+      const ts = '2026-11-28T14:00:00Z';
+      expect(getScheduledMotorsportClaim({ title: 'Formula 1 Qatar Grand Prix - Race', category: 'motorsport', date: ts }).session).toBe('race');
+      expect(getScheduledMotorsportClaim({ title: 'MotoGP Valencia Q1', category: 'motorsport', date: ts }).session).toBe('q1');
+      expect(getScheduledMotorsportClaim({ title: 'MotoGP Valencia Q2', category: 'motorsport', date: ts }).session).toBe('q2');
+      expect(getScheduledMotorsportClaim({ title: 'F1 Qatar Sprint Qualifying', category: 'motorsport', date: ts }).session).toBe('sprint_qualifying');
+      expect(getScheduledMotorsportClaim({ title: 'F1 Qatar Sprint', category: 'motorsport', date: ts }).session).toBe('sprint');
+    });
+
+    test('normalizes venue aliases, unaliased consistent circuits, and rejects venue-less or generic-only titles', () => {
+      const ts = '2026-11-27T13:30:00Z';
+      const lusail = getScheduledMotorsportClaim({ title: 'F1 Lusail Grand Prix', category: 'motorsport', date: ts });
+      const qatar = getScheduledMotorsportClaim({ title: 'Formula 1 Qatar Grand Prix', category: 'motorsport', date: ts });
+      expect(lusail.venueKey).toBeTruthy();
+      expect(lusail.venueKey).toBe(qatar.venueKey);
+
+      const ricardo = getScheduledMotorsportClaim({ title: 'Ricardo Tormo FP1', category: 'motorsport', date: ts });
+      const comunitat = getScheduledMotorsportClaim({ title: 'Comunitat Valenciana MotoGP', category: 'motorsport', date: ts });
+      expect(ricardo.venueKey).toBeTruthy();
+      expect(ricardo.venueKey).toBe(comunitat.venueKey);
+
+      const unaliasedA = getScheduledMotorsportClaim({ title: 'IndyCar Barber Motorsports Park Practice 1', category: 'motorsport', date: ts });
+      const unaliasedB = getScheduledMotorsportClaim({ title: 'IndyCar Barber Motorsports Park', category: 'motorsport', date: ts });
+      expect(unaliasedA.venueKey).toBeTruthy();
+      expect(unaliasedA.venueKey).toBe(unaliasedB.venueKey);
+
+      const noVenue = getScheduledMotorsportClaim({ title: 'Formula 1 - Free Practice', category: 'motorsport', date: ts });
+      expect(noVenue.venueKey).toBeNull();
+
+      const genericOnlyA = getScheduledMotorsportClaim({ title: 'Grand Prix Race', category: 'motorsport', date: ts });
+      const genericOnlyB = getScheduledMotorsportClaim({ title: 'Grand Prix Qualifying', category: 'motorsport', date: ts });
+      expect(genericOnlyA.venueKey).toBeNull();
+      expect(genericOnlyB.venueKey).toBeNull();
+    });
+
+    test('enforces start-time provenance: rejects missing, synthetic, and date-only; accepts explicit timezone offsets', () => {
+      expect(getScheduledMotorsportClaim({ title: 'F1 Qatar FP1', category: 'motorsport', date: '' }).kickoffMs).toBeNull();
+      expect(getScheduledMotorsportClaim({ title: 'F1 Qatar FP1', category: 'motorsport', date: 0 }).kickoffMs).toBeNull();
+
+      const syntheticEntity = new MatchEntity({
+        id: 'cdn_synth',
+        title: 'F1 Qatar FP1',
+        category: 'motorsport',
+        timestamp: Date.parse('2026-11-27T13:30:00Z'),
+        kickoffVerified: false
+      });
+      expect(getScheduledMotorsportClaim(syntheticEntity).kickoffMs).toBeNull();
+
+      const dateOnlyRaw = getScheduledMotorsportClaim({ title: 'F1 Qatar FP1', category: 'motorsport', date: '2026-11-27' });
+      expect(dateOnlyRaw.kickoffMs).toBeNull();
+
+      const dateOnlyEntity = new MatchEntity({
+        id: 'cdn_dateonly',
+        title: 'F1 Qatar FP1',
+        category: 'motorsport',
+        date: '2026-11-27'
+      });
+      expect(getScheduledMotorsportClaim(dateOnlyEntity).kickoffMs).toBeNull();
+
+      const tzOffset = getScheduledMotorsportClaim({
+        title: 'F1 Qatar FP1',
+        category: 'motorsport',
+        date: '2026-11-27T16:30:00+03:00'
+      });
+      expect(tzOffset.kickoffMs).toBe(Date.parse('2026-11-27T13:30:00Z'));
+    });
+  });
+
+  describe('Full-Sync Motorsport Session Reconciliation (syncMatches)', () => {
+    const runSyncWithProviders = async (providerSets, prevMatches = []) => {
+      let saved = [];
+      const cacheService = new CacheService();
+      cacheService.lastDiskMtime = Date.now() + 100000;
+      cacheService.cachedMatches = prevMatches;
+      const origSetMatches = cacheService.setMatches.bind(cacheService);
+      cacheService.setMatches = (m) => {
+        saved = m;
+        origSetMatches(m);
+      };
+
+      const aggregator = new MatchAggregator({ cacheService });
+      aggregator.providers = providerSets.map(({ sourceName, matches, lastScheduleOk }) => ({
+        sourceName,
+        lastScheduleOk,
+        getMatches: async () => matches
+      }));
+      const results = await aggregator.syncMatches();
+      return { results, saved, cacheService };
+    };
+
+    const futureIso = (offsetHours = 24) => new Date(Date.now() + offsetHours * 3600 * 1000).toISOString();
+
+    test('merges observed F1 Qatar pair in both provider orders, keeps session title and resolves both IDs', async () => {
+      const kickoff = futureIso(20);
+      const cdnQatar = new MatchEntity({
+        id: 'cdn_qatar_fp1',
+        title: 'Formula 1 Qatar Airways Qatar Grand Prix - Practice 1',
+        category: 'motorsport',
+        league: 'Formula 1',
+        timestamp: kickoff,
+        sources: [{ source: 'cdnlive', id: 'cdn_q1' }]
+      });
+      const sportzxQatar = new MatchEntity({
+        id: 'sportzx_qatar',
+        title: 'Formula 1 Qatar Grand Prix',
+        category: 'motorsport',
+        league: 'Formula 1',
+        timestamp: kickoff,
+        sources: [{ source: 'sportzx', id: 'szx_q1' }]
+      });
+
+      for (const order of [
+        [{ sourceName: 'cdnlive', matches: [cdnQatar] }, { sourceName: 'sportzx', matches: [sportzxQatar] }],
+        [{ sourceName: 'sportzx', matches: [sportzxQatar] }, { sourceName: 'cdnlive', matches: [cdnQatar] }]
+      ]) {
+        const { results, cacheService } = await runSyncWithProviders(order);
+        expect(results.length).toBe(1);
+        expect(results[0].sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+        expect(results[0].title).toMatch(/Practice 1/i);
+        expect(cacheService.findMatch('cdn_qatar_fp1')?.id).toBe(results[0].id);
+        expect(cacheService.findMatch('sportzx_qatar')?.id).toBe(results[0].id);
+      }
+    });
+
+    test('merges observed MotoGP Valencia pair in both provider orders, keeps FP1 title and resolves both IDs', async () => {
+      const kickoff = futureIso(22);
+      const cdnValencia = new MatchEntity({
+        id: 'cdn_valencia_fp1',
+        title: 'Ricardo Tormo FP1',
+        category: 'motorsport',
+        league: '',
+        timestamp: kickoff,
+        sources: [{ source: 'cdnlive', id: 'cdn_v1' }]
+      });
+      const sportzxValencia = new MatchEntity({
+        id: 'sportzx_valencia',
+        title: 'Gran Premio de la Comunitat Valenciana',
+        category: 'motorsport',
+        league: 'MotoGP',
+        timestamp: kickoff,
+        sources: [{ source: 'sportzx', id: 'szx_v1' }]
+      });
+
+      for (const order of [
+        [{ sourceName: 'cdnlive', matches: [cdnValencia] }, { sourceName: 'sportzx', matches: [sportzxValencia] }],
+        [{ sourceName: 'sportzx', matches: [sportzxValencia] }, { sourceName: 'cdnlive', matches: [cdnValencia] }]
+      ]) {
+        const { results, cacheService } = await runSyncWithProviders(order);
+        expect(results.length).toBe(1);
+        expect(results[0].sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+        expect(results[0].title).toMatch(/FP1/i);
+        expect(cacheService.findMatch('cdn_valencia_fp1')?.id).toBe(results[0].id);
+        expect(cacheService.findMatch('sportzx_valencia')?.id).toBe(results[0].id);
+      }
+    });
+
+    test('generalizes to future weekend with different venue, providers, and date', async () => {
+      const kickoff = futureIso(48);
+      const p1 = new MatchEntity({
+        id: 'dlv_suzuka',
+        title: 'Formula 1 Japanese Grand Prix',
+        category: 'motorsport',
+        league: 'Formula 1',
+        timestamp: kickoff,
+        sources: [{ source: 'daddylive', id: 'dlv_1' }]
+      });
+      const p2 = new MatchEntity({
+        id: 'pit_suzuka_q',
+        title: 'Suzuka Qualifying',
+        category: 'motorsport',
+        league: '',
+        timestamp: kickoff,
+        sources: [{ source: 'pitsport', id: 'pit_1' }]
+      });
+
+      const { results, cacheService } = await runSyncWithProviders([
+        { sourceName: 'daddylive', matches: [p1] },
+        { sourceName: 'pitsport', matches: [p2] }
+      ]);
+      expect(results.length).toBe(1);
+      expect(results[0].sources.map(s => s.source).sort()).toEqual(['daddylive', 'pitsport']);
+      expect(results[0].title).toMatch(/Qualifying/i);
+      expect(cacheService.findMatch('dlv_suzuka')?.id).toBe(results[0].id);
+      expect(cacheService.findMatch('pit_suzuka_q')?.id).toBe(results[0].id);
+    });
+
+    test('warm cache with old split cards does not reintroduce stale split cards or transfer unverified rows', async () => {
+      const kickoffMs = Date.now() + 20 * 3600 * 1000;
+      const oldSplitCache = [
+        {
+          id: 'cdn_qatar_fp1',
+          title: 'Formula 1 Qatar Airways Qatar Grand Prix - Practice 1',
+          category: 'motorsport',
+          date: String(kickoffMs), // old cache row without kickoffVerified
+          sources: [{ source: 'cdnlive', id: 'cdn_q1' }]
+        },
+        {
+          id: 'dlv_qatar_nosession',
+          title: 'Formula 1 Qatar Grand Prix',
+          category: 'motorsport',
+          date: String(kickoffMs), // old cache row without kickoffVerified or session
+          sources: [{ source: 'daddylive', id: 'dlv_q1' }]
+        }
+      ];
+
+      const freshCdn = new MatchEntity({
+        id: 'cdn_qatar_fp1',
+        title: 'Formula 1 Qatar Airways Qatar Grand Prix - Practice 1',
+        category: 'motorsport',
+        league: 'Formula 1',
+        timestamp: kickoffMs,
+        sources: [{ source: 'cdnlive', id: 'cdn_q1' }]
+      });
+      const freshSportzx = new MatchEntity({
+        id: 'sportzx_qatar',
+        title: 'Formula 1 Qatar Grand Prix',
+        category: 'motorsport',
+        league: 'Formula 1',
+        timestamp: kickoffMs,
+        sources: [{ source: 'sportzx', id: 'szx_q1' }]
+      });
+
+      const { results } = await runSyncWithProviders([
+        { sourceName: 'cdnlive', matches: [freshCdn] },
+        { sourceName: 'sportzx', matches: [freshSportzx] },
+        { sourceName: 'daddylive', matches: [], lastScheduleOk: false }
+      ], oldSplitCache);
+
+      // Fresh pair merges into 1 card; old unverified daddylive row (different session) must NOT merge onto p1
+      const p1Cards = results.filter(m => m.id === 'cdn_qatar_fp1' || (m.aliasIds || []).includes('cdn_qatar_fp1'));
+      expect(p1Cards.length).toBe(1);
+      expect(p1Cards[0].sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+    });
+
+    test('keeps MotoGP vs Moto2 vs Moto3, FP1 vs FP2, Race vs FP1, Q1 vs Q2, and Sprint vs Qualifying separate', async () => {
+      const t1 = futureIso(24);
+      const t2 = futureIso(26);
+      const rows = [
+        new MatchEntity({ id: 'm_gp', title: 'MotoGP Valencia FP1', category: 'motorsport', timestamp: t1, sources: [{ source: 'cdnlive', id: '1' }] }),
+        new MatchEntity({ id: 'm_2', title: 'Moto2 Valencia FP1', category: 'motorsport', timestamp: t1, sources: [{ source: 'sportzx', id: '2' }] }),
+        new MatchEntity({ id: 'm_3', title: 'Moto3 Valencia FP1', category: 'motorsport', timestamp: t1, sources: [{ source: 'daddylive', id: '3' }] }),
+        new MatchEntity({ id: 'f1_fp2', title: 'F1 Qatar FP2', category: 'motorsport', timestamp: t2, sources: [{ source: 'cdnlive', id: '4' }] }),
+        new MatchEntity({ id: 'f1_race', title: 'F1 Qatar Grand Prix Race', category: 'motorsport', timestamp: t2, sources: [{ source: 'sportzx', id: '5' }] }),
+        new MatchEntity({ id: 'f1_q1', title: 'F1 Qatar Q1', category: 'motorsport', timestamp: futureIso(30), sources: [{ source: 'cdnlive', id: '6' }] }),
+        new MatchEntity({ id: 'f1_q2', title: 'F1 Qatar Q2', category: 'motorsport', timestamp: futureIso(30), sources: [{ source: 'sportzx', id: '7' }] }),
+        new MatchEntity({ id: 'f1_sprint', title: 'F1 Qatar Sprint', category: 'motorsport', timestamp: futureIso(34), sources: [{ source: 'daddylive', id: '8' }] }),
+        new MatchEntity({ id: 'f1_qual', title: 'F1 Qatar Qualifying', category: 'motorsport', timestamp: futureIso(34), sources: [{ source: 'pitsport', id: '9' }] })
+      ];
+
+      const { results } = await runSyncWithProviders([{ sourceName: 'mixed', matches: rows }]);
+      expect(results.length).toBe(rows.length);
+    });
+
+    test('blocks three-row partial bridge in any provider order', async () => {
+      const kickoff = futureIso(24);
+      const partialSession = new MatchEntity({
+        id: 'p_sess',
+        title: 'Ricardo Tormo FP1',
+        category: 'motorsport',
+        timestamp: kickoff,
+        sources: [{ source: 'cdnlive', id: '1' }]
+      });
+      const partialSeries = new MatchEntity({
+        id: 'p_ser',
+        title: 'Gran Premio de la Comunitat Valenciana',
+        category: 'motorsport',
+        league: 'MotoGP',
+        timestamp: kickoff,
+        sources: [{ source: 'sportzx', id: '2' }]
+      });
+      const conflictThird = new MatchEntity({
+        id: 'p_conf',
+        title: 'Moto2 Valencia FP1',
+        category: 'motorsport',
+        timestamp: kickoff,
+        sources: [{ source: 'daddylive', id: '3' }]
+      });
+
+      for (const order of [
+        [
+          { sourceName: 'cdnlive', matches: [partialSession] },
+          { sourceName: 'sportzx', matches: [partialSeries] },
+          { sourceName: 'daddylive', matches: [conflictThird] }
+        ],
+        [
+          { sourceName: 'daddylive', matches: [conflictThird] },
+          { sourceName: 'sportzx', matches: [partialSeries] },
+          { sourceName: 'cdnlive', matches: [partialSession] }
+        ]
+      ]) {
+        const { results } = await runSyncWithProviders(order);
+        const mergedWithBoth = results.find(m =>
+          m.sources.some(s => s.source === 'cdnlive') && m.sources.some(s => s.source === 'sportzx')
+        );
+        expect(mergedWithBoth).toBeUndefined();
+      }
+    });
+
+    test('rejects unequal timestamps, different venues, incomplete evidence, synthetic/date-only starts, and conflicting ID/alias hits', async () => {
+      const t1 = futureIso(24);
+      const t2 = futureIso(25);
+      const dateOnly = new Date(Date.now() + 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+      const { results } = await runSyncWithProviders([
+        {
+          sourceName: 'cdnlive',
+          matches: [
+            new MatchEntity({ id: 'unequal_1', title: 'F1 Qatar FP1', category: 'motorsport', timestamp: t1, sources: [{ source: 'cdnlive', id: '1' }] }),
+            new MatchEntity({ id: 'diff_venue_1', title: 'F1 Suzuka FP1', category: 'motorsport', timestamp: t1, sources: [{ source: 'cdnlive', id: '2' }] }),
+            new MatchEntity({ id: 'incomplete_1', title: 'Silverstone FP1', category: 'motorsport', timestamp: futureIso(40), sources: [{ source: 'cdnlive', id: '3' }] }),
+            new MatchEntity({ id: 'synth_1', title: 'F1 Bahrain FP1', category: 'motorsport', timestamp: Date.parse(t1), kickoffVerified: false, sources: [{ source: 'cdnlive', id: '4' }] }),
+            new MatchEntity({ id: 'dateonly_1', title: 'F1 Monaco FP1', category: 'motorsport', date: dateOnly, sources: [{ source: 'cdnlive', id: '5' }] }),
+            new MatchEntity({ id: 'alias_conflict_1', title: 'F1 Monza FP1', category: 'motorsport', timestamp: futureIso(50), aliasIds: ['alias_conflict_2'], sources: [{ source: 'cdnlive', id: '6' }] })
+          ]
+        },
+        {
+          sourceName: 'sportzx',
+          matches: [
+            new MatchEntity({ id: 'unequal_2', title: 'Formula 1 Qatar Grand Prix', category: 'motorsport', timestamp: t2, sources: [{ source: 'sportzx', id: '7' }] }),
+            new MatchEntity({ id: 'diff_venue_2', title: 'Formula 1 Baku Grand Prix', category: 'motorsport', timestamp: t1, sources: [{ source: 'sportzx', id: '8' }] }),
+            new MatchEntity({ id: 'incomplete_2', title: 'Silverstone Grand Prix', category: 'motorsport', timestamp: futureIso(40), sources: [{ source: 'sportzx', id: '9' }] }),
+            new MatchEntity({ id: 'synth_2', title: 'Formula 1 Bahrain Grand Prix', category: 'motorsport', timestamp: t1, sources: [{ source: 'sportzx', id: '10' }] }),
+            new MatchEntity({ id: 'dateonly_2', title: 'Formula 1 Monaco Grand Prix', category: 'motorsport', date: dateOnly, sources: [{ source: 'sportzx', id: '11' }] }),
+            new MatchEntity({ id: 'alias_conflict_2', title: 'F1 Monza FP2', category: 'motorsport', timestamp: futureIso(50), sources: [{ source: 'sportzx', id: '12' }] })
+          ]
+        }
+      ]);
+
+      expect(results.length).toBe(12);
+    });
+
+    test('generalizes across a full future 2027 multi-series, multi-timezone weekend without cross-session leakage', async () => {
+      // Suzuka 2027 F1 weekend: JST (+09:00) vs UTC (Z)
+      const suzukaFp1Utc = '2027-04-02T02:30:00Z';
+      const suzukaFp1Jst = '2027-04-02T11:30:00+09:00';
+      const suzukaFp2Utc = '2027-04-02T06:00:00Z';
+      const suzukaQualiUtc = '2027-04-03T06:00:00Z';
+      const suzukaRaceUtc = '2027-04-04T05:00:00Z';
+
+      // Mugello 2027 MotoGP / Moto2 / Moto3 weekend (different kickoffs)
+      const mugelloMotoGpQ = '2027-06-19T08:50:00Z';
+      const mugelloMoto3Q = '2027-06-19T10:50:00Z';
+      const mugelloMoto2Q = '2027-06-19T11:45:00Z';
+
+      // Unaliased circuit: Barber Motorsports Park (IndyCar 2027)
+      const barberFp1 = '2027-05-01T15:00:00Z';
+
+      const { results, cacheService } = await runSyncWithProviders([
+        {
+          sourceName: 'cdnlive',
+          matches: [
+            new MatchEntity({ id: 'cdn_suz_fp1', title: 'Suzuka FP1', category: 'motorsport', timestamp: suzukaFp1Jst, sources: [{ source: 'cdnlive', id: 'c1' }] }),
+            new MatchEntity({ id: 'cdn_suz_fp2', title: 'Suzuka FP2', category: 'motorsport', timestamp: suzukaFp2Utc, sources: [{ source: 'cdnlive', id: 'c2' }] }),
+            new MatchEntity({ id: 'cdn_mug_gp', title: 'Mugello Qualifying', category: 'motorsport', timestamp: mugelloMotoGpQ, sources: [{ source: 'cdnlive', id: 'c3' }] }),
+            new MatchEntity({ id: 'cdn_mug_m3', title: 'Moto3 Mugello Qualifying', category: 'motorsport', timestamp: mugelloMoto3Q, sources: [{ source: 'cdnlive', id: 'c4' }] }),
+            new MatchEntity({ id: 'cdn_barber', title: 'Barber Motorsports Park Practice 1', category: 'motorsport', timestamp: barberFp1, sources: [{ source: 'cdnlive', id: 'c5' }] })
+          ]
+        },
+        {
+          sourceName: 'sportzx',
+          matches: [
+            new MatchEntity({ id: 'szx_suz_fp1', title: 'Formula 1 Japanese Grand Prix', category: 'motorsport', league: 'Formula 1', timestamp: suzukaFp1Utc, sources: [{ source: 'sportzx', id: 's1' }] }),
+            new MatchEntity({ id: 'szx_suz_q', title: 'Formula 1 Japanese Grand Prix Qualifying', category: 'motorsport', league: 'Formula 1', timestamp: suzukaQualiUtc, sources: [{ source: 'sportzx', id: 's2' }] }),
+            new MatchEntity({ id: 'szx_suz_r', title: 'Formula 1 Japanese Grand Prix - Race', category: 'motorsport', league: 'Formula 1', timestamp: suzukaRaceUtc, sources: [{ source: 'sportzx', id: 's3' }] }),
+            new MatchEntity({ id: 'szx_mug_gp', title: 'Gran Premio d\'Italia Mugello', category: 'motorsport', league: 'MotoGP', timestamp: mugelloMotoGpQ, sources: [{ source: 'sportzx', id: 's4' }] }),
+            new MatchEntity({ id: 'szx_mug_m2', title: 'Moto2 Mugello Qualifying', category: 'motorsport', timestamp: mugelloMoto2Q, sources: [{ source: 'sportzx', id: 's5' }] }),
+            new MatchEntity({ id: 'szx_barber', title: 'IndyCar Barber Motorsports Park', category: 'motorsport', league: 'IndyCar', timestamp: barberFp1, sources: [{ source: 'sportzx', id: 's6' }] })
+          ]
+        }
+      ]);
+
+      // 8 distinct sessions total:
+      // 1. Suzuka FP1 (merged: cdnlive + sportzx)
+      // 2. Suzuka FP2 (cdnlive)
+      // 3. Suzuka Qualifying (sportzx)
+      // 4. Suzuka Race (sportzx)
+      // 5. Mugello MotoGP Qualifying (merged: cdnlive + sportzx)
+      // 6. Mugello Moto3 Qualifying (cdnlive)
+      // 7. Mugello Moto2 Qualifying (sportzx)
+      // 8. Barber Motorsports Park Practice 1 (merged: cdnlive + sportzx)
+      expect(results.length).toBe(8);
+
+      const suzFp1Card = cacheService.findMatch('szx_suz_fp1');
+      expect(suzFp1Card).not.toBeNull();
+      expect(suzFp1Card.id).toBe(cacheService.findMatch('cdn_suz_fp1')?.id);
+      expect(suzFp1Card.sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+      expect(suzFp1Card.title).toMatch(/FP1/i);
+
+      const mugGpCard = cacheService.findMatch('szx_mug_gp');
+      expect(mugGpCard).not.toBeNull();
+      expect(mugGpCard.id).toBe(cacheService.findMatch('cdn_mug_gp')?.id);
+      expect(mugGpCard.sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+      expect(mugGpCard.title).toMatch(/Qualifying/i);
+
+      const barberCard = cacheService.findMatch('szx_barber');
+      expect(barberCard).not.toBeNull();
+      expect(barberCard.id).toBe(cacheService.findMatch('cdn_barber')?.id);
+      expect(barberCard.sources.map(s => s.source).sort()).toEqual(['cdnlive', 'sportzx']);
+      expect(barberCard.title).toMatch(/Practice 1/i);
     });
   });
 });

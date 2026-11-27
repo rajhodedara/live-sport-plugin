@@ -262,7 +262,11 @@ class CdnLiveProvider extends BaseProvider {
           let status = 'upcoming';
           if (item.status === 'live' || item.status === 'in') status = 'live';
 
-          const matchTime = item.start ? parseTimezone(item.start, 'UTC') : Date.now();
+          const rawStart = item.start ? String(item.start).trim() : '';
+          const parsedStart = rawStart ? parseTimezone(rawStart, 'UTC') : null;
+          const isDateOnly = Boolean(rawStart) && /^\d{4}[-/]\d{1,2}[-/]\d{1,2}$/.test(rawStart);
+          const kickoffVerified = Boolean(parsedStart && parsedStart > 0 && !isDateOnly && /\d{1,2}:\d{2}|^\d+$/.test(rawStart));
+          const matchTime = parsedStart || Date.now();
 
           matches.push(new MatchEntity({
             id: `cdn_${matchId}`,
@@ -270,6 +274,7 @@ class CdnLiveProvider extends BaseProvider {
             category: category,
             status: status,
             timestamp: matchTime,
+            kickoffVerified,
             sources: [{ source: 'cdnlive', id: matchId }]
           }));
         }

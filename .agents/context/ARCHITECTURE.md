@@ -296,10 +296,11 @@ Caller-supplied dispatchers cannot supply an alternate dial — that is the poin
 
 ```
 CronService (0 */4 * * *)  →  MatchAggregator.syncMatches()      :1063
-    └─ _fetchProviderMatches(provider, shouldRecord)              :1040
-    └─ _precompute(entity)                                        :683  ← fold once, build squad markers
-    └─ build idIndex → channelNormIndex → tokenIndex → categoryBuckets
-    └─ _sameEventPre(p1, p2)                                      :816  ← identity verification
+    └─ _fetchProviderMatches(provider, shouldRecord)              :1040  ← collect all fresh batches
+    └─ _precompute(entity)                                        :683   ← fold once, squad markers, MotorsportIdentity claim
+    └─ build scheduled motorsport (venueKey, kickoffMs) bucket summaries across full fresh batch
+    └─ build idIndex → channelNormIndex → motorsportBucketIndex → tokenIndex → categoryBuckets
+    └─ _sameEventPre(p1, p2)                                      :816   ← identity verification
     └─ mergeMatches(primary, secondary)                           :976
     └─ carry-forward of unseen-but-recent matches (CARRY_FORWARD_MAX, default 600)
     └─ CacheService.setMatches(matches)
@@ -505,7 +506,7 @@ no lint** — it builds on the VPS and gates on `node --check dist.next/index.js
 |---|---|
 | **Guarded egress** | `ProviderOutbound`, `SharedOutboundFetch`, `GuardedOutbound`, `GuardedEgressPolicy`, `GuardedCurlClient`, `OutboundUrlGuard`, `RedirectHeaderPolicy`, `ProviderRequestHeaders`, `NativeGuardedFetch`, `NativeGuardedSlot`, `NativeExclusiveSlot`, `NativeSocksConnection`, `IsolatedNativePoolCandidate`, `NativeShutdown`, `ManifestUserAgent` |
 | **Resolver transport** | `ResolverTransportConfig`, `ResolverTransportRuntime`, `ResolverUnixClients`, `ResolverPinnedClients`, `ResolverPinnedIdentity`, `ResolverPublicIdentity`, `ResolverIdentityProvision`, `ResolverTrustPolicy`, `ResolverConflictGate`, `ResolverConflictState`, `ResolverProxyEvents` |
-| **Identity / aggregation** | `MatchAggregator`, `EventSquadIdentity`, `CacheService`, `TeamNameExtractor`, `BroadcasterMatchService`, `ChannelIdentityService` |
+| **Identity / aggregation** | `MatchAggregator`, `MotorsportIdentity`, `EventSquadIdentity`, `CacheService`, `TeamNameExtractor`, `BroadcasterMatchService`, `ChannelIdentityService` |
 | **Stream path** | `StreamResolveCache`, `StreamPolicy`, `HlsRewriteService`, `DashToHlsService`, `SegmentLengthService`, `ByteRangeSigner`, `M3U8ParserService`, `StreamScoringService` |
 | **Telemetry (opt-in)** | `TimingRuntime`, `TimingContext`, `TimingRelations`, `TimingStatistics`, `TimingOutput`, `TimingSnapshotTimer`, `NativeTiming` |
 | **Ops** | `CronService`, `CircuitBreakerService`, `ProviderHealthService`, `WorkerBudget`, `retry` |
