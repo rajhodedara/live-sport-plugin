@@ -18,6 +18,7 @@
  */
 
 import { connect } from 'cloudflare:sockets';
+import { inflateSync } from 'node:zlib';
 import pngUnfilterWasm from './png-unfilter.wasm';
 
 // Raw HTTPS GET over TLS socket to prevent Cloudflare from injecting
@@ -194,6 +195,35 @@ function tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8, wasmInstan
   return true;
 }
 
+function inflateIdatInto(idat, totalIdat, expectedRawLen, target) {
+  const compressed = new Uint8Array(totalIdat);
+  let compressedOffset = 0;
+  for (const chunk of idat) {
+    compressed.set(chunk, compressedOffset);
+    compressedOffset += chunk.byteLength;
+  }
+
+  let inflated;
+  try {
+    inflated = inflateSync(compressed, { maxOutputLength: expectedRawLen });
+  } catch (error) {
+    if (error?.code === 'ERR_BUFFER_TOO_LARGE') {
+      throw new Error(`Inflated size exceeded expected ${expectedRawLen}`);
+    }
+    throw error;
+  }
+
+  if (inflated.byteLength > expectedRawLen) {
+    throw new Error(`Inflated size ${inflated.byteLength} exceeded expected ${expectedRawLen}`);
+  }
+  if (inflated.byteLength !== expectedRawLen) {
+    throw new Error(`Inflated size ${inflated.byteLength} does not match expected ${expectedRawLen}`);
+  }
+
+  target.set(inflated);
+  return inflated.byteLength;
+}
+
 async function decodePngToTs(arrayBuf) {
   const va = new Uint8Array(arrayBuf);
   if (!isPngBytes(va)) return va;
@@ -262,36 +292,7 @@ async function decodePngToTs(arrayBuf) {
   const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8, instance);
 
   if (!isStored) {
-    // General decoder: stream IDAT directly to DecompressionStream into pre-allocated Wasm memory
-    const ds = new DecompressionStream('deflate');
-    const writer = ds.writable.getWriter();
-    (async () => {
-      try {
-        for (const c of idat) {
-          await writer.write(c);
-        }
-        await writer.close();
-      } catch (_) {}
-    })();
-
-    let inflatedLen = 0;
-    const reader = ds.readable.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        if (inflatedLen + value.byteLength > expectedRawLen) {
-          try { await reader.cancel(); } catch (_) {}
-          throw new Error(`Inflated size ${inflatedLen + value.byteLength} exceeded expected ${expectedRawLen}`);
-        }
-        memU8.set(value, inflatedLen);
-        inflatedLen += value.byteLength;
-      }
-    }
-
-    if (inflatedLen !== expectedRawLen) {
-      throw new Error(`Inflated size ${inflatedLen} does not match expected ${expectedRawLen}`);
-    }
+    inflateIdatInto(idat, totalIdat, expectedRawLen, memU8);
   }
 
   const retCode = instance.exports.unfilter(rawPtr, outPtr, width, height, bpp);
@@ -379,33 +380,7 @@ async function inflatePngOnly(rawBuf) {
   if (isStored) {
     inflatedLen = expectedRawLen;
   } else {
-    const ds = new DecompressionStream('deflate');
-    const writer = ds.writable.getWriter();
-    (async () => {
-      try {
-        for (const c of idat) {
-          await writer.write(c);
-        }
-        await writer.close();
-      } catch (_) {}
-    })();
-
-    const reader = ds.readable.getReader();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (value) {
-        if (inflatedLen + value.byteLength > expectedRawLen) {
-          try { await reader.cancel(); } catch (_) {}
-          throw new Error(`Inflated size ${inflatedLen + value.byteLength} exceeded expected ${expectedRawLen}`);
-        }
-        targetBuf.set(value, inflatedLen);
-        inflatedLen += value.byteLength;
-      }
-    }
-    if (inflatedLen !== expectedRawLen) {
-      throw new Error(`Truncated DEFLATE stream: got ${inflatedLen}, expected ${expectedRawLen}`);
-    }
+    inflatedLen = inflateIdatInto(idat, totalIdat, expectedRawLen, targetBuf);
   }
 
   return { inflatedBytes: inflatedLen, isStored, width, height, stride };

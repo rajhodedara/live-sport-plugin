@@ -10,11 +10,12 @@ const wasmBytes = fs.readFileSync(wasmPath);
 const wasmModule = new WebAssembly.Module(wasmBytes);
 
 // Dynamically load cloudflare-worker/index.js with mocked environment for test isolation
-function loadWorker() {
+function loadWorker({ decompressionStream = globalThis.DecompressionStream } = {}) {
   const code = fs.readFileSync(path.resolve(__dirname, '../cloudflare-worker/index.js'), 'utf8');
   const transformed = code
     .replace(/import\s*\{\s*connect\s*\}\s*from\s*['"]cloudflare:sockets['"];?/, 'const connect = () => ({ writable: { getWriter: () => {} }, readable: { getReader: () => {} } });')
     .replace(/import\s+pngUnfilterWasm\s+from\s+['"]\.\/png-unfilter\.wasm['"];?/, 'const pngUnfilterWasm = wasmModule;')
+    .replace(/import\s*\{\s*inflateSync\s*\}\s*from\s+['"]node:zlib['"];?/, "const { inflateSync } = require('node:zlib');")
     .replace(/export\s*\{[^}]+\};?/, '')
     .replace(/export\s+default\s+/, 'module.exports = ') +
     '\nmodule.exports.decodePngToTs = decodePngToTs;\nmodule.exports.inflatePngOnly = typeof inflatePngOnly !== "undefined" ? inflatePngOnly : undefined;\nmodule.exports.isPngBytes = isPngBytes;\n';
@@ -27,7 +28,7 @@ function loadWorker() {
     transformed
   );
   fn(
-    m, m.exports, require, WebAssembly, globalThis.DecompressionStream,
+    m, m.exports, require, WebAssembly, decompressionStream,
     globalThis.Headers, globalThis.Request, globalThis.Response, globalThis.URL,
     wasmModule
   );
@@ -254,6 +255,23 @@ describe('pngWorkerFastPath Decoder Core', () => {
     const decoded = await worker.decodePngToTs(png);
     expect(Buffer.from(decoded)).toEqual(ts);
     expect(decoded.length).toBe(376);
+  });
+
+  test('decodes a dynamic-Huffman multi-IDAT PNG without DecompressionStream', async () => {
+    const nativeWorker = loadWorker({ decompressionStream: null });
+    const ts = Buffer.concat([makeTsPacket(0x21), makeTsPacket(0x42)]);
+    const kwp1 = makeKwp1Payload(ts);
+    const { png } = buildSyntheticPng({
+      width: 24,
+      height: 18,
+      colorType: 2,
+      filterPattern: [2, 4, 1, 0, 3],
+      payloadData: kwp1,
+      splitIdat: 5,
+      kwLn: kwp1.length
+    });
+
+    await expect(nativeWorker.decodePngToTs(png)).resolves.toEqual(new Uint8Array(ts));
   });
 
   test('correctly unwraps raw 188-byte aligned MPEG-TS without KWP1 header', async () => {

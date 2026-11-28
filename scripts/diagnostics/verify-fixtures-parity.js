@@ -13,6 +13,7 @@ const workerCode = fs.readFileSync(path.resolve(__dirname, '../../cloudflare-wor
 const transformed = workerCode
   .replace(/import\s*\{\s*connect\s*\}\s*from\s*['"]cloudflare:sockets['"];?/, 'const connect = () => ({});')
   .replace(/import\s+pngUnfilterWasm\s+from\s+['"]\.\/png-unfilter\.wasm['"];?/, 'const pngUnfilterWasm = wasmModule;')
+  .replace(/import\s*\{\s*inflateSync\s*\}\s*from\s+['"]node:zlib['"];?/, "const { inflateSync } = require('node:zlib');")
   .replace(/export\s*\{[^}]+\};?/, '')
   .replace(/export\s+default\s+/, 'module.exports = ') +
   '\nmodule.exports.decodePngToTs = decodePngToTs;\nmodule.exports.isPngBytes = isPngBytes;\n';

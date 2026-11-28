@@ -65,7 +65,7 @@ Worker fleet's job.
 
 | Layer | Lives in | Runtime | Owns |
 |---|---|---|---|
-| L1 | `cloudflare-worker/index.js` (single 547-line file) | Cloudflare Workers, `compatibility-date 2024-01-01` | Byte relay, cloaking-prefix stripping, per-worker budget caps |
+| L1 | `cloudflare-worker/index.js` (single file) | Cloudflare Workers, `compatibility-date 2024-01-01` + `nodejs_compat` | Byte relay, cloaking-prefix stripping, per-worker budget caps |
 | L2 | `src/**` | Node ≥ 22, CommonJS, Express 4 | Protocol surface, aggregation, ranking, playlist rewriting |
 | L2a | `src/services/{ProviderOutbound,SharedOutboundFetch,GuardedOutbound,…}` | Node 22, undici 8 | **Every** external request: URL/DNS validation, egress proxy selection, native/undici transport, redirect policy |
 | L3 | `resolver/src/**` | Node ≥ 22, **ESM**, `curl` on PATH | embed.st `/fetch` handshake, WASM decrypt, CDN relay |
