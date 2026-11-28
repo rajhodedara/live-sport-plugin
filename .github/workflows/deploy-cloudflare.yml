@@ -66,4 +66,4 @@ jobs:
           wranglerVersion: '3'
           apiToken: ${{ secrets[matrix.api_token] }}
           accountId: ${{ secrets[matrix.account_id] }}
-          command: deploy cloudflare-worker/index.js --name ${{ matrix.worker_name }} --compatibility-date 2024-01-01 --compatibility-flags nodejs_compat --compatibility-flags nodejs_zlib
+          command: deploy cloudflare-worker/index.js --name ${{ matrix.worker_name }} --compatibility-date 2024-09-23 --compatibility-flags nodejs_compat
