@@ -187,3 +187,40 @@
   - Playwright (headless Edge): verified slow bootstrap, no devices, multiple devices/no selection, stale 404 device, missing `manifestUrl`, network error, valid device unlock (preserving focus in all-steps), account-disabled self-hosted mode, wizard/sidebar/hash navigation guards, 320px & 1280px widths in light & dark themes, no horizontal overflow, and >=44px recovery targets (`ALL_BROWSER_CHECKS_PASSED`).
 - **Docs**:
   - Updated `.agents/context/ARCHITECTURE.md` with the configure device prerequisite lifecycle.
+
+# Session Checkpoint: Stremio Free Worker PNG Fast Path
+**Date**: 2026-11-28
+**Status**: Execution & Empirical Benchmarking Complete (Plan concluded with fallback analysis)
+
+### What Was Completed
+- **Corpus & Fixtures Located (`../nuvio-re-lab/fixtures/`)**:
+  - Found and extracted 10 real PNG segment fixtures (2.13 MB to 3.05 MB) and computed reference TS SHA-256 hashes in `reference_hashes.json`.
+  - Identified that the reported 4.4 MB (`1214×1213`) live stream sample and segment 95 from prior in-memory soak were missing from disk; the 10 captured sports fixtures up to 3.05 MB served as the empirical corpus.
+- **DEFLATE Block & Scanline Census (Task 1)**:
+  - Implemented `scripts/diagnostics/png-deflate-census.js` and verified with `tests/pngDeflateCensus.test.js` (5 passed).
+  - Distribution: 1 fixture (`fixture_2635597_BBC.png`, 2.63 MB) is 100% stored DEFLATE blocks (42 stored, 0 Huffman) with 100% filter None. 9 fixtures (ESPN, ESPN 2, etc.) are mixed blocks with 62%–88% dynamic Huffman blocks and 12%–38% stored blocks.
+  - Scanline filter breakdown: 66%–73% None (0), 9%–12% Sub (1), 6%–7% Up (2), 3%–4% Average (3), 5%–7% Paeth (4).
+- **Fast-Path Decoder & Wasm Optimization (Task 2)**:
+  - Recompiled `cloudflare-worker/png-unfilter.wasm` from `scripts/build-png-unfilter-wasm.js` with native WebAssembly `(memory.copy)` instructions replacing the byte-by-byte loop for None (0) and Up-row0 (2) scanlines.
+  - Added `tryFastStoredDeflate` in `cloudflare-worker/index.js` for zero-copy bulk extraction of stored blocks directly into linear Wasm memory without `DecompressionStream` overhead.
+  - Optimized general decoder: streamed IDAT chunks directly into `DecompressionStream` and wrote inflated chunks straight into request-owned linear Wasm memory (`memU8`), eliminating 4 intermediate buffer copies.
+  - Added telemetry and benchmark endpoints (`bench_relay`, `bench_inflate`, `bench_decode`) and `x-decode-time-ms`.
+  - Verified 100% SHA-256 bit-for-bit parity across all 10 real capture fixtures and all 28 Jest tests (`npm test -- tests/pngWorkerFastPath.test.js tests/pngDeflateCensus.test.js tests/pngUnfilterWasm.test.js`).
+  - Committed (`38fe79c`) and deployed exclusively to isolated testbed Worker (`nuvio-proxy.odedararaj456.workers.dev`) via GitHub Actions `deploy-cloudflare.yml` (run 46120077335).
+- **Benchmarking & Live Cadence Soak (Task 3)**:
+  - Benchmark replay confirmed 100% SHA-256 match on all 10 fixtures during cold/warm runs.
+  - 30-minute live soak (`scripts/diagnostics/png-worker-soak.js`) achieved 16 consecutive successful segments before failing at segment 17 (`fixture_2900545_0.png`, 2.77 MB) with **Error 1102 (`exceededCpu`)**.
+  - Subsequent requests in the warmed isolate hit Cloudflare's 503 circuit breaker, proving that the failure is purely CPU time limit exhaustion (> 10 ms), NOT memory limit exhaustion.
+  - Sizing curve benchmark (`scripts/diagnostics/benchmark-size-curve.js`):
+    - Lower-bitrate renditions (300 KB – 1.0 MB): decode in 1.55 ms – 3.69 ms (well within the 8 ms p99 budget).
+    - 1080p full-quality sports renditions (2.0 MB – 3.05 MB): require 9.6 ms (desktop V8) to ~14 ms (Cloudflare AMD EPYC), exceeding the 10 ms Free Worker CPU limit during dynamic Huffman DEFLATE streaming.
+  - Verified that zero media segment bytes touch the VPS (all segment requests flow directly between Stremio, the Worker, and the upstream CDN).
+
+### Current Blockers / Open Questions
+- Dynamic Huffman DEFLATE decompression of full-quality 1080p sports streams (2.5–3.0 MB per segment) cannot reliably fit within Cloudflare Free Worker's 10 ms invocation CPU budget across sustained live playback.
+- Rollout for full-quality 1080p PNG feeds on Cloudflare Free is stopped per Task 3 line 60 of the plan. Lower-bitrate renditions (<= 1.2 MB) or standard MPEG-TS/ByteRange feeds remain functional.
+
+### Immediate Next Steps for Next Chat
+1. If PNG-wrapped feeds are to be supported in production, either:
+   - Route PNG streams to Cloudflare Workers Paid (which provides 50 ms or 30 seconds of CPU per request), or
+   - Use upstream lower-bitrate renditions (<= 720p / <= 1.2 MB segments) which comfortably pass under 5 ms CPU.
