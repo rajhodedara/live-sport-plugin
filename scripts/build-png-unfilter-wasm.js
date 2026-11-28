@@ -91,18 +91,7 @@ const WAT_SOURCE = `(module
         ;; ft == 0 (None)
         (if (i32.eq (local.get $ft) (i32.const 0))
           (then
-            (local.set $x (i32.const 0))
-            (block $b0
-              (loop $l0
-                (br_if $b0 (i32.ge_s (local.get $x) (local.get $stride)))
-                (i32.store8
-                  (i32.add (local.get $rowOff) (local.get $x))
-                  (i32.load8_u (i32.add (local.get $rawIdx) (local.get $x)))
-                )
-                (local.set $x (i32.add (local.get $x) (i32.const 1)))
-                (br $l0)
-              )
-            )
+            (memory.copy (local.get $rowOff) (local.get $rawIdx) (local.get $stride))
           )
         )
 
@@ -147,18 +136,7 @@ const WAT_SOURCE = `(module
             (if (i32.eq (local.get $y) (i32.const 0))
               (then
                 ;; y == 0: out[rowOff + x] = raw[rawIdx + x]
-                (local.set $x (i32.const 0))
-                (block $b2_0
-                  (loop $l2_0
-                    (br_if $b2_0 (i32.ge_s (local.get $x) (local.get $stride)))
-                    (i32.store8
-                      (i32.add (local.get $rowOff) (local.get $x))
-                      (i32.load8_u (i32.add (local.get $rawIdx) (local.get $x)))
-                    )
-                    (local.set $x (i32.add (local.get $x) (i32.const 1)))
-                    (br $l2_0)
-                  )
-                )
+                (memory.copy (local.get $rowOff) (local.get $rawIdx) (local.get $stride))
               )
               (else
                 ;; y > 0: out[rowOff + x] = raw[rawIdx + x] + out[prevOff + x]

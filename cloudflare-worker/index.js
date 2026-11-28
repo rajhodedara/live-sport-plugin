@@ -80,6 +80,114 @@ function isPngBytes(u8) {
     u8[4] === 0x0d && u8[5] === 0x0a && u8[6] === 0x1a && u8[7] === 0x0a;
 }
 
+function tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8) {
+  if (totalIdat < 11) return false;
+
+  let chunkIdx = 0;
+  let chunkOff = 0;
+
+  function peekByte() {
+    if (chunkIdx >= idat.length) return -1;
+    return idat[chunkIdx][chunkOff];
+  }
+
+  function readByte() {
+    if (chunkIdx >= idat.length) return -1;
+    const b = idat[chunkIdx][chunkOff++];
+    if (chunkOff >= idat[chunkIdx].length) {
+      chunkIdx++;
+      chunkOff = 0;
+    }
+    return b;
+  }
+
+  function readUInt16LE() {
+    const b0 = readByte();
+    const b1 = readByte();
+    if (b0 === -1 || b1 === -1) return -1;
+    return (b0 | (b1 << 8)) >>> 0;
+  }
+
+  const cmf = readByte();
+  const flg = readByte();
+  if (cmf === -1 || flg === -1) return false;
+  if (((cmf << 8) | flg) % 31 !== 0) return false;
+  if ((cmf & 0x0f) !== 8) return false;
+  if (flg & 0x20) {
+    for (let k = 0; k < 4; k++) readByte();
+  }
+
+  const firstBlockByte = peekByte();
+  if (firstBlockByte === -1) return false;
+  // If bits 1-2 != 00, block is Huffman compressed -> fall back to general decoder
+  if ((firstBlockByte & 0x06) !== 0) return false;
+
+  let outPos = 0;
+  let bfinal = 0;
+
+  while (!bfinal) {
+    const hdr = readByte();
+    if (hdr === -1) return false;
+    bfinal = hdr & 1;
+    const btype = (hdr >> 1) & 3;
+    if (btype !== 0) {
+      // Encountered compressed block in mixed stream -> fallback
+      return false;
+    }
+
+    const len = readUInt16LE();
+    const nlen = readUInt16LE();
+    if (len === -1 || nlen === -1) return false;
+    if ((len ^ 0xffff) !== nlen) {
+      throw new Error(`Corrupted stored block LEN/NLEN mismatch: len=${len}, nlen=${nlen}`);
+    }
+
+    if (outPos + len > expectedRawLen) {
+      throw new Error(`Stored block inflated bytes (${outPos + len}) exceeded expected ${expectedRawLen}`);
+    }
+
+    let bytesToRead = len;
+    while (bytesToRead > 0) {
+      if (chunkIdx >= idat.length) {
+        throw new Error('Truncated stored DEFLATE stream');
+      }
+      const curChunk = idat[chunkIdx];
+      const avail = curChunk.length - chunkOff;
+      const toCopy = Math.min(avail, bytesToRead);
+      memU8.set(curChunk.subarray(chunkOff, chunkOff + toCopy), outPos);
+      outPos += toCopy;
+      chunkOff += toCopy;
+      bytesToRead -= toCopy;
+      if (chunkOff >= curChunk.length) {
+        chunkIdx++;
+        chunkOff = 0;
+      }
+    }
+  }
+
+  if (outPos !== expectedRawLen) {
+    throw new Error(`Stored block inflated size ${outPos} does not match expected ${expectedRawLen}`);
+  }
+
+  const a0 = readByte(), a1 = readByte(), a2 = readByte(), a3 = readByte();
+  if (a0 === -1 || a1 === -1 || a2 === -1 || a3 === -1) {
+    throw new Error('Truncated zlib Adler-32 checksum');
+  }
+  const streamAdler = (((a0 << 24) | (a1 << 16) | (a2 << 8) | a3) >>> 0);
+
+  let s1 = 1, s2 = 0;
+  for (let i = 0; i < expectedRawLen; i++) {
+    s1 = (s1 + memU8[i]) % 65521;
+    s2 = (s2 + s1) % 65521;
+  }
+  const calcAdler = (((s2 << 16) | s1) >>> 0);
+  if (streamAdler !== calcAdler) {
+    throw new Error(`Adler-32 checksum mismatch: stream=0x${streamAdler.toString(16)}, calc=0x${calcAdler.toString(16)}`);
+  }
+
+  return true;
+}
+
 async function decodePngToTs(arrayBuf) {
   const va = new Uint8Array(arrayBuf);
   if (!isPngBytes(va)) return va;
@@ -126,39 +234,6 @@ async function decodePngToTs(arrayBuf) {
     throw new Error(`PNG raw size exceeds 32MB limit: ${expectedRawLen}`);
   }
 
-  const comp = new Uint8Array(totalIdat);
-  let cOff = 0;
-  for (const c of idat) {
-    comp.set(c, cOff);
-    cOff += c.byteLength;
-  }
-
-  // Streaming decompression with early abort
-  const ds = new DecompressionStream('deflate');
-  const writer = ds.writable.getWriter();
-  writer.write(comp).catch(() => {});
-  writer.close().catch(() => {});
-
-  const chunks = [];
-  let inflatedLen = 0;
-  const reader = ds.readable.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      inflatedLen += value.byteLength;
-      if (inflatedLen > expectedRawLen) {
-        try { await reader.cancel(); } catch (_) {}
-        throw new Error(`Inflated size ${inflatedLen} exceeded expected ${expectedRawLen}`);
-      }
-      chunks.push(value);
-    }
-  }
-
-  if (inflatedLen !== expectedRawLen) {
-    throw new Error(`Inflated size ${inflatedLen} does not match expected ${expectedRawLen}`);
-  }
-
   // Instantiate WebAssembly with exclusive linear memory per decode
   const instance = pngUnfilterWasm instanceof WebAssembly.Module
     ? new WebAssembly.Instance(pngUnfilterWasm)
@@ -176,24 +251,52 @@ async function decodePngToTs(arrayBuf) {
   const rawPtr = 0;
   const outPtr = expectedRawLen;
   const memU8 = new Uint8Array(memory.buffer);
-  let ro = 0;
-  for (const c of chunks) {
-    memU8.set(c, ro);
-    ro += c.byteLength;
+
+  // Attempt fast stored-block bulk copy path first
+  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8);
+
+  if (!isStored) {
+    // General decoder: stream IDAT directly to DecompressionStream into pre-allocated Wasm memory
+    const ds = new DecompressionStream('deflate');
+    const writer = ds.writable.getWriter();
+    (async () => {
+      try {
+        for (const c of idat) {
+          await writer.write(c);
+        }
+        await writer.close();
+      } catch (_) {}
+    })();
+
+    let inflatedLen = 0;
+    const reader = ds.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        if (inflatedLen + value.byteLength > expectedRawLen) {
+          try { await reader.cancel(); } catch (_) {}
+          throw new Error(`Inflated size ${inflatedLen + value.byteLength} exceeded expected ${expectedRawLen}`);
+        }
+        memU8.set(value, inflatedLen);
+        inflatedLen += value.byteLength;
+      }
+    }
+
+    if (inflatedLen !== expectedRawLen) {
+      throw new Error(`Inflated size ${inflatedLen} does not match expected ${expectedRawLen}`);
+    }
   }
 
   const retCode = instance.exports.unfilter(rawPtr, outPtr, width, height, bpp);
   if (retCode !== 0) throw new Error(`WASM unfilter failed with code ${retCode}`);
 
-  const pixels = new Uint8Array(outLen);
-  pixels.set(new Uint8Array(memory.buffer, outPtr, outLen));
-
-  let payload = pixels;
+  let payload = memU8.subarray(outPtr, outPtr + outLen);
   if (colorType === 4 || colorType === 6) {
     const keep = colorType === 4 ? 1 : 3;
     const stripped = new Uint8Array(width * height * keep);
     for (let src = 0, dst = 0; dst < stripped.length; src += bpp, dst += keep) {
-      for (let k = 0; k < keep; k++) stripped[dst + k] = pixels[src + k];
+      for (let k = 0; k < keep; k++) stripped[dst + k] = memU8[outPtr + src + k];
     }
     payload = stripped;
   }
@@ -217,6 +320,84 @@ async function decodePngToTs(arrayBuf) {
   throw new Error('Decoded PNG does not contain KWP1 or MPEG-TS payload');
 }
 
+async function inflatePngOnly(rawBuf) {
+  const va = new Uint8Array(rawBuf);
+  if (!isPngBytes(va)) throw new Error('Not a valid PNG signature');
+
+  let pos = 8;
+  let width = 0, height = 0, bitDepth = 0, colorType = 0, interlace = 0;
+  const idat = [];
+  let totalIdat = 0;
+
+  while (pos + 8 <= va.length) {
+    const len = ((va[pos] << 24) | (va[pos + 1] << 16) | (va[pos + 2] << 8) | va[pos + 3]) >>> 0;
+    const type = String.fromCharCode(va[pos + 4], va[pos + 5], va[pos + 6], va[pos + 7]);
+    const dataStart = pos + 8;
+    const dataEnd = dataStart + len;
+    if (dataEnd + 4 > va.length) throw new Error(`Truncated PNG chunk: ${type}`);
+
+    if (type === 'IHDR') {
+      width = ((va[dataStart] << 24) | (va[dataStart + 1] << 16) | (va[dataStart + 2] << 8) | va[dataStart + 3]) >>> 0;
+      height = ((va[dataStart + 4] << 24) | (va[dataStart + 5] << 16) | (va[dataStart + 6] << 8) | va[dataStart + 7]) >>> 0;
+      bitDepth = va[dataStart + 8];
+      colorType = va[dataStart + 9];
+      interlace = va[dataStart + 12];
+    } else if (type === 'IDAT') {
+      idat.push(va.subarray(dataStart, dataEnd));
+      totalIdat += len;
+    } else if (type === 'IEND') {
+      break;
+    }
+    pos = dataEnd + 4;
+  }
+
+  if (bitDepth !== 8 || interlace !== 0) throw new Error('Unsupported PNG layout');
+  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType];
+  if (!bpp) throw new Error(`Unsupported PNG colorType=${colorType}`);
+
+  const stride = width * bpp;
+  const expectedRawLen = height * (stride + 1);
+  const targetBuf = new Uint8Array(expectedRawLen);
+
+  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, targetBuf);
+  let inflatedLen = 0;
+  if (isStored) {
+    inflatedLen = expectedRawLen;
+  } else {
+    const ds = new DecompressionStream('deflate');
+    const writer = ds.writable.getWriter();
+    (async () => {
+      try {
+        for (const c of idat) {
+          await writer.write(c);
+        }
+        await writer.close();
+      } catch (_) {}
+    })();
+
+    const reader = ds.readable.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        if (inflatedLen + value.byteLength > expectedRawLen) {
+          try { await reader.cancel(); } catch (_) {}
+          throw new Error(`Inflated size ${inflatedLen + value.byteLength} exceeded expected ${expectedRawLen}`);
+        }
+        targetBuf.set(value, inflatedLen);
+        inflatedLen += value.byteLength;
+      }
+    }
+    if (inflatedLen !== expectedRawLen) {
+      throw new Error(`Truncated DEFLATE stream: got ${inflatedLen}, expected ${expectedRawLen}`);
+    }
+  }
+
+  return { inflatedBytes: inflatedLen, isStored, width, height, stride };
+}
+
+export { decodePngToTs, inflatePngOnly, isPngBytes };
+
 export default {
   async fetch(request, env, ctx) {
     const reqUrl = new URL(request.url);
@@ -233,9 +414,75 @@ export default {
       });
     }
 
-    const action = reqUrl.searchParams.get('action');
+        const action = reqUrl.searchParams.get('action');
     const referer = reqUrl.searchParams.get('referer');
     const origin = reqUrl.searchParams.get('origin');
+
+    // --- BENCHMARK ENDPOINTS FOR RESOURCE & LATENCY AUDIT ---
+    if (action === 'bench_relay' || action === 'bench_inflate' || action === 'bench_decode') {
+      try {
+        let rawBuf;
+        if (request.method === 'POST') {
+          rawBuf = await request.arrayBuffer();
+        } else {
+          const targetUrl = reqUrl.searchParams.get('url');
+          if (!targetUrl) return new Response('Missing target url or POST body', { status: 400 });
+          const fetchRes = await fetch(targetUrl, { headers: request.headers });
+          if (!fetchRes.ok) return new Response(`Fetch failed: ${fetchRes.status}`, { status: fetchRes.status });
+          rawBuf = await fetchRes.arrayBuffer();
+        }
+
+        const t0 = performance.now();
+        if (action === 'bench_relay') {
+          const dt = performance.now() - t0;
+          return new Response(rawBuf, {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/octet-stream',
+              'Access-Control-Allow-Origin': '*',
+              'Server-Timing': `relay;dur=${dt.toFixed(2)}`,
+              'x-relay-time-ms': dt.toFixed(2),
+              'x-bytes-count': String(rawBuf.byteLength)
+            }
+          });
+        }
+
+        if (action === 'bench_inflate') {
+          const result = await inflatePngOnly(rawBuf);
+          const dt = performance.now() - t0;
+          return new Response(JSON.stringify({ ...result, cpuMs: Number(dt.toFixed(2)) }), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+              'Access-Control-Allow-Origin': '*',
+              'Server-Timing': `inflate;dur=${dt.toFixed(2)}`,
+              'x-inflate-time-ms': dt.toFixed(2),
+              'x-inflated-bytes': String(result.inflatedBytes)
+            }
+          });
+        }
+
+        if (action === 'bench_decode') {
+          const tsBytes = await decodePngToTs(rawBuf);
+          const dt = performance.now() - t0;
+          return new Response(tsBytes, {
+            status: 200,
+            headers: {
+              'Content-Type': 'video/mp2t',
+              'Access-Control-Allow-Origin': '*',
+              'Server-Timing': `decode;dur=${dt.toFixed(2)}`,
+              'x-decode-time-ms': dt.toFixed(2),
+              'x-ts-bytes': String(tsBytes.byteLength)
+            }
+          });
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: err.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
     
     // Clone headers from the incoming request
     const newHeaders = new Headers(request.headers);
@@ -679,12 +926,16 @@ export default {
         }
         const rawBuf = await pngRes.arrayBuffer();
         const rawU8 = new Uint8Array(rawBuf);
+        const t0 = performance.now();
         const tsBytes = isPngBytes(rawU8)
           ? await decodePngToTs(rawBuf)
           : (isCloakedImage && rawU8.length > CLOAK_PREFIX_BYTES ? rawU8.subarray(CLOAK_PREFIX_BYTES) : rawU8);
+        const dt = performance.now() - t0;
 
         responseHeaders.set('Content-Type', 'video/mp2t');
         responseHeaders.set('Content-Length', String(tsBytes.byteLength));
+        responseHeaders.set('x-decode-time-ms', dt.toFixed(2));
+        responseHeaders.set('Server-Timing', `decode;dur=${dt.toFixed(2)}`);
         responseHeaders.delete('Content-Range');
         responseHeaders.delete('Accept-Ranges');
         return new Response(tsBytes, {
