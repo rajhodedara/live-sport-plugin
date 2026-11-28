@@ -21,11 +21,11 @@ jobs:
             api_token: CF_API_TOKEN_1
             worker_name: nuvio-proxy
 
-          # # Your 2nd Cloudflare account (rajodedara360)
-          # - proxy_num: 2
-          #   account_id: CF_ACCOUNT_ID_2
-          #   api_token: CF_API_TOKEN_2
-          #   worker_name: nuvio-proxy2
+          # Your 2nd Cloudflare account (rajodedara360)
+          - proxy_num: 2
+            account_id: CF_ACCOUNT_ID_2
+            api_token: CF_API_TOKEN_2
+            worker_name: nuvio-proxy2
 
           # # When you create a 3rd Cloudflare account, add secrets CF_ACCOUNT_ID_3 and CF_API_TOKEN_3, then uncomment below:
           # - proxy_num: 3
