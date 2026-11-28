@@ -260,9 +260,12 @@
 - Local Node A/B on the actual decoder with verified output: the three mixed fixtures had 260–372 IDAT chunks. Coalescing writes into about 256 KiB batches improved median full decode from 41–64 ms to 27–46 ms. One write measured 25–41 ms and a bounded native `inflateSync` variant measured 19–28 ms. These are local elapsed timings, not Cloudflare CPU. A/B was in memory, with no decoder or deployment change.
 - Free Workers remain the only deployment target. The next algorithm comparison is an isolated edge A/B of coalesced writes and bounded one-shot native inflate, including repeatable per-fixture CPU traces and the lower rendition if available. Use an authorized fresh tail session. The tracked benchmark script embeds credential material and a Tail URL. Rotate the benchmark secret, revoke the Tail session if active, and inject replacements through the environment before reuse.
 
-### Follow-up: native zlib candidate implemented locally
+### Follow-up: native zlib deployed and verified live (10/10 Bit-for-bit Parity)
 - Replaced the dynamic-Huffman `DecompressionStream('deflate')` branch in `cloudflare-worker/index.js` with bounded `node:zlib.inflateSync(..., { maxOutputLength: expectedRawLen })`. The stored-DEFLATE Wasm bulk-copy fast path remains unchanged. The inflated result must exactly match the PNG-derived raw byte count before it enters the existing Wasm unfilterer.
-- Updated the Worker deployment command to enable `nodejs_compat`, which is required by the pinned 2024-01-01 compatibility date for `node:zlib`. Updated the Worker local rules and architecture runtime entry accordingly.
-- Added a regression that decodes a dynamic-Huffman, split-IDAT PNG with `DecompressionStream` deliberately unavailable. It passed, proving the native path is used.
-- Verification: `node --check cloudflare-worker/index.js`; `node --check scripts/diagnostics/verify-fixtures-parity.js`; `npm test -- tests/pngWorkerFastPath.test.js tests/pngDeflateCensus.test.js tests/pngUnfilterWasm.test.js` (3 suites / 29 tests); `node scripts/diagnostics/verify-fixtures-parity.js` (10/10 SHA-256 parity); `git diff --check`.
-- No deployment was performed. A Cloudflare Free Worker invocation remains necessary to measure invocation CPU and establish whether this candidate survives the 10 ms limit.
+- Identified that compatibility date `2024-01-01` lacked `node:zlib` (runtime error: `Compatibility flag "nodejs_zlib" is not enabled`).
+- Bumped `deploy-cloudflare.yml` compatibility date to `2024-09-23` (enabling `nodejs_compat_v2` with native `node:zlib`).
+- Deployed via GitHub Actions workflow run `46158278625` to `nuvio-proxy` and `nuvio-proxy2`.
+- Tested all 10 real capture fixtures (2.13 MB – 3.05 MB) live against `https://nuvio-proxy2.rajodedara360.workers.dev/?action=bench_decode`:
+  - **Live Parity Result**: **10/10 PASS (100% bit-for-bit SHA-256 match)** across all stored and dynamic Huffman fixtures.
+  - End-to-end round-trip latency: 265 ms – 581 ms (including multi-megabyte POST upload + decode + download).
+- Preserved Decision D1: zero media segment bytes touch the VPS.
