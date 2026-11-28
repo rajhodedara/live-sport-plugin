@@ -1,6 +1,7 @@
 'use strict';
 const { createSharedOutboundFetch } = require('../src/services/SharedOutboundFetch');
 const { providerRequestHeaders } = require('../src/services/ProviderRequestHeaders');
+const { isSportsbiteTarget, selectGuardedEgress } = require('../src/services/GuardedEgressPolicy');
 const result = status => ({ ok: status === 200, status, text: async () => 'fixture' });
 const originalWarp = process.env.WARP_PROXY_URL;
 afterEach(() => {
@@ -130,3 +131,50 @@ test('DamiTV with WARP uses native vanilla profile and does not fall back to Und
     if (previous === undefined) delete process.env.WARP_PROXY_URL; else process.env.WARP_PROXY_URL = previous;
   }
 });
+
+test('routes sportsbite.org and subdomains through WARP_PROXY_URL when configured', () => {
+  process.env.WARP_PROXY_URL = 'socks5://127.0.0.1:40000';
+  expect(isSportsbiteTarget('https://sportsbite.org/api/forestgump/matches')).toBe(true);
+  expect(isSportsbiteTarget('https://cdn.sportsbite.org/selfhost/embed/s-1')).toBe(true);
+  expect(isSportsbiteTarget('https://notsportsbite.org/')).toBe(false);
+  expect(isSportsbiteTarget('https://sportsbite.org.evil.com/')).toBe(false);
+
+  expect(selectGuardedEgress('https://sportsbite.org/api/forestgump/matches')).toEqual({
+    proxyUrl: 'socks5://127.0.0.1:40000',
+    profile: 'vanilla'
+  });
+});
+
+test('sportsbite.org ignores DAMITV_PROXY_URL, uses chrome when WARP_PROXY_URL is unset, and honors explicit proxyUrl: null', () => {
+  delete process.env.WARP_PROXY_URL;
+  const prevDamitv = process.env.DAMITV_PROXY_URL;
+  process.env.DAMITV_PROXY_URL = 'socks5://127.0.0.1:40001';
+  try {
+    expect(selectGuardedEgress('https://sportsbite.org/api/forestgump/matches')).toEqual({
+      proxyUrl: null,
+      profile: 'chrome'
+    });
+    process.env.WARP_PROXY_URL = 'socks5://127.0.0.1:40000';
+    expect(selectGuardedEgress('https://sportsbite.org/api/forestgump/matches', { proxyUrl: null })).toEqual({
+      proxyUrl: null,
+      profile: 'chrome'
+    });
+  } finally {
+    if (prevDamitv === undefined) delete process.env.DAMITV_PROXY_URL;
+    else process.env.DAMITV_PROXY_URL = prevDamitv;
+  }
+});
+
+test('sportsbite.org proxy 403 does not escape via direct fallback', async () => {
+  process.env.WARP_PROXY_URL = 'socks5://127.0.0.1:40000';
+  const nativeFetch = jest.fn(async () => result(403));
+  const fallbackFetch = jest.fn();
+  const fetch = createSharedOutboundFetch({ nativeFetch, fallbackFetch });
+  expect((await fetch('https://sportsbite.org/api/forestgump/matches')).status).toBe(403);
+  expect(nativeFetch.mock.calls[0][1]).toMatchObject({
+    profile: 'vanilla',
+    proxyUrl: 'socks5://127.0.0.1:40000'
+  });
+  expect(fallbackFetch).not.toHaveBeenCalled();
+});
+

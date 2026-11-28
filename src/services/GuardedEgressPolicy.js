@@ -23,14 +23,22 @@ function isDamitvMediaTarget(value) {
   catch (_) { return false; }
 }
 
+function isSportsbiteTarget(value) {
+  const host = hostnameOf(value);
+  return host === 'sportsbite.org' || host.endsWith('.sportsbite.org');
+}
+
 function selectGuardedEgress(url, options = {}, environment = process.env) {
   const dami = isDamitvTarget(url);
+  const sportsbite = isSportsbiteTarget(url);
   // An explicit null is the caller's direct-egress choice, not a missing value.
   // Resolve this once per request and retain it throughout its redirect chain.
-  const configuredProxy = dami ? environment.WARP_PROXY_URL || environment.DAMITV_PROXY_URL : null;
+  const configuredProxy = dami
+    ? environment.WARP_PROXY_URL || environment.DAMITV_PROXY_URL
+    : (sportsbite ? environment.WARP_PROXY_URL : null);
   const proxyUrl = Object.hasOwn(options, 'proxyUrl') ? options.proxyUrl || null : configuredProxy || null;
   const profile = options.profile || (proxyUrl || dami ? 'vanilla' : 'chrome');
   return { proxyUrl, profile };
 }
 
-module.exports = { isDamitvTarget, isDamitvMediaTarget, selectGuardedEgress };
+module.exports = { isDamitvTarget, isDamitvMediaTarget, isSportsbiteTarget, selectGuardedEgress };
