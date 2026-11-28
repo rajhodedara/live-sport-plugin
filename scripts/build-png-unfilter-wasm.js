@@ -306,6 +306,52 @@ const WAT_SOURCE = `(module
 
     (return (i32.const 0))
   )
+
+  ;; Fast Adler-32 in WebAssembly (chunked 5552 bytes before modulo)
+  (func (export "adler32") (param $ptr i32) (param $len i32) (result i32)
+    (local $s1 i32)
+    (local $s2 i32)
+    (local $end i32)
+    (local $chunkEnd i32)
+    (local.set $s1 (i32.const 1))
+    (local.set $s2 (i32.const 0))
+    (local.set $end (i32.add (local.get $ptr) (local.get $len)))
+
+    (block $outer_break
+      (loop $outer_loop
+        (br_if $outer_break (i32.ge_u (local.get $ptr) (local.get $end)))
+
+        ;; chunkEnd = min(ptr + 5552, end)
+        (local.set $chunkEnd (i32.add (local.get $ptr) (i32.const 5552)))
+        (if (i32.gt_u (local.get $chunkEnd) (local.get $end))
+          (then (local.set $chunkEnd (local.get $end)))
+        )
+
+        (block $inner_break
+          (loop $inner_loop
+            (br_if $inner_break (i32.ge_u (local.get $ptr) (local.get $chunkEnd)))
+
+            ;; s1 += memory[ptr]
+            (local.set $s1 (i32.add (local.get $s1) (i32.load8_u (local.get $ptr))))
+            ;; s2 += s1
+            (local.set $s2 (i32.add (local.get $s2) (local.get $s1)))
+
+            (local.set $ptr (i32.add (local.get $ptr) (i32.const 1)))
+            (br $inner_loop)
+          )
+        )
+
+        ;; s1 %= 65521
+        (local.set $s1 (i32.rem_u (local.get $s1) (i32.const 65521)))
+        ;; s2 %= 65521
+        (local.set $s2 (i32.rem_u (local.get $s2) (i32.const 65521)))
+
+        (br $outer_loop)
+      )
+    )
+
+    (return (i32.or (i32.shl (local.get $s2) (i32.const 16)) (local.get $s1)))
+  )
 )
 `;
 

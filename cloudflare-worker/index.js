@@ -80,7 +80,7 @@ function isPngBytes(u8) {
     u8[4] === 0x0d && u8[5] === 0x0a && u8[6] === 0x1a && u8[7] === 0x0a;
 }
 
-function tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8) {
+function tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8, wasmInstance = null) {
   if (totalIdat < 11) return false;
 
   let chunkIdx = 0;
@@ -175,12 +175,18 @@ function tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8) {
   }
   const streamAdler = (((a0 << 24) | (a1 << 16) | (a2 << 8) | a3) >>> 0);
 
-  let s1 = 1, s2 = 0;
-  for (let i = 0; i < expectedRawLen; i++) {
-    s1 = (s1 + memU8[i]) % 65521;
-    s2 = (s2 + s1) % 65521;
+  let calcAdler;
+  if (wasmInstance && typeof wasmInstance.exports?.adler32 === 'function') {
+    calcAdler = (wasmInstance.exports.adler32(0, expectedRawLen) >>> 0);
+  } else {
+    let s1 = 1, s2 = 0;
+    for (let i = 0; i < expectedRawLen; i++) {
+      s1 = (s1 + memU8[i]) % 65521;
+      s2 = (s2 + s1) % 65521;
+    }
+    calcAdler = (((s2 << 16) | s1) >>> 0);
   }
-  const calcAdler = (((s2 << 16) | s1) >>> 0);
+
   if (streamAdler !== calcAdler) {
     throw new Error(`Adler-32 checksum mismatch: stream=0x${streamAdler.toString(16)}, calc=0x${calcAdler.toString(16)}`);
   }
@@ -253,7 +259,7 @@ async function decodePngToTs(arrayBuf) {
   const memU8 = new Uint8Array(memory.buffer);
 
   // Attempt fast stored-block bulk copy path first
-  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8);
+  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, memU8, instance);
 
   if (!isStored) {
     // General decoder: stream IDAT directly to DecompressionStream into pre-allocated Wasm memory
@@ -357,9 +363,18 @@ async function inflatePngOnly(rawBuf) {
 
   const stride = width * bpp;
   const expectedRawLen = height * (stride + 1);
-  const targetBuf = new Uint8Array(expectedRawLen);
 
-  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, targetBuf);
+  const instance = pngUnfilterWasm instanceof WebAssembly.Module
+    ? new WebAssembly.Instance(pngUnfilterWasm)
+    : (await WebAssembly.instantiate(pngUnfilterWasm)).instance;
+  const memory = instance.exports.memory;
+  if (expectedRawLen > memory.buffer.byteLength) {
+    const pages = Math.ceil((expectedRawLen - memory.buffer.byteLength) / 65536);
+    memory.grow(pages);
+  }
+  const targetBuf = new Uint8Array(memory.buffer);
+
+  const isStored = tryFastStoredDeflate(idat, totalIdat, expectedRawLen, targetBuf, instance);
   let inflatedLen = 0;
   if (isStored) {
     inflatedLen = expectedRawLen;
@@ -414,34 +429,51 @@ export default {
       });
     }
 
-        const action = reqUrl.searchParams.get('action');
+    const action = reqUrl.searchParams.get('action');
     const referer = reqUrl.searchParams.get('referer');
     const origin = reqUrl.searchParams.get('origin');
 
-    // --- BENCHMARK ENDPOINTS FOR RESOURCE & LATENCY AUDIT ---
+    // --- SECURED BENCHMARK ENDPOINTS FOR CANARY MEASUREMENTS ---
     if (action === 'bench_relay' || action === 'bench_inflate' || action === 'bench_decode') {
+      const benchToken = request.headers.get('x-bench-token');
+      const secret = env?.BENCHMARK_TOKEN || env?.BENCH_SECRET;
+      if (!secret || !benchToken || benchToken !== secret) {
+        return new Response(JSON.stringify({ error: 'Unauthorized benchmark access' }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
+      if (request.method !== 'POST') {
+        return new Response(JSON.stringify({ error: 'Benchmark requests must be POST with body payload' }), {
+          status: 405,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
+      const contentLength = parseInt(request.headers.get('content-length') || '0', 10);
+      if (contentLength > 10 * 1024 * 1024) {
+        return new Response(JSON.stringify({ error: 'Payload exceeds 10MB limit' }), {
+          status: 413,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+
       try {
-        let rawBuf;
-        if (request.method === 'POST') {
-          rawBuf = await request.arrayBuffer();
-        } else {
-          const targetUrl = reqUrl.searchParams.get('url');
-          if (!targetUrl) return new Response('Missing target url or POST body', { status: 400 });
-          const fetchRes = await fetch(targetUrl, { headers: request.headers });
-          if (!fetchRes.ok) return new Response(`Fetch failed: ${fetchRes.status}`, { status: fetchRes.status });
-          rawBuf = await fetchRes.arrayBuffer();
+        const rawBuf = await request.arrayBuffer();
+        if (rawBuf.byteLength > 10 * 1024 * 1024) {
+          return new Response(JSON.stringify({ error: 'Payload exceeds 10MB limit' }), {
+            status: 413,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
         }
 
-        const t0 = performance.now();
         if (action === 'bench_relay') {
-          const dt = performance.now() - t0;
           return new Response(rawBuf, {
             status: 200,
             headers: {
               'Content-Type': 'application/octet-stream',
               'Access-Control-Allow-Origin': '*',
-              'Server-Timing': `relay;dur=${dt.toFixed(2)}`,
-              'x-relay-time-ms': dt.toFixed(2),
               'x-bytes-count': String(rawBuf.byteLength)
             }
           });
@@ -449,14 +481,11 @@ export default {
 
         if (action === 'bench_inflate') {
           const result = await inflatePngOnly(rawBuf);
-          const dt = performance.now() - t0;
-          return new Response(JSON.stringify({ ...result, cpuMs: Number(dt.toFixed(2)) }), {
+          return new Response(JSON.stringify(result), {
             status: 200,
             headers: {
               'Content-Type': 'application/json',
               'Access-Control-Allow-Origin': '*',
-              'Server-Timing': `inflate;dur=${dt.toFixed(2)}`,
-              'x-inflate-time-ms': dt.toFixed(2),
               'x-inflated-bytes': String(result.inflatedBytes)
             }
           });
@@ -464,14 +493,11 @@ export default {
 
         if (action === 'bench_decode') {
           const tsBytes = await decodePngToTs(rawBuf);
-          const dt = performance.now() - t0;
           return new Response(tsBytes, {
             status: 200,
             headers: {
               'Content-Type': 'video/mp2t',
               'Access-Control-Allow-Origin': '*',
-              'Server-Timing': `decode;dur=${dt.toFixed(2)}`,
-              'x-decode-time-ms': dt.toFixed(2),
               'x-ts-bytes': String(tsBytes.byteLength)
             }
           });
@@ -926,16 +952,12 @@ export default {
         }
         const rawBuf = await pngRes.arrayBuffer();
         const rawU8 = new Uint8Array(rawBuf);
-        const t0 = performance.now();
         const tsBytes = isPngBytes(rawU8)
           ? await decodePngToTs(rawBuf)
           : (isCloakedImage && rawU8.length > CLOAK_PREFIX_BYTES ? rawU8.subarray(CLOAK_PREFIX_BYTES) : rawU8);
-        const dt = performance.now() - t0;
 
         responseHeaders.set('Content-Type', 'video/mp2t');
         responseHeaders.set('Content-Length', String(tsBytes.byteLength));
-        responseHeaders.set('x-decode-time-ms', dt.toFixed(2));
-        responseHeaders.set('Server-Timing', `decode;dur=${dt.toFixed(2)}`);
         responseHeaders.delete('Content-Range');
         responseHeaders.delete('Accept-Ranges');
         return new Response(tsBytes, {

@@ -5,27 +5,35 @@ const path = require('path');
 const crypto = require('crypto');
 
 const WORKER_URL = process.env.WORKER_URL || 'https://nuvio-proxy.odedararaj456.workers.dev';
+const BENCHMARK_TOKEN = process.env.BENCHMARK_TOKEN || process.env.BENCH_SECRET || '';
 
 function percentile(arr, p) {
-  if (!arr.length) return 0;
-  const sorted = [...arr].sort((a, b) => a - b);
+  if (!arr || !arr.length) return null;
+  const valid = arr.filter(v => typeof v === 'number' && !isNaN(v));
+  if (!valid.length) return null;
+  const sorted = [...valid].sort((a, b) => a - b);
   const idx = Math.min(Math.floor((p / 100) * sorted.length), sorted.length - 1);
   return sorted[idx];
 }
 
-async function postWorker(action, buffer, timeoutMs = 15000) {
+async function postWorker(action, buffer, timeoutMs = 20000) {
   const url = `${WORKER_URL}/?action=${action}`;
   const t0 = performance.now();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
+  const headers = {
+    'Content-Type': 'application/octet-stream',
+    'User-Agent': 'NuvioBenchSoak/2.0'
+  };
+  if (BENCHMARK_TOKEN) {
+    headers['x-bench-token'] = BENCHMARK_TOKEN;
+  }
+
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'User-Agent': 'NuvioBenchSoak/1.0'
-      },
+      headers,
       body: buffer,
       signal: controller.signal
     });
@@ -33,33 +41,39 @@ async function postWorker(action, buffer, timeoutMs = 15000) {
     const wallMs = performance.now() - t0;
 
     const status = res.status;
-    const decodeHeader = res.headers.get('x-decode-time-ms');
-    const inflateHeader = res.headers.get('x-inflate-time-ms');
-    const relayHeader = res.headers.get('x-relay-time-ms');
-    const serverTiming = res.headers.get('server-timing') || '';
+    const cfRay = res.headers.get('cf-ray') || 'missing_ray';
 
-    const workerCpuMs = decodeHeader ? parseFloat(decodeHeader) :
-                        (inflateHeader ? parseFloat(inflateHeader) :
-                        (relayHeader ? parseFloat(relayHeader) : null));
+    // Cloudflare Workers internal execution telemetry (only present via Tail / Trace events)
+    // performance.now() inside worker is disabled to prevent Spectre / inaccurate measurements.
+    const cloudflareCpuMs = null; // Unsampled directly from response headers
 
     if (!res.ok) {
       const errText = await res.text();
-      let outcome = `HTTP ${status}`;
+      let outcome = `http_${status}`;
       if (errText.includes('1102') || status === 530) {
-        outcome = errText.includes('memory') ? 'exceededMemory (1102)' : 'exceededCpu (1102)';
+        // HTTP 1102 does not differentiate exceededCpu from exceededMemory on client side
+        outcome = 'resource_limit_1102 (undifferentiated: exceededCpu or exceededMemory without Cloudflare Trace)';
       }
-      return { ok: false, status, outcome, errText, wallMs, workerCpuMs };
+      return {
+        ok: false,
+        status,
+        cfRay,
+        outcome,
+        errText: errText.slice(0, 300),
+        wallMs,
+        cloudflareCpuMs
+      };
     }
 
     const bodyBuf = Buffer.from(await res.arrayBuffer());
     return {
       ok: true,
       status,
+      cfRay,
       outcome: 'success',
       bodyBuf,
       wallMs,
-      workerCpuMs,
-      serverTiming
+      cloudflareCpuMs
     };
   } catch (err) {
     clearTimeout(timeout);
@@ -67,21 +81,28 @@ async function postWorker(action, buffer, timeoutMs = 15000) {
     return {
       ok: false,
       status: 0,
-      outcome: err.name === 'AbortError' ? 'timeout' : err.message,
+      cfRay: 'network_error',
+      outcome: err.name === 'AbortError' ? 'timeout' : `error: ${err.message}`,
       errText: err.message,
       wallMs,
-      workerCpuMs: null
+      cloudflareCpuMs: null
     };
   }
 }
 
 async function runBenchmark(fixturesDir, refHashes) {
   console.log(`\n======================================================`);
-  console.log(`RUNNING ISOLATED FREE WORKER BENCHMARK: ${WORKER_URL}`);
+  console.log(`RUNNING SECURED FREE WORKER BENCHMARK: ${WORKER_URL}`);
+  console.log(`Benchmark Token: ${BENCHMARK_TOKEN ? '[PROVIDED]' : '[NOT SET - Expect 403]'}`);
   console.log(`Operations: bench_relay, bench_inflate, bench_decode`);
   console.log(`======================================================\n`);
 
   const results = {
+    metadata: {
+      workerUrl: WORKER_URL,
+      timestamp: new Date().toISOString(),
+      note: 'Worker CPU values are set to null when Cloudflare Trace / Tail telemetry is absent. Never estimated from wall-clock.'
+    },
     relay: {},
     inflate: {},
     decode: {}
@@ -97,25 +118,30 @@ async function runBenchmark(fixturesDir, refHashes) {
     for (const op of ops) {
       const stage = op.replace('bench_', '');
       const iterations = 5; // 1 cold + 4 warm
-      const cpuTimes = [];
       const wallTimes = [];
+      const cpuTimes = [];
+      const cfRays = [];
       let lastOutcome = 'unknown';
+      let lastStatus = 0;
       let hashMatch = true;
 
       for (let i = 0; i < iterations; i++) {
         const isCold = (i === 0);
         const res = await postWorker(op, pngBuf);
         lastOutcome = res.outcome;
+        lastStatus = res.status;
+        cfRays.push(res.cfRay);
 
         if (!res.ok) {
-          console.error(`  [${stage}] iter ${i + 1} (${isCold ? 'cold' : 'warm'}): FAILED - ${res.outcome}`);
+          console.error(`  [${stage}] iter ${i + 1} (${isCold ? 'cold' : 'warm'}): FAILED - ${res.outcome} [Ray: ${res.cfRay}]`);
           hashMatch = false;
           break;
         }
 
-        const cpu = res.workerCpuMs !== null ? res.workerCpuMs : 0;
-        cpuTimes.push(cpu);
         wallTimes.push(res.wallMs);
+        if (res.cloudflareCpuMs !== null) {
+          cpuTimes.push(res.cloudflareCpuMs);
+        }
 
         if (stage === 'decode') {
           const hash = crypto.createHash('sha256').update(res.bodyBuf).digest('hex');
@@ -129,20 +155,24 @@ async function runBenchmark(fixturesDir, refHashes) {
       const p50 = percentile(cpuTimes, 50);
       const p95 = percentile(cpuTimes, 95);
       const p99 = percentile(cpuTimes, 99);
-      const coldCpu = cpuTimes[0] !== undefined ? cpuTimes[0] : 0;
+      const coldCpu = cpuTimes.length > 0 ? cpuTimes[0] : null;
 
       results[stage][ref.file] = {
         size: pngBuf.length,
+        httpStatus: lastStatus,
+        cfRays,
         outcome: lastOutcome,
         hashMatch,
-        coldCpu,
-        p50,
-        p95,
-        p99,
-        wallAvg: wallTimes.length ? wallTimes.reduce((a, b) => a + b, 0) / wallTimes.length : 0
+        cloudflare: {
+          cpu_time_ms_cold: coldCpu,
+          cpu_time_ms_p50: p50,
+          cpu_time_ms_p95: p95,
+          cpu_time_ms_p99: p99,
+          wall_time_ms_avg: wallTimes.length ? wallTimes.reduce((a, b) => a + b, 0) / wallTimes.length : null
+        }
       };
 
-      console.log(`  ${stage.toUpperCase().padEnd(8)}: outcome=${lastOutcome} | cold=${coldCpu.toFixed(2)}ms | p50=${p50.toFixed(2)}ms | p95=${p95.toFixed(2)}ms | p99=${p99.toFixed(2)}ms | hash=${hashMatch ? 'OK' : 'MISMATCH'}`);
+      console.log(`  ${stage.toUpperCase().padEnd(8)}: outcome=${lastOutcome} | http=${lastStatus} | wallAvg=${results[stage][ref.file].cloudflare.wall_time_ms_avg ? results[stage][ref.file].cloudflare.wall_time_ms_avg.toFixed(1) + 'ms' : 'N/A'} | cpuTelemetry=${p50 !== null ? p50.toFixed(2) + 'ms' : 'null'} | hash=${hashMatch ? 'OK' : 'MISMATCH'}`);
     }
     console.log('');
   }
@@ -152,8 +182,8 @@ async function runBenchmark(fixturesDir, refHashes) {
 
 async function runSoak(fixturesDir, refHashes, durationSec = 1800, intervalMs = 2000) {
   console.log(`\n======================================================`);
-  console.log(`RUNNING 30-MINUTE LIVE CADENCE SOAK: ${WORKER_URL}`);
-  console.log(`Duration: ${durationSec}s | Cadence: 1 segment every ${intervalMs}ms`);
+  console.log(`STARTING LIVE CADENCE SOAK: ${WORKER_URL}`);
+  console.log(`Target Duration: ${durationSec}s | Cadence: 1 segment every ${intervalMs}ms`);
   console.log(`======================================================\n`);
 
   const startTime = Date.now();
@@ -161,7 +191,7 @@ async function runSoak(fixturesDir, refHashes, durationSec = 1800, intervalMs = 
   let segIndex = 0;
   let successCount = 0;
   let failCount = 0;
-  const cpuHistory = [];
+  const history = [];
   const failures = [];
 
   while (Date.now() < endTime) {
@@ -176,22 +206,38 @@ async function runSoak(fixturesDir, refHashes, durationSec = 1800, intervalMs = 
 
     if (!res.ok) {
       failCount++;
-      failures.push({ segIndex, file: ref.file, outcome: res.outcome, err: res.errText });
-      console.error(`[FAIL] Seg #${segIndex} (${ref.file}): ${res.outcome}`);
+      failures.push({
+        segIndex,
+        file: ref.file,
+        status: res.status,
+        cfRay: res.cfRay,
+        outcome: res.outcome,
+        errText: res.errText
+      });
+      console.error(`[FAIL] Seg #${segIndex} (${ref.file}): status=${res.status} [Ray: ${res.cfRay}] outcome=${res.outcome}`);
+      // If circuit breaker / resource limit encountered, stop soak cleanly
+      if (res.outcome.includes('1102') || res.status === 530 || res.status === 503) {
+        console.error(`[SOAK STOPPED] Edge resource limit encountered at segment ${segIndex}. Stopping soak per test criteria.`);
+        break;
+      }
     } else {
       const hash = crypto.createHash('sha256').update(res.bodyBuf).digest('hex');
       const hashOk = (hash === ref.tsSha256);
       if (!hashOk) {
         failCount++;
-        failures.push({ segIndex, file: ref.file, outcome: 'hash_mismatch' });
-        console.error(`[FAIL] Seg #${segIndex} (${ref.file}): HASH MISMATCH`);
+        failures.push({ segIndex, file: ref.file, cfRay: res.cfRay, outcome: 'hash_mismatch' });
+        console.error(`[FAIL] Seg #${segIndex} (${ref.file}): HASH MISMATCH [Ray: ${res.cfRay}]`);
       } else {
         successCount++;
-        const cpu = res.workerCpuMs !== null ? res.workerCpuMs : 0;
-        cpuHistory.push(cpu);
+        history.push({
+          segIndex,
+          file: ref.file,
+          cfRay: res.cfRay,
+          wallMs: res.wallMs
+        });
         if (segIndex % 10 === 0 || segIndex <= 5) {
           const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(0);
-          console.log(`[SOAK] Seg #${segIndex} (${ref.file}) | elapsed: ${elapsedSec}s/${durationSec}s | workerCpu: ${cpu.toFixed(2)}ms | wall: ${res.wallMs.toFixed(0)}ms | hash: OK`);
+          console.log(`[SOAK] Seg #${segIndex} (${ref.file}) | elapsed: ${elapsedSec}s/${durationSec}s | wall: ${res.wallMs.toFixed(0)}ms | ray: ${res.cfRay} | hash: OK`);
         }
       }
     }
@@ -202,27 +248,25 @@ async function runSoak(fixturesDir, refHashes, durationSec = 1800, intervalMs = 
     }
   }
 
-  const p50 = percentile(cpuHistory, 50);
-  const p95 = percentile(cpuHistory, 95);
-  const p99 = percentile(cpuHistory, 99);
+  const actualDurationSec = ((Date.now() - startTime) / 1000).toFixed(1);
+  const isComplete = (Date.now() >= endTime);
 
   console.log(`\n======================================================`);
-  console.log(`SOAK COMPLETED`);
+  console.log(`SOAK RUN SUMMARY`);
+  console.log(`Status:         ${isComplete ? 'COMPLETED FULL 30 MINUTES' : 'STOPPED EARLY'}`);
+  console.log(`Run duration:   ${actualDurationSec}s / ${durationSec}s`);
   console.log(`Total segments: ${segIndex}`);
   console.log(`Successful:     ${successCount}`);
   console.log(`Failed:         ${failCount}`);
-  console.log(`CPU p50:        ${p50.toFixed(2)} ms`);
-  console.log(`CPU p95:        ${p95.toFixed(2)} ms`);
-  console.log(`CPU p99:        ${p99.toFixed(2)} ms`);
   console.log(`======================================================\n`);
 
   return {
+    isComplete,
+    actualDurationSec: Number(actualDurationSec),
+    targetDurationSec: durationSec,
     totalSegments: segIndex,
     successCount,
     failCount,
-    p50,
-    p95,
-    p99,
     failures
   };
 }

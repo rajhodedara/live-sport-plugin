@@ -99,7 +99,7 @@ function makeSyntheticPng(targetBytes, mode = 'deflate') {
 }
 
 async function run() {
-  console.log('--- Benchmarking CPU vs Segment Size (Desktop Node 22 V8) ---');
+  console.log('--- LOCAL-ONLY Synthetic Benchmark: CPU vs Segment Size (Desktop Node 22 V8 x86_64, NOT Cloudflare edge telemetry) ---');
   const sizes = [
     { label: '300 KB (Low-res/audio)', bytes: 300 * 1024 },
     { label: '600 KB (480p rendition)', bytes: 600 * 1024 },

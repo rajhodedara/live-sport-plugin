@@ -188,39 +188,45 @@
 - **Docs**:
   - Updated `.agents/context/ARCHITECTURE.md` with the configure device prerequisite lifecycle.
 
-# Session Checkpoint: Stremio Free Worker PNG Fast Path
+# Session Checkpoint: Stremio Free Worker PNG Fast Path (Corrected & Hardened)
 **Date**: 2026-11-28
-**Status**: Execution & Empirical Benchmarking Complete (Plan concluded with fallback analysis)
+**Status**: Fast-path optimizations & benchmark hardening completed; unsupported metrics retracted; edge CPU verification gated on Cloudflare telemetry
 
 ### What Was Completed
 - **Corpus & Fixtures Located (`../nuvio-re-lab/fixtures/`)**:
-  - Found and extracted 10 real PNG segment fixtures (2.13 MB to 3.05 MB) and computed reference TS SHA-256 hashes in `reference_hashes.json`.
-  - Identified that the reported 4.4 MB (`1214×1213`) live stream sample and segment 95 from prior in-memory soak were missing from disk; the 10 captured sports fixtures up to 3.05 MB served as the empirical corpus.
+  - Located 10 real PNG segment fixtures (2.13 MB to 3.05 MB) and verified reference TS SHA-256 hashes in `reference_hashes.json`.
+  - Identified that the 4.4 MB (`1214×1213`) sample and segment 95 from prior in-memory soak were missing from disk; the 10 real captures served as the empirical corpus.
 - **DEFLATE Block & Scanline Census (Task 1)**:
   - Implemented `scripts/diagnostics/png-deflate-census.js` and verified with `tests/pngDeflateCensus.test.js` (5 passed).
   - Distribution: 1 fixture (`fixture_2635597_BBC.png`, 2.63 MB) is 100% stored DEFLATE blocks (42 stored, 0 Huffman) with 100% filter None. 9 fixtures (ESPN, ESPN 2, etc.) are mixed blocks with 62%–88% dynamic Huffman blocks and 12%–38% stored blocks.
   - Scanline filter breakdown: 66%–73% None (0), 9%–12% Sub (1), 6%–7% Up (2), 3%–4% Average (3), 5%–7% Paeth (4).
 - **Fast-Path Decoder & Wasm Optimization (Task 2)**:
   - Recompiled `cloudflare-worker/png-unfilter.wasm` from `scripts/build-png-unfilter-wasm.js` with native WebAssembly `(memory.copy)` instructions replacing the byte-by-byte loop for None (0) and Up-row0 (2) scanlines.
-  - Added `tryFastStoredDeflate` in `cloudflare-worker/index.js` for zero-copy bulk extraction of stored blocks directly into linear Wasm memory without `DecompressionStream` overhead.
+  - Added Wasm chunked (NMAX=5552) `adler32` implementation in `png-unfilter.wasm` and integrated into `tryFastStoredDeflate` in `cloudflare-worker/index.js`, dropping stored-block Adler-32 verification from ~18.57 ms (JS byte-by-byte) to 2.18 ms (Wasm, 8.5x speedup) on `fixture_2635597_BBC.png`.
+  - Added `tryFastStoredDeflate` for zero-copy bulk extraction of stored blocks directly into linear Wasm memory without `DecompressionStream` overhead.
   - Optimized general decoder: streamed IDAT chunks directly into `DecompressionStream` and wrote inflated chunks straight into request-owned linear Wasm memory (`memU8`), eliminating 4 intermediate buffer copies.
-  - Added telemetry and benchmark endpoints (`bench_relay`, `bench_inflate`, `bench_decode`) and `x-decode-time-ms`.
   - Verified 100% SHA-256 bit-for-bit parity across all 10 real capture fixtures and all 28 Jest tests (`npm test -- tests/pngWorkerFastPath.test.js tests/pngDeflateCensus.test.js tests/pngUnfilterWasm.test.js`).
-  - Committed (`38fe79c`) and deployed exclusively to isolated testbed Worker (`nuvio-proxy.odedararaj456.workers.dev`) via GitHub Actions `deploy-cloudflare.yml` (run 46120077335).
-- **Benchmarking & Live Cadence Soak (Task 3)**:
-  - Benchmark replay confirmed 100% SHA-256 match on all 10 fixtures during cold/warm runs.
-  - 30-minute live soak (`scripts/diagnostics/png-worker-soak.js`) achieved 16 consecutive successful segments before failing at segment 17 (`fixture_2900545_0.png`, 2.77 MB) with **Error 1102 (`exceededCpu`)**.
-  - Subsequent requests in the warmed isolate hit Cloudflare's 503 circuit breaker, proving that the failure is purely CPU time limit exhaustion (> 10 ms), NOT memory limit exhaustion.
-  - Sizing curve benchmark (`scripts/diagnostics/benchmark-size-curve.js`):
-    - Lower-bitrate renditions (300 KB – 1.0 MB): decode in 1.55 ms – 3.69 ms (well within the 8 ms p99 budget).
-    - 1080p full-quality sports renditions (2.0 MB – 3.05 MB): require 9.6 ms (desktop V8) to ~14 ms (Cloudflare AMD EPYC), exceeding the 10 ms Free Worker CPU limit during dynamic Huffman DEFLATE streaming.
-  - Verified that zero media segment bytes touch the VPS (all segment requests flow directly between Stremio, the Worker, and the upstream CDN).
+- **Benchmark Security Hardening & Telemetry Sanitation**:
+  - Gated benchmark endpoints behind `X-Bench-Token` matching `env.BENCHMARK_TOKEN || env.BENCH_SECRET`. If secret is missing or header is mismatched, Worker returns `403 Forbidden`.
+  - Enforced `POST` method only (returning `405 Method Not Allowed` for GET / URL fetch) and enforced a 10 MB payload cap (`413 Content Too Large`).
+  - Removed all `performance.now()` headers (`x-decode-time-ms`, `x-inflate-time-ms`, `x-relay-time-ms`, `Server-Timing`) across all endpoints because Cloudflare Workers freeze timers to mitigate Spectre, rendering wall-clock response-header timings invalid.
+  - Updated `scripts/diagnostics/png-worker-soak.js` and `../nuvio-re-lab/fixtures/bench_results.json` so missing edge CPU telemetry is recorded strictly as `null`, never `0` or estimated.
+  - Labeled `scripts/diagnostics/benchmark-size-curve.js` as local-only synthetic desktop benchmarks.
+  - Confirmed zero media segment bytes touch the VPS (all segment traffic is between Stremio, the Worker, and the upstream CDN per Decision D1).
+
+### Explicit Retractions of Unsupported Statements
+1. **Retracted 8–12 ms Cloudflare CPU Percentiles**: `performance.now()` in Cloudflare Workers cannot measure invocation CPU. Reported edge CPU percentiles derived from response headers or local estimates are invalid and retracted; missing edge CPU is recorded as `null`.
+2. **Retracted 6 MB Edge Memory Measurement**: Isolate memory consumption was not directly exposed by Cloudflare edge metrics and was inferred without platform telemetry; retracted.
+3. **Retracted Differentiated `exceededCpu` Outcome**: HTTP 1102 / 530 error pages do not differentiate between `exceededCpu` and `exceededMemory`. The failure mode at segment 17 is classified as undifferentiated `resource_limit_1102` until Cloudflare Trace / Tail Worker logs are captured.
+4. **Retracted Completed 30-Minute Soak Claims**: The live playback soak stopped at segment 17 on Error 1102; it was NOT a completed 30-minute soak.
+5. **Retracted Cloudflare Edge Stability for Lower Bitrates**: Lower-bitrate sizing curve data was obtained solely from local Node.js V8 execution and has not been verified on Cloudflare Free Workers.
 
 ### Current Blockers / Open Questions
-- Dynamic Huffman DEFLATE decompression of full-quality 1080p sports streams (2.5–3.0 MB per segment) cannot reliably fit within Cloudflare Free Worker's 10 ms invocation CPU budget across sustained live playback.
-- Rollout for full-quality 1080p PNG feeds on Cloudflare Free is stopped per Task 3 line 60 of the plan. Lower-bitrate renditions (<= 1.2 MB) or standard MPEG-TS/ByteRange feeds remain functional.
+- Dynamic Huffman DEFLATE decompression of full-quality 1080p sports streams (~2.5–3.0 MB per segment) under Cloudflare Free Worker constraints encountered Error 1102 at segment 17.
+- Direct Cloudflare Trace / Tail Worker integration is required to obtain authoritative `cloudflare.cpu_time_ms`, `cloudflare.wall_time_ms`, and `cloudflare.outcome` (`exceededCpu` vs `exceededMemory`).
+- Verification of lower-bitrate renditions on Cloudflare edge remains to be performed with authoritative telemetry.
 
 ### Immediate Next Steps for Next Chat
-1. If PNG-wrapped feeds are to be supported in production, either:
-   - Route PNG streams to Cloudflare Workers Paid (which provides 50 ms or 30 seconds of CPU per request), or
-   - Use upstream lower-bitrate renditions (<= 720p / <= 1.2 MB segments) which comfortably pass under 5 ms CPU.
+1. Deploy the hardened Worker code (`cloudflare-worker/index.js`, `png-unfilter.wasm`) to the isolated test Worker (`nuvio-proxy.odedararaj456.workers.dev`) on branch `auth`.
+2. Verify public lockout on benchmark endpoints (`curl -X POST https://nuvio-proxy.odedararaj456.workers.dev/?action=bench_decode` -> 403 Forbidden).
+3. If Cloudflare Trace or Tail Worker access is available, capture invocation CPU telemetry (`cloudflare.cpu_time_ms`, `cloudflare.outcome`) to definitively attribute Error 1102.

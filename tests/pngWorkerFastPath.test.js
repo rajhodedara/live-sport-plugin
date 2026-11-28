@@ -527,7 +527,7 @@ describe('Worker-Level HTTP Endpoint Regressions', () => {
     expect(resHead.headers.get('Content-Length')).toBe(String(rawTs.length));
   });
 
-  test('benchmark endpoints handle bench_relay, bench_inflate, and bench_decode via POST', async () => {
+  test('benchmark endpoints enforce authentication, POST-only, and 10MB limits', async () => {
     const rawTs = Buffer.concat([makeTsPacket(0x55), makeTsPacket(0x66)]);
     const { png } = buildSyntheticPng({
       width: 47,
@@ -538,37 +538,79 @@ describe('Worker-Level HTTP Endpoint Regressions', () => {
       useStoredDeflate: true
     });
 
-    // 1. bench_relay
-    const reqRelay = new Request('https://worker.test/?action=bench_relay', {
+    const envWithSecret = { BENCHMARK_TOKEN: 'test-secret-token-123' };
+
+    // 1. Unauthenticated request -> 403 Forbidden
+    const reqUnauth = new Request('https://worker.test/?action=bench_decode', {
       method: 'POST',
       body: png
     });
-    const resRelay = await worker.fetch(reqRelay, {}, {});
+    const resUnauth = await worker.fetch(reqUnauth, envWithSecret, {});
+    expect(resUnauth.status).toBe(403);
+
+    // 2. Missing secret in env -> 403 Forbidden even with header
+    const resNoEnvSecret = await worker.fetch(reqUnauth, {}, {});
+    expect(resNoEnvSecret.status).toBe(403);
+
+    // 3. GET method -> 405 Method Not Allowed
+    const reqGet = new Request('https://worker.test/?action=bench_decode', {
+      method: 'GET',
+      headers: { 'x-bench-token': 'test-secret-token-123' }
+    });
+    const resGet = await worker.fetch(reqGet, envWithSecret, {});
+    expect(resGet.status).toBe(405);
+
+    // 4. Content-Length > 10MB -> 413 Payload Too Large
+    const reqOversize = new Request('https://worker.test/?action=bench_decode', {
+      method: 'POST',
+      headers: {
+        'x-bench-token': 'test-secret-token-123',
+        'content-length': String(11 * 1024 * 1024)
+      },
+      body: png
+    });
+    const resOversize = await worker.fetch(reqOversize, envWithSecret, {});
+    expect(resOversize.status).toBe(413);
+
+    // 5. Authenticated bench_relay
+    const reqRelay = new Request('https://worker.test/?action=bench_relay', {
+      method: 'POST',
+      headers: { 'x-bench-token': 'test-secret-token-123' },
+      body: png
+    });
+    const resRelay = await worker.fetch(reqRelay, envWithSecret, {});
     expect(resRelay.status).toBe(200);
     expect(resRelay.headers.get('x-bytes-count')).toBe(String(png.length));
+    expect(resRelay.headers.has('x-relay-time-ms')).toBe(false);
+    expect(resRelay.headers.has('server-timing')).toBe(false);
     const relayBody = Buffer.from(await resRelay.arrayBuffer());
     expect(relayBody).toEqual(png);
 
-    // 2. bench_inflate
+    // 6. Authenticated bench_inflate
     const reqInflate = new Request('https://worker.test/?action=bench_inflate', {
       method: 'POST',
+      headers: { 'x-bench-token': 'test-secret-token-123' },
       body: png
     });
-    const resInflate = await worker.fetch(reqInflate, {}, {});
+    const resInflate = await worker.fetch(reqInflate, envWithSecret, {});
     expect(resInflate.status).toBe(200);
+    expect(resInflate.headers.has('x-inflate-time-ms')).toBe(false);
+    expect(resInflate.headers.has('server-timing')).toBe(false);
     const inflateJson = await resInflate.json();
     expect(inflateJson.inflatedBytes).toBe(8 * (47 * 3 + 1));
     expect(inflateJson.isStored).toBe(true);
 
-    // 3. bench_decode
+    // 7. Authenticated bench_decode
     const reqDecode = new Request('https://worker.test/?action=bench_decode', {
       method: 'POST',
+      headers: { 'x-bench-token': 'test-secret-token-123' },
       body: png
     });
-    const resDecode = await worker.fetch(reqDecode, {}, {});
+    const resDecode = await worker.fetch(reqDecode, envWithSecret, {});
     expect(resDecode.status).toBe(200);
     expect(resDecode.headers.get('Content-Type')).toBe('video/mp2t');
-    expect(resDecode.headers.has('x-decode-time-ms')).toBe(true);
+    expect(resDecode.headers.has('x-decode-time-ms')).toBe(false);
+    expect(resDecode.headers.has('server-timing')).toBe(false);
     const decodeBody = Buffer.from(await resDecode.arrayBuffer());
     expect(decodeBody).toEqual(rawTs);
   });
