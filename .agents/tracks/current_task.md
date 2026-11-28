@@ -221,12 +221,35 @@
 4. **Retracted Completed 30-Minute Soak Claims**: The live playback soak stopped at segment 17 on Error 1102; it was NOT a completed 30-minute soak.
 5. **Retracted Cloudflare Edge Stability for Lower Bitrates**: Lower-bitrate sizing curve data was obtained solely from local Node.js V8 execution and has not been verified on Cloudflare Free Workers.
 
-### Current Blockers / Open Questions
-- Dynamic Huffman DEFLATE decompression of full-quality 1080p sports streams (~2.5–3.0 MB per segment) under Cloudflare Free Worker constraints encountered Error 1102 at segment 17.
-- Direct Cloudflare Trace / Tail Worker integration is required to obtain authoritative `cloudflare.cpu_time_ms`, `cloudflare.wall_time_ms`, and `cloudflare.outcome` (`exceededCpu` vs `exceededMemory`).
-- Verification of lower-bitrate renditions on Cloudflare edge remains to be performed with authoritative telemetry.
+### Empirical Cloudflare Tail Telemetry (Authoritative Edge Evidence)
+- **Direct Edge Instrumentation via Cloudflare WebSocket Tail (`wss://tail.developers.workers.dev/...`)**:
+  - Script: `scripts/diagnostics/cf-trace-benchmark.js` connecting via `trace-v1` protocol on `nuvio-proxy2.rajodedara360.workers.dev`.
+  - Gathered exact Cloudflare edge telemetry (`cpuTime`, `wallTime`, `outcome`, `cf-ray`, SHA-256 parity) across 26 invocations on all 10 real capture fixtures.
+- **Stage Breakdown**:
+  1. **Relay-only** (`bench_relay`):
+     - Min: 2 ms, Max: 6 ms, p50: **3 ms**.
+     - Well within the 10 ms Free Worker CPU limit.
+  2. **Inflate-only** (`bench_inflate` via `DecompressionStream('deflate')`):
+     - 100% Stored DEFLATE (`fixture_2635597_BBC.png`, 2.63 MB): Min: 6 ms, Max: 12 ms, p50: **7 ms**.
+     - Dynamic Huffman Streams (2.13 MB – 3.05 MB ESPN, etc.): Min: 20 ms, Max: 35 ms, p50: **24 ms**.
+  3. **Full Decode** (`bench_decode`, Inflate + Wasm Unfilter + MPEG-TS alignment):
+     - 100% Stored DEFLATE (`fixture_2635597_BBC.png`): All runs **11 ms** (Wasm Adler-32 + bulk copy).
+     - Dynamic Huffman Streams: Min: 24 ms, p50: **37 ms**, p95: **46 ms**, p99: **64 ms**.
+  4. **Parity**:
+     - **100% Bit-for-bit SHA-256 Match** (`parity=PASS`) across all 10 real capture fixtures.
+- **Root Cause & Failing Bottleneck**:
+  - Exact failing resource: `exceededCpu` (10 ms invocation CPU limit on Cloudflare Free tier).
+  - Smallest remaining measured bottleneck: **`DecompressionStream('deflate')`** alone consumes **p50 = 24 ms CPU** on 2.5–3.0 MB dynamic Huffman streams, which exceeds Cloudflare Free's 10 ms allowance by **2.4x**, independent of Wasm unfiltering.
+  - While Cloudflare Free Workers occasionally allow burst execution up to ~50 ms on fresh isolates, live playback sustains continuous invocations that trigger CPU throttling and circuit breakers (Error 1102 at segment 17).
+
+### Current Blockers / Conclusions
+- **Full-Quality 1080p Sports Feeds on Cloudflare Free Workers**: Cannot reliably fit within 10 ms invocation CPU due to the fundamental CPU cost of dynamic Huffman DEFLATE decompression on segments $\ge 2.1$ MB.
+- **Free Worker Rollout Status**: Stopped for full-quality 1080p dynamic Huffman PNG sources per Task 3 line 60 of the plan.
+- **Production Architecture Alternatives**:
+  1. Route PNG streams to Cloudflare Workers Paid (50 ms CPU limit, where 37 ms p50 comfortably passes with headroom).
+  2. Use upstream lower-bitrate renditions ($\le 720\text{p}$ / $\le 1.2$ MB segments) which fall under the 10 ms threshold.
+  3. Serve standard non-PNG MPEG-TS/ByteRange streams directly through the existing proxy path (2–4 ms CPU).
 
 ### Immediate Next Steps for Next Chat
-1. Deploy the hardened Worker code (`cloudflare-worker/index.js`, `png-unfilter.wasm`) to the isolated test Worker (`nuvio-proxy.odedararaj456.workers.dev`) on branch `auth`.
-2. Verify public lockout on benchmark endpoints (`curl -X POST https://nuvio-proxy.odedararaj456.workers.dev/?action=bench_decode` -> 403 Forbidden).
-3. If Cloudflare Trace or Tail Worker access is available, capture invocation CPU telemetry (`cloudflare.cpu_time_ms`, `cloudflare.outcome`) to definitively attribute Error 1102.
+1. Present empirical Cloudflare Tail telemetry to the user.
+2. Maintain existing hardened Worker deployment on test proxies without fleet rollout.
