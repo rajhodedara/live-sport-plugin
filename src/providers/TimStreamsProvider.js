@@ -7,6 +7,7 @@ const { parseTimezone } = require('../timezone');
 const { BASE_URL } = require('../config');
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36';
+const DEFAULT_TICKET_BASE = 'https://tims-001.servehttp.com';
 
 class TimStreamsProvider extends BaseProvider {
   constructor(opts) {
@@ -240,13 +241,52 @@ class TimStreamsProvider extends BaseProvider {
   }
 
   /**
+   * Read `<meta name="..." content="...">` regardless of attribute order.
+   */
+  _extractMetaContent(html, name) {
+    if (typeof html !== 'string' || !name) return '';
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m1 = html.match(new RegExp(`<meta\\b[^>]*\\bname\\s*=\\s*["']${escaped}["'][^>]*\\bcontent\\s*=\\s*["']([^"']+)["']`, 'i'));
+    if (m1) return m1[1].trim();
+    const m2 = html.match(new RegExp(`<meta\\b[^>]*\\bcontent\\s*=\\s*["']([^"']+)["'][^>]*\\bname\\s*=\\s*["']${escaped}["']`, 'i'));
+    return m2 ? m2[1].trim() : '';
+  }
+
+  /**
+   * Fetch and XOR-decrypt a TimStreams `/p/<token>` ticket response into an m3u8 URL.
+   */
+  async _fetchAndDecryptToken(tokenUrl, embedUrl) {
+    const tokenRes = await this.proxyFetch(tokenUrl, {
+      headers: {
+        'Referer': embedUrl,
+        'Origin': new URL(embedUrl).origin,
+        'User-Agent': UA
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (!tokenRes.ok) return null;
+    const buf = Buffer.from(await tokenRes.arrayBuffer());
+    if (buf.length <= 1) return null;
+
+    const tk = tokenUrl.substring(tokenUrl.lastIndexOf('/') + 1);
+    if (!tk) return null;
+    const s = buf[0];
+    let decrypted = '';
+    for (let i = 1; i < buf.length; i++) {
+      decrypted += String.fromCharCode(buf[i] ^ tk.charCodeAt((i - 1) % tk.length) ^ ((s + i - 1) & 255));
+    }
+    const mMatch = decrypted.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
+    return mMatch ? mMatch[0] : null;
+  }
+
+  /**
    * Extract the signed m3u8 URL from a TimStreams embed page natively.
    */
   async extractM3u8(embedUrl) {
     try {
       const res = await this.proxyFetch(embedUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
+          'User-Agent': UA,
           'Referer': 'https://tim-streams.com/'
         },
         signal: AbortSignal.timeout(10000)
@@ -255,40 +295,26 @@ class TimStreamsProvider extends BaseProvider {
       if (!res.ok) return null;
       const html = await res.text();
 
-      const decoded = this.decodeObfuscatedScript(html);
-      if (!decoded) return null;
-
       let m3u8Url = null;
-      const urlMatch = decoded.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
-      if (urlMatch) {
-        m3u8Url = urlMatch[0];
-      } else {
-        const loadMatch = decoded.match(/loadStreamUrl\s*\(\s*["']([^"']+)["']/);
-        if (loadMatch) {
-          const tokenUrl = loadMatch[1];
-          const tokenRes = await this.proxyFetch(tokenUrl, {
-            headers: {
-              'Referer': embedUrl,
-              'Origin': new URL(embedUrl).origin,
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
-            },
-            signal: AbortSignal.timeout(10000)
-          });
-          if (tokenRes.ok) {
-            const buf = Buffer.from(await tokenRes.arrayBuffer());
-            if (buf.length > 1) {
-              const tk = tokenUrl.substring(tokenUrl.lastIndexOf('/') + 1);
-              const s = buf[0];
-              let decrypted = '';
-              for (let i = 1; i < buf.length; i++) {
-                decrypted += String.fromCharCode(buf[i] ^ tk.charCodeAt((i - 1) % tk.length) ^ ((s + i - 1) & 255));
-              }
-              const mMatch = decrypted.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
-              if (mMatch) {
-                m3u8Url = mMatch[0];
-              }
-            }
+      const decoded = this.decodeObfuscatedScript(html);
+      if (decoded) {
+        const urlMatch = decoded.match(/https?:\/\/[^\x22\x27<>\s]+\.m3u8[^\x22\x27<>\s]*/);
+        if (urlMatch) {
+          m3u8Url = urlMatch[0];
+        } else {
+          const loadMatch = decoded.match(/loadStreamUrl\s*\(\s*["']([^"']+)["']/);
+          if (loadMatch) {
+            m3u8Url = await this._fetchAndDecryptToken(loadMatch[1], embedUrl);
           }
+        }
+      } else {
+        // Current embed pages (e.g. shoewiki.click) pass the ticket via <meta name="tu">
+        // or <meta name="tk"> instead of an inline XOR-obfuscated script block.
+        const tu = this._extractMetaContent(html, 'tu');
+        const tk = this._extractMetaContent(html, 'tk');
+        const tokenUrl = tu || (tk ? `${DEFAULT_TICKET_BASE}/p/${tk}` : '');
+        if (tokenUrl) {
+          m3u8Url = await this._fetchAndDecryptToken(tokenUrl, embedUrl);
         }
       }
 

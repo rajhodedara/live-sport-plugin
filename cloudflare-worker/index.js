@@ -18,6 +18,7 @@
  */
 
 import { connect } from 'cloudflare:sockets';
+import pngUnfilterWasm from './png-unfilter.wasm';
 
 // Raw HTTPS GET over TLS socket to prevent Cloudflare from injecting
 // cf-worker, cf-ray, and cf-connecting-ip headers that trigger 403 on cdnlivetv.
@@ -79,31 +80,6 @@ function isPngBytes(u8) {
     u8[4] === 0x0d && u8[5] === 0x0a && u8[6] === 0x1a && u8[7] === 0x0a;
 }
 
-async function inflateZlib(comp) {
-  const ds = new DecompressionStream('deflate');
-  const writer = ds.writable.getWriter();
-  writer.write(comp);
-  writer.close();
-  const chunks = [];
-  let total = 0;
-  const reader = ds.readable.getReader();
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      total += value.byteLength;
-    }
-  }
-  const out = new Uint8Array(total);
-  let off = 0;
-  for (const c of chunks) {
-    out.set(c, off);
-    off += c.byteLength;
-  }
-  return out;
-}
-
 async function decodePngToTs(arrayBuf) {
   const va = new Uint8Array(arrayBuf);
   if (!isPngBytes(va)) return va;
@@ -137,55 +113,80 @@ async function decodePngToTs(arrayBuf) {
   }
 
   if (bitDepth !== 8 || interlace !== 0) throw new Error('Unsupported PNG layout');
+  if (width <= 0 || width > 16384 || height <= 0 || height > 16384) {
+    throw new Error(`Invalid PNG dimensions: ${width}x${height}`);
+  }
+
   const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType];
   if (!bpp) throw new Error(`Unsupported PNG colorType=${colorType}`);
 
-  const comp = new Uint8Array(totalIdat);
-  let off = 0;
-  for (const c of idat) {
-    comp.set(c, off);
-    off += c.byteLength;
-  }
-
-  const raw = await inflateZlib(comp);
   const stride = width * bpp;
-  const pixels = new Uint8Array(height * stride);
-  let prev = new Uint8Array(stride);
-  let idx = 0;
-
-  for (let y = 0; y < height; y++) {
-    const ft = raw[idx++];
-    const row = pixels.subarray(y * stride, (y + 1) * stride);
-    if (ft === 0) {
-      row.set(raw.subarray(idx, idx + stride));
-    } else if (ft === 1) {
-      for (let x = 0; x < stride; x++) {
-        row[x] = (raw[idx + x] + (x >= bpp ? row[x - bpp] : 0)) & 255;
-      }
-    } else if (ft === 2) {
-      for (let x = 0; x < stride; x++) {
-        row[x] = (raw[idx + x] + prev[x]) & 255;
-      }
-    } else if (ft === 3) {
-      for (let x = 0; x < stride; x++) {
-        const a = x >= bpp ? row[x - bpp] : 0;
-        row[x] = (raw[idx + x] + ((a + prev[x]) >> 1)) & 255;
-      }
-    } else if (ft === 4) {
-      for (let x = 0; x < stride; x++) {
-        const a = x >= bpp ? row[x - bpp] : 0;
-        const b = prev[x];
-        const c = x >= bpp ? prev[x - bpp] : 0;
-        const p = a + b - c;
-        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
-        row[x] = (raw[idx + x] + (pa <= pb && pa <= pc ? a : (pb <= pc ? b : c))) & 255;
-      }
-    } else {
-      throw new Error(`Unsupported PNG filter=${ft}`);
-    }
-    prev = row;
-    idx += stride;
+  const expectedRawLen = height * (stride + 1);
+  if (expectedRawLen > 32 * 1024 * 1024) {
+    throw new Error(`PNG raw size exceeds 32MB limit: ${expectedRawLen}`);
   }
+
+  const comp = new Uint8Array(totalIdat);
+  let cOff = 0;
+  for (const c of idat) {
+    comp.set(c, cOff);
+    cOff += c.byteLength;
+  }
+
+  // Streaming decompression with early abort
+  const ds = new DecompressionStream('deflate');
+  const writer = ds.writable.getWriter();
+  writer.write(comp).catch(() => {});
+  writer.close().catch(() => {});
+
+  const chunks = [];
+  let inflatedLen = 0;
+  const reader = ds.readable.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      inflatedLen += value.byteLength;
+      if (inflatedLen > expectedRawLen) {
+        try { await reader.cancel(); } catch (_) {}
+        throw new Error(`Inflated size ${inflatedLen} exceeded expected ${expectedRawLen}`);
+      }
+      chunks.push(value);
+    }
+  }
+
+  if (inflatedLen !== expectedRawLen) {
+    throw new Error(`Inflated size ${inflatedLen} does not match expected ${expectedRawLen}`);
+  }
+
+  // Instantiate WebAssembly with exclusive linear memory per decode
+  const instance = pngUnfilterWasm instanceof WebAssembly.Module
+    ? new WebAssembly.Instance(pngUnfilterWasm)
+    : (await WebAssembly.instantiate(pngUnfilterWasm)).instance;
+  const memory = instance.exports.memory;
+  const outLen = height * stride;
+  const totalNeeded = expectedRawLen + outLen;
+
+  const currentBytes = memory.buffer.byteLength;
+  if (totalNeeded > currentBytes) {
+    const neededPages = Math.ceil((totalNeeded - currentBytes) / 65536);
+    memory.grow(neededPages);
+  }
+
+  const rawPtr = 0;
+  const outPtr = expectedRawLen;
+  const memU8 = new Uint8Array(memory.buffer);
+  let ro = 0;
+  for (const c of chunks) {
+    memU8.set(c, ro);
+    ro += c.byteLength;
+  }
+
+  const retCode = instance.exports.unfilter(rawPtr, outPtr, width, height, bpp);
+  if (retCode !== 0) throw new Error(`WASM unfilter failed with code ${retCode}`);
+
+  const pixels = new Uint8Array(outLen);
+  pixels.set(new Uint8Array(memory.buffer, outPtr, outLen));
 
   let payload = pixels;
   if (colorType === 4 || colorType === 6) {
@@ -204,13 +205,13 @@ async function decodePngToTs(arrayBuf) {
   if (payload.length >= 8 && payload[0] === 0x4b && payload[1] === 0x57 && payload[2] === 0x50 && payload[3] === 0x31) {
     const tsLen = ((payload[4] << 24) | (payload[5] << 16) | (payload[6] << 8) | payload[7]) >>> 0;
     if (8 + tsLen > payload.length) throw new Error('KWP1 length exceeds decoded bytes');
-    return payload.subarray(8, 8 + tsLen);
+    return payload.slice(8, 8 + tsLen);
   }
 
   if (payload.length >= 188 && payload[0] === 0x47) {
     let aligned = Math.floor(payload.length / 188) * 188;
     while (aligned >= 188 && payload[aligned - 188] !== 0x47) aligned -= 188;
-    return aligned > 0 ? payload.subarray(0, aligned) : payload;
+    return aligned > 0 ? payload.slice(0, aligned) : payload.slice();
   }
 
   throw new Error('Decoded PNG does not contain KWP1 or MPEG-TS payload');

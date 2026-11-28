@@ -253,6 +253,77 @@ describe('TimStreamsProvider Decryption & Stream Resolution', () => {
     expect(result.referer).toBe('https://ehgembxe.cfd');
   });
 
+  test('extractM3u8 decrypts meta[name="tk"] ticket flow (shoewiki-style embed)', async () => {
+    const embedUrl = 'https://shoewiki.click/z1gz6dtd-7130';
+    const tk = 'c6445fe6956c5dba4e5d80bdfbe42157';
+    const tokenUrl = `https://tims-001.servehttp.com/p/${tk}`;
+    const finalM3u8 = 'https://tims-001.servehttp.com/main/secure/abc/123/nba.m3u8';
+
+    const html = `<!doctype html><html><head><meta name="tk" content="${tk}"></head><body><script src="/js/bundle.js"></script></body></html>`;
+
+    const seed = 77;
+    const tokenBuf = Buffer.alloc(1 + finalM3u8.length);
+    tokenBuf[0] = seed;
+    for (let i = 0; i < finalM3u8.length; i++) {
+      tokenBuf[i + 1] = finalM3u8.charCodeAt(i) ^ tk.charCodeAt(i % tk.length) ^ ((seed + i) & 255);
+    }
+
+    provider.proxyFetch = jest.fn(async (url) => {
+      if (url === embedUrl) return { ok: true, text: async () => html };
+      if (url === tokenUrl) {
+        return {
+          ok: true,
+          arrayBuffer: async () => tokenBuf.buffer.slice(tokenBuf.byteOffset, tokenBuf.byteOffset + tokenBuf.byteLength)
+        };
+      }
+      return { ok: false };
+    });
+
+    const result = await provider.extractM3u8(embedUrl);
+    expect(provider.proxyFetch.mock.calls.map(([u]) => u)).toEqual([embedUrl, tokenUrl]);
+    expect(provider.proxyFetch.mock.calls[1][1].headers).toMatchObject({
+      Referer: embedUrl,
+      Origin: 'https://shoewiki.click'
+    });
+    expect(result).toEqual({
+      m3u8: finalM3u8,
+      referer: 'https://shoewiki.click'
+    });
+  });
+
+  test('extractM3u8 prefers meta[name="tu"] explicit ticket URL over meta[name="tk"]', async () => {
+    const embedUrl = 'https://shoewiki.click/abc-123';
+    const tk = 'deadbeef0123';
+    const tokenUrl = `https://alt-ticket.example.com/p/${tk}`;
+    const finalM3u8 = 'https://cdn.example.com/live/stream.m3u8';
+
+    const html = `<html><head><meta content="${tokenUrl}" name="tu"><meta name="tk" content="ignored"></head></html>`;
+
+    const seed = 19;
+    const tokenBuf = Buffer.alloc(1 + finalM3u8.length);
+    tokenBuf[0] = seed;
+    for (let i = 0; i < finalM3u8.length; i++) {
+      tokenBuf[i + 1] = finalM3u8.charCodeAt(i) ^ tk.charCodeAt(i % tk.length) ^ ((seed + i) & 255);
+    }
+
+    provider.proxyFetch = jest.fn(async (url) => {
+      if (url === embedUrl) return { ok: true, text: async () => html };
+      if (url === tokenUrl) {
+        return {
+          ok: true,
+          arrayBuffer: async () => tokenBuf.buffer.slice(tokenBuf.byteOffset, tokenBuf.byteOffset + tokenBuf.byteLength)
+        };
+      }
+      return { ok: false };
+    });
+
+    const result = await provider.extractM3u8(embedUrl);
+    expect(result).toEqual({
+      m3u8: finalM3u8,
+      referer: 'https://shoewiki.click'
+    });
+  });
+
   test('resolveStream constructs HD StreamEntity with proxyHeaders and manifest proxy', async () => {
     const embedUrl = 'https://ehgembxe.cfd/game-stream';
     const finalM3u8 = 'https://p16.tiktokcdn-us.com/live/game.m3u8';
