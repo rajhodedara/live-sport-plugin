@@ -69,7 +69,152 @@ async function rawHttpsGet(urlStr, customHeaders = {}) {
 
 // Bytes of fake WebP/RIFF header the Streamed.pk / TikTok CDN prepends to
 // .image segments. Everything after it is the real MPEG-TS payload.
+// Bytes of fake WebP/RIFF header the Streamed.pk / TikTok CDN prepends to
+// .image segments. Everything after it is the real MPEG-TS payload.
 const CLOAK_PREFIX_BYTES = 42;
+
+function isPngBytes(u8) {
+  return u8.length >= 8 &&
+    u8[0] === 0x89 && u8[1] === 0x50 && u8[2] === 0x4e && u8[3] === 0x47 &&
+    u8[4] === 0x0d && u8[5] === 0x0a && u8[6] === 0x1a && u8[7] === 0x0a;
+}
+
+async function inflateZlib(comp) {
+  const ds = new DecompressionStream('deflate');
+  const writer = ds.writable.getWriter();
+  writer.write(comp);
+  writer.close();
+  const chunks = [];
+  let total = 0;
+  const reader = ds.readable.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      total += value.byteLength;
+    }
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out;
+}
+
+async function decodePngToTs(arrayBuf) {
+  const va = new Uint8Array(arrayBuf);
+  if (!isPngBytes(va)) return va;
+
+  let pos = 8, width = 0, height = 0, bitDepth = 0, colorType = 0, interlace = 0, kwLn = -1;
+  const idat = [];
+  let totalIdat = 0;
+
+  while (pos + 12 <= va.length) {
+    const len = ((va[pos] << 24) | (va[pos + 1] << 16) | (va[pos + 2] << 8) | va[pos + 3]) >>> 0;
+    const type = String.fromCharCode(va[pos + 4], va[pos + 5], va[pos + 6], va[pos + 7]);
+    const dataStart = pos + 8;
+    const dataEnd = dataStart + len;
+    if (dataEnd + 4 > va.length) throw new Error(`Truncated PNG chunk: ${type}`);
+
+    if (type === 'IHDR') {
+      width = ((va[dataStart] << 24) | (va[dataStart + 1] << 16) | (va[dataStart + 2] << 8) | va[dataStart + 3]) >>> 0;
+      height = ((va[dataStart + 4] << 24) | (va[dataStart + 5] << 16) | (va[dataStart + 6] << 8) | va[dataStart + 7]) >>> 0;
+      bitDepth = va[dataStart + 8];
+      colorType = va[dataStart + 9];
+      interlace = va[dataStart + 12];
+    } else if (type === 'kwLn' && len === 4) {
+      kwLn = ((va[dataStart] << 24) | (va[dataStart + 1] << 16) | (va[dataStart + 2] << 8) | va[dataStart + 3]) >>> 0;
+    } else if (type === 'IDAT') {
+      idat.push(va.subarray(dataStart, dataEnd));
+      totalIdat += len;
+    } else if (type === 'IEND') {
+      break;
+    }
+    pos = dataEnd + 4;
+  }
+
+  if (bitDepth !== 8 || interlace !== 0) throw new Error('Unsupported PNG layout');
+  const bpp = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType];
+  if (!bpp) throw new Error(`Unsupported PNG colorType=${colorType}`);
+
+  const comp = new Uint8Array(totalIdat);
+  let off = 0;
+  for (const c of idat) {
+    comp.set(c, off);
+    off += c.byteLength;
+  }
+
+  const raw = await inflateZlib(comp);
+  const stride = width * bpp;
+  const pixels = new Uint8Array(height * stride);
+  let prev = new Uint8Array(stride);
+  let idx = 0;
+
+  for (let y = 0; y < height; y++) {
+    const ft = raw[idx++];
+    const row = pixels.subarray(y * stride, (y + 1) * stride);
+    if (ft === 0) {
+      row.set(raw.subarray(idx, idx + stride));
+    } else if (ft === 1) {
+      for (let x = 0; x < stride; x++) {
+        row[x] = (raw[idx + x] + (x >= bpp ? row[x - bpp] : 0)) & 255;
+      }
+    } else if (ft === 2) {
+      for (let x = 0; x < stride; x++) {
+        row[x] = (raw[idx + x] + prev[x]) & 255;
+      }
+    } else if (ft === 3) {
+      for (let x = 0; x < stride; x++) {
+        const a = x >= bpp ? row[x - bpp] : 0;
+        row[x] = (raw[idx + x] + ((a + prev[x]) >> 1)) & 255;
+      }
+    } else if (ft === 4) {
+      for (let x = 0; x < stride; x++) {
+        const a = x >= bpp ? row[x - bpp] : 0;
+        const b = prev[x];
+        const c = x >= bpp ? prev[x - bpp] : 0;
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        row[x] = (raw[idx + x] + (pa <= pb && pa <= pc ? a : (pb <= pc ? b : c))) & 255;
+      }
+    } else {
+      throw new Error(`Unsupported PNG filter=${ft}`);
+    }
+    prev = row;
+    idx += stride;
+  }
+
+  let payload = pixels;
+  if (colorType === 4 || colorType === 6) {
+    const keep = colorType === 4 ? 1 : 3;
+    const stripped = new Uint8Array(width * height * keep);
+    for (let src = 0, dst = 0; dst < stripped.length; src += bpp, dst += keep) {
+      for (let k = 0; k < keep; k++) stripped[dst + k] = pixels[src + k];
+    }
+    payload = stripped;
+  }
+
+  if (kwLn > 0 && kwLn <= payload.length) {
+    payload = payload.subarray(0, kwLn);
+  }
+
+  if (payload.length >= 8 && payload[0] === 0x4b && payload[1] === 0x57 && payload[2] === 0x50 && payload[3] === 0x31) {
+    const tsLen = ((payload[4] << 24) | (payload[5] << 16) | (payload[6] << 8) | payload[7]) >>> 0;
+    if (8 + tsLen > payload.length) throw new Error('KWP1 length exceeds decoded bytes');
+    return payload.subarray(8, 8 + tsLen);
+  }
+
+  if (payload.length >= 188 && payload[0] === 0x47) {
+    let aligned = Math.floor(payload.length / 188) * 188;
+    while (aligned >= 188 && payload[aligned - 188] !== 0x47) aligned -= 188;
+    return aligned > 0 ? payload.subarray(0, aligned) : payload;
+  }
+
+  throw new Error('Decoded PNG does not contain KWP1 or MPEG-TS payload');
+}
 
 export default {
   async fetch(request, env, ctx) {
@@ -508,6 +653,45 @@ export default {
       
       // For Streamed.pk / TikTok CDN .image chunks, strip the fake WebP header
       // in flight AND correct the response metadata for the stripped prefix.
+      const imagexFmt = responseHeaders.get('imagex-fmt') || '';
+      const isPngSegment = request.method === 'GET' && !isM3u8 && !targetUrl.includes('.key') && (
+        action === 'png_ts' ||
+        /\.png(?:\?|$)/i.test(targetUrl) ||
+        contentType.includes('image/png') ||
+        imagexFmt.toLowerCase().includes('png')
+      );
+
+      if (isPngSegment) {
+        let pngRes = response;
+        if (response.status === 206) {
+          const fullHeaders = new Headers(newHeaders);
+          fullHeaders.delete('Range');
+          fullHeaders.delete('range');
+          pngRes = await fetch(targetUrl, { method: 'GET', headers: fullHeaders, redirect: 'follow' });
+          if (!pngRes.ok) {
+            return new Response(pngRes.body, {
+              status: pngRes.status,
+              statusText: pngRes.statusText,
+              headers: responseHeaders
+            });
+          }
+        }
+        const rawBuf = await pngRes.arrayBuffer();
+        const rawU8 = new Uint8Array(rawBuf);
+        const tsBytes = isPngBytes(rawU8)
+          ? await decodePngToTs(rawBuf)
+          : (isCloakedImage && rawU8.length > CLOAK_PREFIX_BYTES ? rawU8.subarray(CLOAK_PREFIX_BYTES) : rawU8);
+
+        responseHeaders.set('Content-Type', 'video/mp2t');
+        responseHeaders.set('Content-Length', String(tsBytes.byteLength));
+        responseHeaders.delete('Content-Range');
+        responseHeaders.delete('Accept-Ranges');
+        return new Response(tsBytes, {
+          status: 200,
+          headers: responseHeaders
+        });
+      }
+
       if (isCloakedImage) {
         responseHeaders.set('Accept-Ranges', 'bytes');
 
